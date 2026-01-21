@@ -1,0 +1,13 @@
+{
+  "name": "nopressure-playwright",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.43.1",
+    "typescript": "^5.3.3"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:e2e": "playwright test --project=e2e"
+  }
+}

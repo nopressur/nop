@@ -1,0 +1,83 @@
+/*
+ * This file is part of the product NoPressure.
+ * SPDX-FileCopyrightText: 2025-2026 Zivatar Limited
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
+ */
+
+@import "tailwindcss";
+@config "../tailwind.config.cjs";
+@source "./**/*.{html,js,svelte,ts}";
+
+:root {
+  color-scheme: light dark;
+  --font-sans: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;
+
+  --bg: #f6f2eb;
+  --surface: #fffdf7;
+  --surface-2: #efebe3;
+  --text: #1c1b1a;
+  --muted: #5f5953;
+  --border: #d8d0c6;
+  --accent: #0f766e;
+  --accent-strong: #0a5c53;
+  --danger: #b9382e;
+  --success: #2f855a;
+  --focus: #0f766e;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --control-height: 36px;
+  --control-padding-x: 12px;
+  --control-padding-y: 8px;
+  --shadow-soft: 0 18px 40px rgba(15, 17, 19, 0.12);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  letter-spacing: 0.01em;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1113;
+    --surface: #171a1d;
+    --surface-2: #1f2327;
+    --text: #e9e3d8;
+    --muted: #a59f96;
+    --border: #2e3338;
+    --accent: #5bd1c6;
+    --accent-strong: #3bb6aa;
+    --danger: #f07167;
+    --success: #63c07f;
+    --focus: #5bd1c6;
+    --shadow-soft: 0 18px 40px rgba(0, 0, 0, 0.35);
+  }
+}
+
+@layer base {
+  html {
+    font-size: 15px;
+  }
+
+  body {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  a {
+    color: var(--accent);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+}

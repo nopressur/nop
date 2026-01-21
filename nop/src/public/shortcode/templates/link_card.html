@@ -1,0 +1,94 @@
+<!--
+This file is part of the product NoPressure.
+SPDX-FileCopyrightText: 2025-2026 Zivatar Limited
+SPDX-License-Identifier: AGPL-3.0-or-later
+The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
+-->
+
+<div class="link-card-container">
+    <style>
+        .link-card-container {
+            display: inline-block;
+            margin: 0.5rem 0.5rem 0.5rem 0;
+            vertical-align: top;
+            padding: 4px;
+        }
+
+        .link-card-{{ card_id }} {
+            display: block;
+            min-width: 200px;
+            max-width: 300px;
+            border-radius: 8px;
+            padding: 1rem;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
+
+            background-color: {{ light_bg }};
+            color: #1a1a1a !important;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transform: translateY(0);
+        }
+
+        .link-card-container:hover .link-card-{{ card_id }} {
+            background-color: {{ light_hover_bg }}
+
+            ;
+            color: #1a1a1a !important;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .link-card-container:active .link-card-{{ card_id }} {
+            transform: translateY(1px);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .link-card-{{ card_id }} .title {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1a1a1a !important;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .link-card-{{ card_id }} {
+                background-color: {{ dark_bg }};
+                color: #f0f0f0 !important;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            }
+
+            .link-card-container:hover .link-card-{{ card_id }} {
+                background-color: {{ dark_hover_bg }};
+                color: #f0f0f0 !important;
+                box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+            }
+
+            .link-card-container:active .link-card-{{ card_id }} {
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+            }
+
+            .link-card-{{ card_id }}
+
+            .title {
+                color: #f0f0f0 !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .link-card-container {
+                display: block;
+                margin: 0.5rem 0;
+            }
+
+            .link-card-{{ card_id }} {
+                width: 100%;
+                max-width: none;
+            }
+        }
+    </style>
+    <a href="{{ link | safe }}" {% if target_attr %} target="{{ target_attr }}" {% endif %}{% if rel_attr %}
+        rel="{{ rel_attr }}" {% endif %} class="link-card-{{ card_id }}">
+        <p class="title">{{ title }}</p>
+    </a>
+</div>

@@ -1,0 +1,70 @@
+<!--
+This file is part of the product NoPressure.
+SPDX-FileCopyrightText: 2025-2026 Zivatar Limited
+SPDX-License-Identifier: AGPL-3.0-or-later
+The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <link rel="stylesheet" href="{bulma_css}">
+    <link rel="icon" href="{favicon_ico}">
+    {theme_content}
+    <style>
+        .content-wrapper .content-container {
+            max-width: 960px;
+        }
+
+        .content-wrapper.is-wide .content-container {
+            max-width: 1152px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="main-container" data-site-root>
+        <nav class="navbar" role="navigation" aria-label="main navigation" data-site-navbar>
+            <div class="container">
+                <div class="navbar-brand">
+                    <a class="navbar-item" href="/">
+                        <strong>{app_name}</strong>
+                    </a>
+
+                    <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false"
+                        data-site-mobile-toggle>
+                        <span aria-hidden="true"></span>
+                        <span aria-hidden="true"></span>
+                        <span aria-hidden="true"></span>
+                    </a>
+                </div>
+
+                <div class="navbar-menu" data-site-mobile-menu>
+                    <div class="navbar-start">
+                        {nav_html}
+                    </div>
+                    <div class="navbar-end">
+                        {user_nav_html}
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <div class="{content_wrapper_class}" data-compact="{content_compact}"
+            data-short-paragraph-length="{short_paragraph_length}" data-site-close-dropdowns>
+            <div class="container content-container" style="{content_container_style}">
+                <div class="content">
+                    {content}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{site_js}" defer></script>
+</body>
+
+</html>

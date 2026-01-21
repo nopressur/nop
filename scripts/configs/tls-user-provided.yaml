@@ -1,0 +1,43 @@
+# Manually provided TLS (cert/key in state/sys/tls)
+server:
+  host: "127.0.0.1"
+  port: 8443
+  http_port: 8080
+  workers: 1
+
+tls:
+  mode: "user-provided"
+  redirect_base_url: "https://localhost:8443"
+
+admin:
+  path: "/admin"
+
+users:
+  auth_method: "local"
+  local:
+    jwt:
+      secret: "test-secret"
+
+navigation:
+  max_dropdown_items: 7
+
+logging:
+  level: "info"
+
+security:
+  max_violations: 2
+  cooldown_seconds: 30
+  use_forwarded_for: false
+  hsts_enabled: false
+  hsts_max_age: 31536000
+  hsts_include_subdomains: true
+  hsts_preload: false
+
+app:
+  name: "NoPressure"
+  description: "User-provided TLS quick test"
+
+upload:
+  max_file_size_mb: 100
+
+dev_mode: "localhost"

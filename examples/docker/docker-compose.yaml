@@ -1,0 +1,10 @@
+services:
+  nopressure:
+    build: .
+    working_dir: /app
+    volumes:
+      - ../data:/data
+    ports:
+      - "5466:5466"
+    environment:
+      - RUST_LOG=info

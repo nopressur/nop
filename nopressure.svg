@@ -1,0 +1,112 @@
+<svg width="600" height="100" viewBox="0 0 600 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Animated rainbow gradient -->
+    <linearGradient id="rainbow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ff0080">
+        <animate attributeName="stop-color" 
+                 values="#ff0080;#ff4000;#ff0040;#8000ff;#4000ff;#0080ff;#0040ff;#ff0080" 
+                 dur="3s" 
+                 repeatCount="indefinite"/>
+      </stop>
+      <stop offset="25%" style="stop-color:#ff4000">
+        <animate attributeName="stop-color" 
+                 values="#ff4000;#ff0040;#8000ff;#4000ff;#0080ff;#0040ff;#ff0080;#ff4000" 
+                 dur="3s" 
+                 repeatCount="indefinite"/>
+      </stop>
+      <stop offset="37.5%" style="stop-color:#ff0040">
+        <animate attributeName="stop-color" 
+                 values="#ff0040;#8000ff;#4000ff;#0080ff;#0040ff;#ff0080;#ff4000;#ff0040" 
+                 dur="3s" 
+                 repeatCount="indefinite"/>
+      </stop>
+      <stop offset="50%" style="stop-color:#8000ff">
+        <animate attributeName="stop-color" 
+                 values="#8000ff;#4000ff;#0080ff;#0040ff;#ff0080;#ff4000;#ff0040;#8000ff" 
+                 dur="3s" 
+                 repeatCount="indefinite"/>
+      </stop>
+      <stop offset="62.5%" style="stop-color:#4000ff">
+        <animate attributeName="stop-color" 
+                 values="#4000ff;#0080ff;#0040ff;#ff0080;#ff4000;#ff0040;#8000ff;#4000ff" 
+                 dur="3s" 
+                 repeatCount="indefinite"/>
+      </stop>
+      <stop offset="75%" style="stop-color:#0080ff">
+        <animate attributeName="stop-color" 
+                 values="#0080ff;#0040ff;#ff0080;#ff4000;#ff0040;#8000ff;#4000ff;#0080ff" 
+                 dur="3s" 
+                 repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" style="stop-color:#0040ff">
+        <animate attributeName="stop-color" 
+                 values="#0040ff;#ff0080;#ff4000;#ff0040;#8000ff;#4000ff;#0080ff;#0040ff" 
+                 dur="3s" 
+                 repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+    
+    <!-- Neon glow filter -->
+    <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge> 
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/> 
+      </feMerge>
+    </filter>
+    
+    <!-- Outer glow filter -->
+    <filter id="outerGlow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+      <feMerge> 
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/> 
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background glow -->
+  <text x="275" y="75" 
+        font-family="Arial, sans-serif" 
+        font-size="95" 
+        font-weight="bold" 
+        text-anchor="middle" 
+        fill="url(#rainbow)" 
+        filter="url(#outerGlow)"
+        opacity="0.4">No pressure</text>
+  
+  <!-- Main neon text -->
+  <text x="275" y="75" 
+        font-family="Arial, sans-serif" 
+        font-size="95" 
+        font-weight="bold" 
+        text-anchor="middle" 
+        fill="none" 
+        stroke="url(#rainbow)" 
+        stroke-width="3" 
+        filter="url(#neonGlow)">No pressure</text>
+  
+  <!-- Inner bright core -->
+  <text x="275" y="75" 
+        font-family="Arial, sans-serif" 
+        font-size="95" 
+        font-weight="bold" 
+        text-anchor="middle" 
+        fill="url(#rainbow)" 
+        opacity="0.9">No pressure</text>
+  
+  <!-- Subtle flicker animation -->
+  <text x="275" y="75" 
+        font-family="Arial, sans-serif" 
+        font-size="95" 
+        font-weight="bold" 
+        text-anchor="middle" 
+        fill="white" 
+        opacity="0.1">
+    <animate attributeName="opacity" 
+             values="0.1;0.3;0.1;0.2;0.1" 
+             dur="4s" 
+             repeatCount="indefinite"/>
+    No pressure
+  </text>
+</svg>

@@ -1,0 +1,1389 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "name": "system.ping.request",
+      "direction": "request",
+      "domain_id": 0,
+      "action_id": 1,
+      "payload": {
+        "version_major": 1,
+        "version_minor": 0,
+        "version_patch": 0
+      },
+      "hex": "010000000000"
+    },
+    {
+      "name": "system.logging_get.request",
+      "direction": "request",
+      "domain_id": 0,
+      "action_id": 4,
+      "payload": {},
+      "hex": ""
+    },
+    {
+      "name": "system.logging_set.request",
+      "direction": "request",
+      "domain_id": 0,
+      "action_id": 7,
+      "payload": {
+        "rotation_max_files": 7,
+        "rotation_max_size_mb": 128
+      },
+      "hex": "800000000000000007000000"
+    },
+    {
+      "name": "system.logging_clear.request",
+      "direction": "request",
+      "domain_id": 0,
+      "action_id": 10,
+      "payload": {},
+      "hex": ""
+    },
+    {
+      "name": "system.pong.response",
+      "direction": "response",
+      "domain_id": 0,
+      "action_id": 2,
+      "payload": {
+        "message": "ok"
+      },
+      "hex": "020000006f6b"
+    },
+    {
+      "name": "system.pong_error.response",
+      "direction": "response",
+      "domain_id": 0,
+      "action_id": 3,
+      "payload": {
+        "message": "version mismatch"
+      },
+      "hex": "1000000076657273696f6e206d69736d61746368"
+    },
+    {
+      "name": "system.logging_get_ok.response",
+      "direction": "response",
+      "domain_id": 0,
+      "action_id": 5,
+      "payload": {
+        "file_logging_active": true,
+        "level": "info",
+        "rotation_max_files": 5,
+        "rotation_max_size_mb": 256,
+        "run_mode": "daemon"
+      },
+      "hex": "04000000696e666f000100000000000005000000060000006461656d6f6e01"
+    },
+    {
+      "name": "system.logging_get_err.response",
+      "direction": "response",
+      "domain_id": 0,
+      "action_id": 6,
+      "payload": {
+        "message": "logging not configured"
+      },
+      "hex": "160000006c6f6767696e67206e6f7420636f6e66696775726564"
+    },
+    {
+      "name": "system.logging_set_ok.response",
+      "direction": "response",
+      "domain_id": 0,
+      "action_id": 8,
+      "payload": {
+        "file_logging_active": true,
+        "level": "debug",
+        "rotation_max_files": 9,
+        "rotation_max_size_mb": 512,
+        "run_mode": "daemon"
+      },
+      "hex": "050000006465627567000200000000000009000000060000006461656d6f6e01"
+    },
+    {
+      "name": "system.logging_set_err.response",
+      "direction": "response",
+      "domain_id": 0,
+      "action_id": 9,
+      "payload": {
+        "message": "invalid rotation size"
+      },
+      "hex": "15000000696e76616c696420726f746174696f6e2073697a65"
+    },
+    {
+      "name": "system.logging_clear_ok.response",
+      "direction": "response",
+      "domain_id": 0,
+      "action_id": 11,
+      "payload": {
+        "deleted_bytes": 2048,
+        "deleted_files": 3,
+        "message": "cleared"
+      },
+      "hex": "07000000636c656172656403000000000000000008000000000000"
+    },
+    {
+      "name": "system.logging_clear_err.response",
+      "direction": "response",
+      "domain_id": 0,
+      "action_id": 12,
+      "payload": {
+        "message": "permission denied"
+      },
+      "hex": "110000007065726d697373696f6e2064656e696564"
+    },
+    {
+      "name": "users.add.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 1,
+      "payload": {
+        "change_token": null,
+        "email": "user@example.com",
+        "name": "User One",
+        "password": {
+          "kind": "plaintext",
+          "plaintext": "secret"
+        },
+        "roles": [
+          "admin",
+          "editor"
+        ]
+      },
+      "hex": "001000000075736572406578616d706c652e636f6d0800000055736572204f6e650006000000736563726574020000000500000061646d696e06000000656469746f72"
+    },
+    {
+      "name": "users.change.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 2,
+      "payload": {
+        "email": "user@example.com",
+        "name": "User Two",
+        "roles": [
+          "editor"
+        ]
+      },
+      "hex": "031000000075736572406578616d706c652e636f6d08000000557365722054776f0100000006000000656469746f72"
+    },
+    {
+      "name": "users.delete.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 3,
+      "payload": {
+        "email": "delete@example.com"
+      },
+      "hex": "1200000064656c657465406578616d706c652e636f6d"
+    },
+    {
+      "name": "users.password_set.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 4,
+      "payload": {
+        "change_token": null,
+        "email": "user@example.com",
+        "password": {
+          "kind": "plaintext",
+          "plaintext": "newsecret"
+        }
+      },
+      "hex": "001000000075736572406578616d706c652e636f6d00090000006e6577736563726574"
+    },
+    {
+      "name": "users.password_set_front_end.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 4,
+      "payload": {
+        "change_token": "pc_token",
+        "email": "user@example.com",
+        "password": {
+          "front_end_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "front_end_salt": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "kind": "front_end_hash"
+        }
+      },
+      "hex": "011000000075736572406578616d706c652e636f6d0140000000616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161612000000062626262626262626262626262626262626262626262626262626262626262620800000070635f746f6b656e"
+    },
+    {
+      "name": "users.password_salt.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 10,
+      "payload": {
+        "email": "user@example.com"
+      },
+      "hex": "1000000075736572406578616d706c652e636f6d"
+    },
+    {
+      "name": "users.password_validate.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 11,
+      "payload": {
+        "email": "user@example.com",
+        "front_end_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "hex": "1000000075736572406578616d706c652e636f6d4000000061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161"
+    },
+    {
+      "name": "users.password_update.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 12,
+      "payload": {
+        "change_token": "pc_token",
+        "current_front_end_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "email": "user@example.com",
+        "new_front_end_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "new_front_end_salt": "cccccccccccccccccccccccccccccccc"
+      },
+      "hex": "1000000075736572406578616d706c652e636f6d400000006161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616140000000626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262622000000063636363636363636363636363636363636363636363636363636363636363630800000070635f746f6b656e"
+    },
+    {
+      "name": "users.list.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 5,
+      "payload": {},
+      "hex": ""
+    },
+    {
+      "name": "users.show.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 6,
+      "payload": {
+        "email": "viewer@example.com"
+      },
+      "hex": "12000000766965776572406578616d706c652e636f6d"
+    },
+    {
+      "name": "users.role_add.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 7,
+      "payload": {
+        "email": "user@example.com",
+        "role": "viewer"
+      },
+      "hex": "1000000075736572406578616d706c652e636f6d06000000766965776572"
+    },
+    {
+      "name": "users.role_remove.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 8,
+      "payload": {
+        "email": "user@example.com",
+        "role": "editor"
+      },
+      "hex": "1000000075736572406578616d706c652e636f6d06000000656469746f72"
+    },
+    {
+      "name": "users.roles_list.request",
+      "direction": "request",
+      "domain_id": 1,
+      "action_id": 9,
+      "payload": {},
+      "hex": ""
+    },
+    {
+      "name": "users.add_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 101,
+      "payload": {
+        "message": "user created"
+      },
+      "hex": "0c000000757365722063726561746564"
+    },
+    {
+      "name": "users.add_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 102,
+      "payload": {
+        "message": "email already exists"
+      },
+      "hex": "14000000656d61696c20616c726561647920657869737473"
+    },
+    {
+      "name": "users.change_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 201,
+      "payload": {
+        "message": "user updated"
+      },
+      "hex": "0c000000757365722075706461746564"
+    },
+    {
+      "name": "users.change_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 202,
+      "payload": {
+        "message": "user not found"
+      },
+      "hex": "0e00000075736572206e6f7420666f756e64"
+    },
+    {
+      "name": "users.delete_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 301,
+      "payload": {
+        "message": "user deleted"
+      },
+      "hex": "0c000000757365722064656c65746564"
+    },
+    {
+      "name": "users.delete_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 302,
+      "payload": {
+        "message": "cannot delete admin"
+      },
+      "hex": "1300000063616e6e6f742064656c6574652061646d696e"
+    },
+    {
+      "name": "users.password_set_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 401,
+      "payload": {
+        "message": "password updated"
+      },
+      "hex": "1000000070617373776f72642075706461746564"
+    },
+    {
+      "name": "users.password_set_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 402,
+      "payload": {
+        "message": "password too short"
+      },
+      "hex": "1200000070617373776f726420746f6f2073686f7274"
+    },
+    {
+      "name": "users.password_salt_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 1001,
+      "payload": {
+        "change_token": "pc_token",
+        "current_front_end_salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expires_in_seconds": 600,
+        "next_front_end_salt": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "hex": "0800000070635f746f6b656e2000000061616161616161616161616161616161616161616161616161616161616161612000000062626262626262626262626262626262626262626262626262626262626262625802000000000000"
+    },
+    {
+      "name": "users.password_salt_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 1002,
+      "payload": {
+        "message": "salt unavailable"
+      },
+      "hex": "1000000073616c7420756e617661696c61626c65"
+    },
+    {
+      "name": "users.password_validate_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 1101,
+      "payload": {
+        "valid": true
+      },
+      "hex": "01"
+    },
+    {
+      "name": "users.password_validate_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 1102,
+      "payload": {
+        "message": "validation failed"
+      },
+      "hex": "1100000076616c69646174696f6e206661696c6564"
+    },
+    {
+      "name": "users.password_update_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 1201,
+      "payload": {
+        "message": "password updated"
+      },
+      "hex": "1000000070617373776f72642075706461746564"
+    },
+    {
+      "name": "users.password_update_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 1202,
+      "payload": {
+        "message": "password change failed"
+      },
+      "hex": "1600000070617373776f7264206368616e6765206661696c6564"
+    },
+    {
+      "name": "users.list_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 501,
+      "payload": {
+        "users": [
+          {
+            "email": "alpha@example.com",
+            "name": "Alpha"
+          },
+          {
+            "email": "beta@example.com",
+            "name": "Beta"
+          }
+        ]
+      },
+      "hex": "0200000011000000616c706861406578616d706c652e636f6d05000000416c7068611000000062657461406578616d706c652e636f6d0400000042657461"
+    },
+    {
+      "name": "users.list_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 502,
+      "payload": {
+        "message": "user list error"
+      },
+      "hex": "0f00000075736572206c697374206572726f72"
+    },
+    {
+      "name": "users.show_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 601,
+      "payload": {
+        "email": "alpha@example.com",
+        "name": "Alpha",
+        "roles": [
+          "admin",
+          "editor"
+        ]
+      },
+      "hex": "11000000616c706861406578616d706c652e636f6d05000000416c706861020000000500000061646d696e06000000656469746f72"
+    },
+    {
+      "name": "users.show_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 602,
+      "payload": {
+        "message": "user not found"
+      },
+      "hex": "0e00000075736572206e6f7420666f756e64"
+    },
+    {
+      "name": "users.role_add_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 701,
+      "payload": {
+        "message": "role added"
+      },
+      "hex": "0a000000726f6c65206164646564"
+    },
+    {
+      "name": "users.role_add_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 702,
+      "payload": {
+        "message": "role already assigned"
+      },
+      "hex": "15000000726f6c6520616c72656164792061737369676e6564"
+    },
+    {
+      "name": "users.role_remove_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 801,
+      "payload": {
+        "message": "role removed"
+      },
+      "hex": "0c000000726f6c652072656d6f766564"
+    },
+    {
+      "name": "users.role_remove_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 802,
+      "payload": {
+        "message": "role not found"
+      },
+      "hex": "0e000000726f6c65206e6f7420666f756e64"
+    },
+    {
+      "name": "users.roles_list_ok.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 901,
+      "payload": {
+        "roles": [
+          "admin",
+          "editor",
+          "viewer"
+        ]
+      },
+      "hex": "030000000500000061646d696e06000000656469746f7206000000766965776572"
+    },
+    {
+      "name": "users.roles_list_err.response",
+      "direction": "response",
+      "domain_id": 1,
+      "action_id": 902,
+      "payload": {
+        "message": "role list error"
+      },
+      "hex": "0f000000726f6c65206c697374206572726f72"
+    },
+    {
+      "name": "tags.add.request",
+      "direction": "request",
+      "domain_id": 11,
+      "action_id": 1,
+      "payload": {
+        "access_rule": "union",
+        "id": "news",
+        "name": "News",
+        "roles": [
+          "editor",
+          "admin"
+        ]
+      },
+      "hex": "01040000006e657773040000004e6577730200000006000000656469746f720500000061646d696e00000000"
+    },
+    {
+      "name": "tags.change.request",
+      "direction": "request",
+      "domain_id": 11,
+      "action_id": 2,
+      "payload": {
+        "access_rule": "intersect",
+        "clear_access": true,
+        "id": "news",
+        "name": "Updates",
+        "new_id": "updates",
+        "roles": [
+          "editor"
+        ]
+      },
+      "hex": "0f040000006e657773070000007570646174657307000000557064617465730100000006000000656469746f720100000001"
+    },
+    {
+      "name": "tags.delete.request",
+      "direction": "request",
+      "domain_id": 11,
+      "action_id": 3,
+      "payload": {
+        "id": "old"
+      },
+      "hex": "030000006f6c64"
+    },
+    {
+      "name": "tags.list.request",
+      "direction": "request",
+      "domain_id": 11,
+      "action_id": 4,
+      "payload": {},
+      "hex": ""
+    },
+    {
+      "name": "tags.show.request",
+      "direction": "request",
+      "domain_id": 11,
+      "action_id": 5,
+      "payload": {
+        "id": "news"
+      },
+      "hex": "040000006e657773"
+    },
+    {
+      "name": "tags.add_ok.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 101,
+      "payload": {
+        "message": "tag created"
+      },
+      "hex": "0b0000007461672063726561746564"
+    },
+    {
+      "name": "tags.add_err.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 102,
+      "payload": {
+        "message": "tag already exists"
+      },
+      "hex": "1200000074616720616c726561647920657869737473"
+    },
+    {
+      "name": "tags.change_ok.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 201,
+      "payload": {
+        "message": "tag updated"
+      },
+      "hex": "0b0000007461672075706461746564"
+    },
+    {
+      "name": "tags.change_err.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 202,
+      "payload": {
+        "message": "tag not found"
+      },
+      "hex": "0d000000746167206e6f7420666f756e64"
+    },
+    {
+      "name": "tags.delete_ok.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 301,
+      "payload": {
+        "message": "tag deleted"
+      },
+      "hex": "0b0000007461672064656c65746564"
+    },
+    {
+      "name": "tags.delete_err.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 302,
+      "payload": {
+        "message": "tag in use"
+      },
+      "hex": "0a00000074616720696e20757365"
+    },
+    {
+      "name": "tags.list_ok.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 401,
+      "payload": {
+        "tags": [
+          {
+            "id": "news",
+            "name": "News"
+          },
+          {
+            "id": "updates",
+            "name": "Updates"
+          }
+        ]
+      },
+      "hex": "02000000040000006e657773040000004e65777307000000757064617465730700000055706461746573"
+    },
+    {
+      "name": "tags.list_err.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 402,
+      "payload": {
+        "message": "tag list error"
+      },
+      "hex": "0e000000746167206c697374206572726f72"
+    },
+    {
+      "name": "tags.show_ok.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 501,
+      "payload": {
+        "access_rule": "union",
+        "id": "news",
+        "name": "News",
+        "roles": [
+          "editor"
+        ]
+      },
+      "hex": "01040000006e657773040000004e6577730100000006000000656469746f7200000000"
+    },
+    {
+      "name": "tags.show_err.response",
+      "direction": "response",
+      "domain_id": 11,
+      "action_id": 502,
+      "payload": {
+        "message": "tag not found"
+      },
+      "hex": "0d000000746167206e6f7420666f756e64"
+    },
+    {
+      "name": "roles.add.request",
+      "direction": "request",
+      "domain_id": 13,
+      "action_id": 1,
+      "payload": {
+        "role": "editor"
+      },
+      "hex": "06000000656469746f72"
+    },
+    {
+      "name": "roles.change.request",
+      "direction": "request",
+      "domain_id": 13,
+      "action_id": 2,
+      "payload": {
+        "new_role": "contributor",
+        "role": "editor"
+      },
+      "hex": "06000000656469746f720b000000636f6e7472696275746f72"
+    },
+    {
+      "name": "roles.delete.request",
+      "direction": "request",
+      "domain_id": 13,
+      "action_id": 3,
+      "payload": {
+        "role": "obsolete"
+      },
+      "hex": "080000006f62736f6c657465"
+    },
+    {
+      "name": "roles.list.request",
+      "direction": "request",
+      "domain_id": 13,
+      "action_id": 4,
+      "payload": {},
+      "hex": ""
+    },
+    {
+      "name": "roles.show.request",
+      "direction": "request",
+      "domain_id": 13,
+      "action_id": 5,
+      "payload": {
+        "role": "editor"
+      },
+      "hex": "06000000656469746f72"
+    },
+    {
+      "name": "roles.add_ok.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 101,
+      "payload": {
+        "message": "role created"
+      },
+      "hex": "0c000000726f6c652063726561746564"
+    },
+    {
+      "name": "roles.add_err.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 102,
+      "payload": {
+        "message": "role already exists"
+      },
+      "hex": "13000000726f6c6520616c726561647920657869737473"
+    },
+    {
+      "name": "roles.change_ok.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 201,
+      "payload": {
+        "message": "role updated"
+      },
+      "hex": "0c000000726f6c652075706461746564"
+    },
+    {
+      "name": "roles.change_err.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 202,
+      "payload": {
+        "message": "role not found"
+      },
+      "hex": "0e000000726f6c65206e6f7420666f756e64"
+    },
+    {
+      "name": "roles.delete_ok.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 301,
+      "payload": {
+        "message": "role deleted"
+      },
+      "hex": "0c000000726f6c652064656c65746564"
+    },
+    {
+      "name": "roles.delete_err.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 302,
+      "payload": {
+        "message": "role in use"
+      },
+      "hex": "0b000000726f6c6520696e20757365"
+    },
+    {
+      "name": "roles.list_ok.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 401,
+      "payload": {
+        "roles": [
+          "admin",
+          "editor",
+          "viewer"
+        ]
+      },
+      "hex": "030000000500000061646d696e06000000656469746f7206000000766965776572"
+    },
+    {
+      "name": "roles.list_err.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 402,
+      "payload": {
+        "message": "role list error"
+      },
+      "hex": "0f000000726f6c65206c697374206572726f72"
+    },
+    {
+      "name": "roles.show_ok.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 501,
+      "payload": {
+        "role": "editor"
+      },
+      "hex": "06000000656469746f72"
+    },
+    {
+      "name": "roles.show_err.response",
+      "direction": "response",
+      "domain_id": 13,
+      "action_id": 502,
+      "payload": {
+        "message": "role not found"
+      },
+      "hex": "0e000000726f6c65206e6f7420666f756e64"
+    },
+    {
+      "name": "content.list.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 1,
+      "payload": {
+        "markdown_only": true,
+        "page": 1,
+        "page_size": 20,
+        "query": "guide",
+        "sort_direction": "asc",
+        "sort_field": "title",
+        "tags": [
+          "docs",
+          "guide"
+        ]
+      },
+      "hex": "03010000001400000000000000000000000500000067756964650200000004000000646f637305000000677569646501"
+    },
+    {
+      "name": "content.read.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 2,
+      "payload": {
+        "id": "0000000000000001"
+      },
+      "hex": "1000000030303030303030303030303030303031"
+    },
+    {
+      "name": "content.update.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 3,
+      "payload": {
+        "content": "# Hello",
+        "id": "0000000000000001",
+        "nav_order": 2,
+        "nav_parent_id": null,
+        "nav_title": "Start",
+        "new_alias": "docs/getting-started",
+        "tags": [
+          "guide",
+          "start"
+        ],
+        "theme": "default",
+        "title": "Getting Started"
+      },
+      "hex": "ef100000003030303030303030303030303030303114000000646f63732f67657474696e672d737461727465640f00000047657474696e67205374617274656402000000050000006775696465050000007374617274050000005374617274020000000700000064656661756c7407000000232048656c6c6f"
+    },
+    {
+      "name": "content.delete.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 4,
+      "payload": {
+        "id": "0000000000000002"
+      },
+      "hex": "1000000030303030303030303030303030303032"
+    },
+    {
+      "name": "content.upload.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 5,
+      "payload": {
+        "alias": "docs/new",
+        "content": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "mime": "text/markdown",
+        "nav_order": 1,
+        "nav_parent_id": "root",
+        "nav_title": "New",
+        "original_filename": "new.md",
+        "tags": [
+          "doc"
+        ],
+        "theme": "default",
+        "title": "New Doc"
+      },
+      "hex": "7f08000000646f63732f6e6577070000004e657720446f630d000000746578742f6d61726b646f776e0100000003000000646f63030000004e657704000000726f6f7401000000060000006e65772e6d640700000064656661756c740400000001020304"
+    },
+    {
+      "name": "content.nav_index.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 6,
+      "payload": {},
+      "hex": ""
+    },
+    {
+      "name": "content.binary_prevalidate.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 7,
+      "payload": {
+        "filename": "photo.png",
+        "mime": "image/png",
+        "size_bytes": 123456
+      },
+      "hex": "0900000070686f746f2e706e6709000000696d6167652f706e6740e2010000000000"
+    },
+    {
+      "name": "content.binary_upload_init.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 8,
+      "payload": {
+        "alias": "images/photo",
+        "filename": "photo.png",
+        "mime": "image/png",
+        "size_bytes": 3456,
+        "tags": [
+          "media"
+        ],
+        "title": "Photo"
+      },
+      "hex": "030c000000696d616765732f70686f746f0500000050686f746f01000000050000006d656469610900000070686f746f2e706e6709000000696d6167652f706e67800d000000000000"
+    },
+    {
+      "name": "content.binary_upload_commit.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 9,
+      "payload": {
+        "upload_id": 7
+      },
+      "hex": "07000000"
+    },
+    {
+      "name": "content.upload_stream_init.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 10,
+      "payload": {
+        "alias": "docs/stream",
+        "nav_order": null,
+        "nav_parent_id": null,
+        "nav_title": null,
+        "size_bytes": 777,
+        "tags": [
+          "stream"
+        ],
+        "theme": "default",
+        "title": "Stream Doc"
+      },
+      "hex": "230b000000646f63732f73747265616d0a00000053747265616d20446f63010000000600000073747265616d0700000064656661756c740903000000000000"
+    },
+    {
+      "name": "content.upload_stream_commit.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 11,
+      "payload": {
+        "upload_id": 9
+      },
+      "hex": "09000000"
+    },
+    {
+      "name": "content.update_stream_init.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 12,
+      "payload": {
+        "id": "0000000000000003",
+        "nav_order": null,
+        "nav_parent_id": null,
+        "nav_title": null,
+        "new_alias": null,
+        "size_bytes": 777,
+        "tags": null,
+        "theme": null,
+        "title": "Streamed"
+      },
+      "hex": "0210000000303030303030303030303030303030330800000053747265616d65640903000000000000"
+    },
+    {
+      "name": "content.update_stream_commit.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 13,
+      "payload": {
+        "upload_id": 10
+      },
+      "hex": "0a000000"
+    },
+    {
+      "name": "content.list_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 101,
+      "payload": {
+        "items": [
+          {
+            "alias": "docs/intro",
+            "id": "1",
+            "is_markdown": true,
+            "mime": "text/markdown",
+            "nav_order": 1,
+            "nav_parent_id": null,
+            "nav_title": "Intro",
+            "original_filename": "intro.md",
+            "tags": [
+              "guide"
+            ],
+            "title": "Intro"
+          }
+        ],
+        "page": 1,
+        "page_size": 20,
+        "total": 1
+      },
+      "hex": "010000000100000014000000010000001b01000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d6401"
+    },
+    {
+      "name": "content.list_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 102,
+      "payload": {
+        "message": "content list error"
+      },
+      "hex": "12000000636f6e74656e74206c697374206572726f72"
+    },
+    {
+      "name": "content.read_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 201,
+      "payload": {
+        "alias": "docs/intro",
+        "content": "# Intro",
+        "id": "1",
+        "mime": "text/markdown",
+        "nav_order": 1,
+        "nav_parent_id": null,
+        "nav_title": "Intro",
+        "original_filename": "intro.md",
+        "tags": [
+          "guide"
+        ],
+        "theme": "default",
+        "title": "Intro"
+      },
+      "hex": "7b01000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d640700000064656661756c74070000002320496e74726f"
+    },
+    {
+      "name": "content.read_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 202,
+      "payload": {
+        "message": "content not found"
+      },
+      "hex": "11000000636f6e74656e74206e6f7420666f756e64"
+    },
+    {
+      "name": "content.update_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 301,
+      "payload": {
+        "message": "content updated"
+      },
+      "hex": "0f000000636f6e74656e742075706461746564"
+    },
+    {
+      "name": "content.update_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 302,
+      "payload": {
+        "message": "content update failed"
+      },
+      "hex": "15000000636f6e74656e7420757064617465206661696c6564"
+    },
+    {
+      "name": "content.delete_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 401,
+      "payload": {
+        "message": "content deleted"
+      },
+      "hex": "0f000000636f6e74656e742064656c65746564"
+    },
+    {
+      "name": "content.delete_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 402,
+      "payload": {
+        "message": "content delete failed"
+      },
+      "hex": "15000000636f6e74656e742064656c657465206661696c6564"
+    },
+    {
+      "name": "content.upload_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 501,
+      "payload": {
+        "alias": "docs/new",
+        "id": "2",
+        "is_markdown": true,
+        "mime": "text/markdown"
+      },
+      "hex": "010000003208000000646f63732f6e65770d000000746578742f6d61726b646f776e01"
+    },
+    {
+      "name": "content.upload_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 502,
+      "payload": {
+        "message": "content upload failed"
+      },
+      "hex": "15000000636f6e74656e742075706c6f6164206661696c6564"
+    },
+    {
+      "name": "content.nav_index_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 601,
+      "payload": {
+        "items": [
+          {
+            "alias": "docs/intro",
+            "id": "1",
+            "nav_order": 1,
+            "nav_parent_id": null,
+            "nav_title": "Intro",
+            "title": "Intro"
+          }
+        ]
+      },
+      "hex": "010000000b01000000310a000000646f63732f696e74726f05000000496e74726f05000000496e74726f01000000"
+    },
+    {
+      "name": "content.nav_index_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 602,
+      "payload": {
+        "message": "nav index failed"
+      },
+      "hex": "100000006e617620696e646578206661696c6564"
+    },
+    {
+      "name": "content.binary_prevalidate_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 701,
+      "payload": {
+        "accepted": true,
+        "message": "ok"
+      },
+      "hex": "01020000006f6b"
+    },
+    {
+      "name": "content.binary_prevalidate_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 702,
+      "payload": {
+        "message": "binary prevalidate failed"
+      },
+      "hex": "1900000062696e6172792070726576616c6964617465206661696c6564"
+    },
+    {
+      "name": "content.binary_upload_init_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 801,
+      "payload": {
+        "chunk_bytes": 1024,
+        "max_bytes": 4096,
+        "stream_id": 11,
+        "upload_id": 7
+      },
+      "hex": "070000000b000000001000000000000000040000"
+    },
+    {
+      "name": "content.binary_upload_init_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 802,
+      "payload": {
+        "message": "binary upload init failed"
+      },
+      "hex": "1900000062696e6172792075706c6f616420696e6974206661696c6564"
+    },
+    {
+      "name": "content.binary_upload_commit_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 901,
+      "payload": {
+        "alias": "images/photo",
+        "id": "3",
+        "is_markdown": false,
+        "mime": "image/png"
+      },
+      "hex": "01000000330c000000696d616765732f70686f746f09000000696d6167652f706e6700"
+    },
+    {
+      "name": "content.binary_upload_commit_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 902,
+      "payload": {
+        "message": "binary upload commit failed"
+      },
+      "hex": "1b00000062696e6172792075706c6f616420636f6d6d6974206661696c6564"
+    },
+    {
+      "name": "content.upload_stream_init_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1001,
+      "payload": {
+        "chunk_bytes": 2048,
+        "max_bytes": 65536,
+        "stream_id": 12,
+        "upload_id": 8
+      },
+      "hex": "080000000c000000000001000000000000080000"
+    },
+    {
+      "name": "content.upload_stream_init_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1002,
+      "payload": {
+        "message": "upload stream init failed"
+      },
+      "hex": "1900000075706c6f61642073747265616d20696e6974206661696c6564"
+    },
+    {
+      "name": "content.upload_stream_commit_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1101,
+      "payload": {
+        "alias": "docs/stream",
+        "id": "4",
+        "is_markdown": true,
+        "mime": "text/markdown"
+      },
+      "hex": "01000000340b000000646f63732f73747265616d0d000000746578742f6d61726b646f776e01"
+    },
+    {
+      "name": "content.upload_stream_commit_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1102,
+      "payload": {
+        "message": "upload stream commit failed"
+      },
+      "hex": "1b00000075706c6f61642073747265616d20636f6d6d6974206661696c6564"
+    },
+    {
+      "name": "content.update_stream_init_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1201,
+      "payload": {
+        "chunk_bytes": 512,
+        "max_bytes": 1024,
+        "stream_id": 13,
+        "upload_id": 9
+      },
+      "hex": "090000000d000000000400000000000000020000"
+    },
+    {
+      "name": "content.update_stream_init_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1202,
+      "payload": {
+        "message": "update stream init failed"
+      },
+      "hex": "190000007570646174652073747265616d20696e6974206661696c6564"
+    },
+    {
+      "name": "content.update_stream_commit_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1301,
+      "payload": {
+        "message": "update stream committed"
+      },
+      "hex": "170000007570646174652073747265616d20636f6d6d6974746564"
+    },
+    {
+      "name": "content.update_stream_commit_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1302,
+      "payload": {
+        "message": "update stream commit failed"
+      },
+      "hex": "1b0000007570646174652073747265616d20636f6d6d6974206661696c6564"
+    }
+  ]
+}

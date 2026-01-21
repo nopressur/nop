@@ -1,0 +1,192 @@
+# NoPressure Configuration Example
+# Copy this file to config.yaml and modify as needed
+# Runtime layout: config.yaml and users.yaml live alongside content/, themes/, and state/
+
+# Development Mode Configuration (DEBUG BUILDS ONLY; REMOVE IN PRODUCTION)
+# dev_mode: "localhost"   # Allow unrestricted access from localhost only (ignored in release builds)
+# dev_mode: "dangerous"   # Allow unrestricted access from anywhere (DANGEROUS, ignored in release builds)
+# Comment out or remove for normal access controls
+
+server:
+  host: "127.0.0.1"  # Server bind address
+  port: 5466         # Server port (HTTP when TLS is disabled, HTTPS when TLS is enabled)
+  # http_port: 8080  # Required when TLS is enabled (HTTP well-known + redirect listener; must differ from port)
+  workers: 4         # Number of worker threads (optional, defaults to 4)
+
+admin:
+  path: "/admin"     # Admin panel path (can be changed for security)
+  # Examples: "/control-panel", "/dashboard", "/management", "/adm"
+
+# TLS configuration (enables HTTPS when present).
+# TLS files live under state/sys/tls/ with no subdirectories.
+# tls:
+#   mode: "self-signed"        # self-signed | user-provided | acme
+#   domains:
+#     - "example.com"
+#     - "www.example.com"
+#   redirect_base_url: "https://example.com"
+#   acme:
+#     provider: "lers"
+#     environment: "production" # production | staging
+#     directory_url: "https://acme-v02.api.letsencrypt.org/directory"
+#     insecure_skip_verify: false
+#     contact_email: "admin@example.com"
+#     challenge: "http-01"       # http-01 | dns-01
+#     dns:
+#       provider: "cloudflare"   # cloudflare | exec
+#       api_token: "env:CF_API_TOKEN"
+#       exec:
+#         present_command: "/usr/local/bin/acme-dns-present"
+#         cleanup_command: "/usr/local/bin/acme-dns-cleanup"
+
+# File upload configuration for admin panel
+upload:
+  max_file_size_mb: 100  # Maximum file size in MB (0 = unlimited, defaults to 100)
+  allowed_extensions:    # Allowed file extensions (optional, extensive defaults provided)
+    # Images
+    - "jpg"
+    - "jpeg"
+    - "png"
+    - "gif"
+    - "webp"
+    - "svg"
+    - "bmp"
+    - "ico"
+    # Documents
+    - "pdf"
+    - "doc"
+    - "docx"
+    - "txt"
+    - "rtf"
+    - "odt"
+    # Spreadsheets
+    - "xls"
+    - "xlsx"
+    - "csv"
+    - "ods"
+    # Presentations
+    - "ppt"
+    - "pptx"
+    - "odp"
+    # Archives
+    - "zip"
+    - "rar"
+    - "7z"
+    - "tar"
+    - "gz"
+    # Video files
+    - "mp4"
+    - "avi"
+    - "mov"
+    - "wmv"
+    - "flv"
+    - "webm"
+    - "mkv"
+    - "m4v"
+    # Audio files
+    - "mp3"
+    - "wav"
+    - "flac"
+    - "aac"
+    - "ogg"
+    - "wma"
+    - "m4a"
+    # Web files
+    - "html"
+    - "css"
+    - "js"
+    - "json"
+    - "xml"
+    # Markdown files (will be renamed to .markdown extension)
+    - "md"
+    - "markdown"
+    # Other common files
+    - "log"
+    - "conf"
+    - "cfg"
+
+# HTTP range request streaming configuration
+streaming:
+  enabled: true                    # Enable/disable streaming functionality (default: true)
+                                  # Note: Streaming is automatically enabled for all non-.md files
+                                  # when a Range header is present in the request
+
+users:
+  auth_method: "local"              # Authentication method: "local" or "oidc"
+  
+  # Local authentication configuration (only used if auth_method is "local")
+  local:
+    # JWT Configuration for local authentication
+    jwt:
+      secret: "your-secret-key-change-this-in-production"  # JWT signing secret (CHANGE THIS!)
+      issuer: "nopressure"              # JWT issuer (defaults to "nopressure")
+      audience: "nopressure-users"      # JWT audience (defaults to "nopressure-users")
+      expiration_hours: 12              # JWT token expiration in hours (defaults to 12)
+      cookie_name: "nop_auth"           # Authentication cookie name (defaults to "nop_auth")
+      
+      # JWT Auto-Refresh Configuration (optional)
+      # disable_refresh: false            # Disable automatic JWT token refresh (defaults to false)
+      # refresh_threshold_percentage: 10  # Percentage of token lifetime before refresh (10-90, defaults to 10)
+      # refresh_threshold_hours: 24       # Hours before refresh for long-lived tokens (minimum 1, defaults to 24)
+
+    # Argon2id parameters for local passwords (front-end + back-end phases)
+    password:
+      front_end:
+        memory_kib: 65536
+        iterations: 2
+        parallelism: 1
+        output_len: 32
+        salt_len: 16
+      back_end:
+        memory_kib: 131072
+        iterations: 3
+        parallelism: 2
+        output_len: 32
+        salt_len: 16
+  
+  # OIDC authentication configuration (only used if auth_method is "oidc")
+  # oidc:
+  #   server_url: "https://keycloak.example.com"  # OIDC provider server URL
+  #   realm: "my-realm"                           # OIDC realm name
+  #   client_id: "nopressure-client"              # Client ID registered in OIDC provider
+  #   client_secret: "your-client-secret"         # Client secret (optional for public clients)
+  #   redirect_uri: "http://127.0.0.1:5466/login/callback"  # OAuth2 callback URI
+  #   scope: "openid email profile"              # OAuth2 scopes (default: "openid email profile")
+  #   verify_ssl: true                           # Verify SSL certificates (default: true)
+
+navigation:
+  max_dropdown_items: 7  # Maximum items to show in dropdown menus before adding "More..." link
+
+rendering:
+  short_paragraph_length: 256  # Paragraph length (chars) to count as "short" (0 disables compact width)
+
+security:
+  max_violations: 2        # Maximum path traversal violations before blocking IP
+  cooldown_seconds: 30     # Time in seconds to block violating IPs
+  use_forwarded_for: false # Use X-Forwarded-For header for client IP detection (ensure proxy sets it correctly)
+  login_sessions:
+    period_seconds: 300     # Login session issuance window (defaults to 300)
+    id_requests: 5          # Max session IDs per window (defaults to 5)
+    lockout_seconds: 600    # Lockout duration when rate limit exceeded (defaults to 600)
+
+  # HTTP Strict Transport Security (HSTS) - Use with caution, only enable if site is fully HTTPS
+  hsts_enabled: false               # Enable HSTS header (defaults to false)
+  hsts_max_age: 31536000            # HSTS max-age in seconds (defaults to 1 year)
+  hsts_include_subdomains: true     # HSTS includeSubDomains (defaults to true)
+  hsts_preload: false               # HSTS preload (defaults to false) - only if you intend to submit to preload lists
+
+logging:
+  level: "info"      # Logging level: debug, info, warn, error
+  rotation:
+    max_size_mb: 16  # Max size per log file before rotation (daemon mode only)
+    max_files: 10    # Total log files to retain including the active file
+
+app:
+  name: "NoPressure"
+  description: "A lightweight web content management system"
+
+# Shortcodes configuration - controls dynamic content features
+shortcodes:
+  # Search URL for the [unibox] shortcode. Defaults to DuckDuckGo if not specified.
+  # start_unibox: "https://www.startpage.com/sp/search?q="
+  start_unibox: "https://duckduckgo.com?q=<QUERY>"

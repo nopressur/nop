@@ -1,0 +1,18 @@
+// This file is part of the product NoPressure.
+// SPDX-FileCopyrightText: 2025-2026 Zivatar Limited
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
+
+pub mod handlers;
+pub mod middleware;
+pub mod pages;
+pub mod roles;
+pub mod shared;
+pub mod system;
+pub mod tags;
+pub mod themes;
+pub mod users;
+pub mod ws;
+mod ws_auth;
+
+pub use handlers::configure;

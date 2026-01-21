@@ -1,0 +1,19 @@
+{
+  "name": "nop-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.6.3",
+    "vite": "^7.3.0",
+    "vitest": "^4.0.16"
+  }
+}

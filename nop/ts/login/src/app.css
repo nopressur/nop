@@ -1,0 +1,257 @@
+/*
+ * This file is part of the product NoPressure.
+ * SPDX-FileCopyrightText: 2025-2026 Zivatar Limited
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
+ */
+
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/600.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f7f4ef;
+  --card: #ffffff;
+  --text: #272523;
+  --muted: #6f6359;
+  --border: rgba(46, 38, 30, 0.18);
+  --accent: #1f6f78;
+  --accent-strong: #165860;
+  --danger: #b0432f;
+  --success: #2f7c5b;
+  --shadow-soft: 0 24px 50px rgba(20, 16, 12, 0.12);
+  --font-sans: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", "Menlo", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: radial-gradient(circle at top, #fffdfa 0%, #f7f4ef 55%, #efe9e0 100%);
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+}
+
+.login-card {
+  width: min(520px, 100%);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-soft);
+  padding: 32px;
+}
+
+.login-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.app-name {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.login-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.login-subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.helper-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-compact {
+  margin-top: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.field span {
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 16px;
+  line-height: 1.3;
+  color: var(--text);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(31, 111, 120, 0.16);
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.button {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, border 150ms ease;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.button-secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.button-muted {
+  background: #f1ebe3;
+  color: var(--text);
+  border-color: #dfd7cc;
+}
+
+.callout {
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+
+.callout-info {
+  color: var(--accent-strong);
+  background: rgba(31, 111, 120, 0.08);
+  border-color: rgba(31, 111, 120, 0.2);
+}
+
+.callout-error {
+  color: var(--danger);
+  background: rgba(176, 67, 47, 0.08);
+  border-color: rgba(176, 67, 47, 0.25);
+}
+
+.callout-success {
+  color: var(--success);
+  background: rgba(47, 124, 91, 0.1);
+  border-color: rgba(47, 124, 91, 0.25);
+}
+
+.profile-card {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.profile-label {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.profile-value {
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.section {
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.section-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+@media (min-width: 480px) {
+  .row .button {
+    width: auto;
+    flex: 1;
+  }
+}

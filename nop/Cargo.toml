@@ -1,0 +1,72 @@
+[package]
+name = "nop"
+version = "0.1.22"
+edition = "2024"
+build = "build.rs"
+default-run = "nop"
+
+[dependencies]
+actix-web = { version = "4.4", features = ["rustls-0_23"] }
+actix-files = "0.6"
+actix-multipart = "0.6"
+actix-ws = "0.3"
+tokio = { version = "1.0", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+ron = "0.8"
+env_logger = "0.11"
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+flate2 = "1.0"
+mime_guess = "2.0"
+infer = "0.16"
+once_cell = "1.0"
+pulldown-cmark = "0.9"
+gray_matter = "0.2"
+regex = "1.0"
+urlencoding = "2.1"
+ammonia = "3.3.1"
+futures-util = "0.3"
+jsonwebtoken = "9.0"
+argon2 = "0.5"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+validator = { version = "0.20", features = ["derive"] }
+config = "0.14"
+dotenvy = "0.15"
+minijinja = { version = "1.0", features = ["macros", "custom_syntax", "loader", "builtins", "preserve_order", "debug", "urlencode", "json"] }
+awc = { version = "3.7", default-features = false, features = ["cookies", "compress-gzip", "rustls-0_23-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rcgen = "0.13"
+x509-parser = "0.16"
+time = "0.3"
+lers = { version = "0.4", default-features = false, features = ["http-01", "dns-01", "dns-01-cloudflare"] }
+openssl = "0.10"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+async-trait = "0.1"
+rustls-native-certs = "0.7"
+hmac = "0.12"
+sha2 = "0.10"
+md5 = "0.7"
+base64 = "0.22"
+hex = "0.4"
+quick-xml = "0.31"
+nom = "7.1"
+libc = "0.2"
+rpassword = "7.3"
+
+[patch.crates-io]
+lers = { path = "target/vendor/lers" }
+trust-dns-proto = { path = "target/vendor/trust-dns-proto" }
+
+[build-dependencies]
+flate2 = "1.0"
+sha2 = "0.10"
+walkdir = "2.0"
+mime_guess = "2.0"
+serde_json = "1.0"
+
+[dev-dependencies]
+actix-http = "3.11"
+tempfile = "3.10"

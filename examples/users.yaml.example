@@ -1,0 +1,13 @@
+# NoPressure Users Configuration Example
+# Copy this file to users.yaml and modify as needed
+# Note: Use `nop user` or auto-bootstrap to generate password provider blocks.
+
+admin@example.com:
+  name: "Administrator"
+  password:
+    front_end_salt: "9a9d2c0d8f0c4d3d8c84f3b8778c4a6e"
+    back_end_salt: "e7b2f1c44b0d4e9aa5c92f6f3a4f8d11"
+    stored_hash: "$argon2id$v=19$m=131072,t=3,p=2$e7b2f1c44b0d4e9aa5c92f6f3a4f8d11$C1uFZTF3L2OU1h3zGfU4vQh96Wc3VQqj7/7Wv/5yM8w"
+  password_version: 1
+  roles:
+    - "admin"

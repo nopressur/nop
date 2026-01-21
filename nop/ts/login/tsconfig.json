@@ -1,0 +1,12 @@
+{
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "moduleResolution": "bundler",
+    "target": "ES2020",
+    "types": ["svelte", "node", "vitest/globals", "@testing-library/jest-dom"],
+    "verbatimModuleSyntax": true,
+    "noEmit": true
+  },
+  "include": ["src", "../shared/src", "vite.config.ts", "svelte.config.js"]
+}

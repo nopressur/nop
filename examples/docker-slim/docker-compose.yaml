@@ -1,0 +1,10 @@
+services:
+  nop:
+    build: .
+    image: nopressure-slim:latest
+    container_name: nopressure-slim
+    ports:
+      - "5466:5466"
+    volumes:
+      - ../data:/data
+    restart: unless-stopped 
