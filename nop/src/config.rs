@@ -4,8 +4,10 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use log::warn;
+use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 
 #[derive(Debug)]
@@ -417,12 +419,74 @@ pub struct AcmeDnsConfig {
     pub provider: String,
     pub api_token: Option<String>,
     pub exec: Option<AcmeDnsExecConfig>,
+    #[serde(default, deserialize_with = "deserialize_resolver_vec")]
+    pub resolver: Vec<String>,
+    #[serde(default = "default_acme_dns_propagation_check")]
+    pub propagation_check: bool,
+    #[serde(default = "default_acme_dns_propagation_delay_seconds")]
+    pub propagation_delay_seconds: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AcmeDnsExecConfig {
     pub present_command: String,
     pub cleanup_command: String,
+}
+
+fn deserialize_resolver_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct ResolverVisitor;
+
+    impl<'de> Visitor<'de> for ResolverVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a string or list of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(vec![value.to_string()])
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(vec![value])
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(value) = seq.next_element::<String>()? {
+                values.push(value);
+            }
+            Ok(values)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Vec::new())
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Vec::new())
+        }
+    }
+
+    deserializer.deserialize_any(ResolverVisitor)
 }
 
 fn default_acme_provider() -> String {
@@ -435,6 +499,24 @@ fn default_acme_environment() -> AcmeEnvironment {
 
 fn default_acme_insecure_skip_verify() -> bool {
     false
+}
+
+fn default_acme_dns_propagation_check() -> bool {
+    false
+}
+
+fn default_acme_dns_propagation_delay_seconds() -> u64 {
+    30
+}
+
+fn parse_dns_resolver_addr(value: &str) -> Option<SocketAddr> {
+    if let Ok(addr) = value.parse::<SocketAddr>() {
+        return Some(addr);
+    }
+    value
+        .parse::<IpAddr>()
+        .ok()
+        .map(|ip| SocketAddr::new(ip, 53))
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1109,6 +1191,23 @@ impl Config {
                         ));
                     }
                 }
+
+                if !dns.resolver.is_empty() {
+                    for resolver in &dns.resolver {
+                        let trimmed = resolver.trim();
+                        if trimmed.is_empty() {
+                            return Err(ConfigError::ValidationError(
+                                "tls.acme.dns.resolver cannot be empty".to_string(),
+                            ));
+                        }
+                        if parse_dns_resolver_addr(trimmed).is_none() {
+                            return Err(ConfigError::ValidationError(format!(
+                                "tls.acme.dns.resolver must be an IP address or socket address: {}",
+                                resolver
+                            )));
+                        }
+                    }
+                }
             }
         }
 
@@ -1364,6 +1463,9 @@ mod tests {
                 provider: "other".to_string(),
                 api_token: Some("token".to_string()),
                 exec: None,
+                resolver: Vec::new(),
+                propagation_check: false,
+                propagation_delay_seconds: 30,
             }),
         });
         let result = Config::validate_tls_config(&tls);
@@ -1387,6 +1489,9 @@ mod tests {
                     present_command: "".to_string(),
                     cleanup_command: "".to_string(),
                 }),
+                resolver: Vec::new(),
+                propagation_check: false,
+                propagation_delay_seconds: 30,
             }),
         });
         let result = Config::validate_tls_config(&tls);

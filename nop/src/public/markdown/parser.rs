@@ -1230,7 +1230,6 @@ Just regular **markdown** content.
             config: &config,
             runtime_paths: &runtime_paths,
             theme,
-            user: None,
             release_tracker: &release_tracker,
             template_engine: &templates,
         };

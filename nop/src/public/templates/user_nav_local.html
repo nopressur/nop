@@ -17,12 +17,12 @@ The code and documentation in this repository is licensed under the GNU Affero G
         <a class="navbar-item" href="#" onclick="logout()">Logout</a>
     </div>
 </div>
-<script src="/builtin/admin/shared.js"></script>
 <script>
     async function logout() {
         try {
-            const response = await csrfFetch('/login/logout-api', {
-                method: 'POST'
+            const response = await fetch('/login/logout-api', {
+                method: 'POST',
+                credentials: 'same-origin'
             });
             if (response.ok) {
                 window.location.href = '/';

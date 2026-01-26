@@ -6,9 +6,10 @@
 use crate::config::ValidatedConfig;
 use crate::public::page_meta_cache::PageMetaCache;
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
+use actix_web::http::Method;
 use actix_web::http::header::{
     ACCEPT_RANGES, CACHE_CONTROL, CONTENT_SECURITY_POLICY, HeaderMap, HeaderName, HeaderValue,
-    PRAGMA, STRICT_TRANSPORT_SECURITY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+    PRAGMA, STRICT_TRANSPORT_SECURITY, VARY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
 };
 use actix_web::{Error, HttpMessage, HttpRequest};
 use argon2::password_hash::rand_core::{OsRng, RngCore};
@@ -20,7 +21,7 @@ use std::sync::Arc;
 
 const PUBLIC_ASSET_CACHE_CONTROL: &str = "public, max-age=86400";
 const STATIC_HTML_CACHE_CONTROL: &str = "public, s-maxage=300, max-age=0, must-revalidate, stale-while-revalidate=30, stale-if-error=86400";
-const DYNAMIC_CACHE_CONTROL: &str = "no-cache, no-store, must-revalidate";
+const DYNAMIC_CACHE_CONTROL: &str = "no-cache, no-store, must-revalidate, private";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CacheDirective {
@@ -277,6 +278,10 @@ where
                 }
             }
 
+            if res.request().method() == Method::GET {
+                append_vary_header(res.headers_mut(), "Cookie");
+            }
+
             Ok(res)
         })
     }
@@ -321,6 +326,27 @@ fn apply_header_override(
     }
 }
 
+fn append_vary_header(headers: &mut HeaderMap, value: &str) {
+    let mut values: Vec<String> = Vec::new();
+    if let Some(existing) = headers.get(VARY).and_then(|val| val.to_str().ok()) {
+        values = existing
+            .split(',')
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect();
+        if values.iter().any(|item| item == "*")
+            || values.iter().any(|item| item.eq_ignore_ascii_case(value))
+        {
+            return;
+        }
+    }
+
+    values.push(value.to_string());
+    if let Ok(joined) = HeaderValue::from_str(&values.join(", ")) {
+        headers.insert(VARY, joined);
+    }
+}
+
 /// Determine if the content being served is public (doesn't require authentication)
 fn is_public_content<B>(
     res: &ServiceResponse<B>,
@@ -335,9 +361,9 @@ fn is_public_content<B>(
         return false;
     }
 
-    // Login paths are public
+    // Login paths should not be cached in shared caches
     if path.starts_with("/login") {
-        return true;
+        return false;
     }
 
     // Theme assets are public
@@ -452,6 +478,12 @@ mod tests {
 
     async fn handler_default() -> HttpResponse {
         HttpResponse::Ok().finish()
+    }
+
+    async fn handler_with_vary() -> HttpResponse {
+        HttpResponse::Ok()
+            .insert_header((VARY, HeaderValue::from_static("Accept-Encoding")))
+            .finish()
     }
 
     async fn handler_static(req: HttpRequest) -> HttpResponse {
@@ -595,6 +627,8 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         let cache_control = resp.headers().get(CACHE_CONTROL).unwrap().to_str().unwrap();
         assert_eq!(cache_control, PUBLIC_ASSET_CACHE_CONTROL);
+        let vary = resp.headers().get(VARY).unwrap().to_str().unwrap();
+        assert!(vary.contains("Cookie"));
     }
 
     #[actix_web::test]
@@ -635,6 +669,45 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         let cache_control = resp.headers().get(CACHE_CONTROL).unwrap().to_str().unwrap();
         assert_eq!(cache_control, DYNAMIC_CACHE_CONTROL);
+    }
+
+    #[actix_web::test]
+    async fn test_cache_control_login_forces_no_store() {
+        let config = Arc::new(test_config());
+        let harness = build_cache().await;
+        let cache = harness.cache.clone();
+        let app = test::init_service(
+            App::new()
+                .wrap(Headers::new(config, cache))
+                .route("/login", web::get().to(handler_default)),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/login").to_request();
+        let resp = test::call_service(&app, req).await;
+        let cache_control = resp.headers().get(CACHE_CONTROL).unwrap().to_str().unwrap();
+        assert_eq!(cache_control, DYNAMIC_CACHE_CONTROL);
+        let vary = resp.headers().get(VARY).unwrap().to_str().unwrap();
+        assert!(vary.contains("Cookie"));
+    }
+
+    #[actix_web::test]
+    async fn test_vary_cookie_merges_with_existing_vary() {
+        let config = Arc::new(test_config());
+        let harness = build_cache().await;
+        let cache = harness.cache.clone();
+        let app = test::init_service(
+            App::new()
+                .wrap(Headers::new(config, cache))
+                .route("/about", web::get().to(handler_with_vary)),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/about").to_request();
+        let resp = test::call_service(&app, req).await;
+        let vary = resp.headers().get(VARY).unwrap().to_str().unwrap();
+        assert!(vary.contains("Accept-Encoding"));
+        assert!(vary.contains("Cookie"));
     }
 
     #[actix_web::test]

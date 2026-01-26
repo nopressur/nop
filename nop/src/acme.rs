@@ -3,9 +3,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use crate::config::{AcmeChallenge, AcmeConfig, AcmeEnvironment, TlsMode, ValidatedConfig};
+use crate::config::{
+    AcmeChallenge, AcmeConfig, AcmeDnsConfig, AcmeEnvironment, TlsMode, ValidatedConfig,
+};
 use crate::runtime_paths::RuntimePaths;
-use crate::tls::cert_not_after;
+use crate::tls::{
+    TlsAcmeState, build_tls_state, cert_covers_domains, cert_not_after, read_tls_state,
+    tls_config_fingerprint, validate_private_key, write_tls_state,
+};
 use async_trait::async_trait;
 use lers::solver::dns::CloudflareDns01Solver;
 use lers::{Directory, LETS_ENCRYPT_PRODUCTION_URL, LETS_ENCRYPT_STAGING_URL, Solver};
@@ -18,11 +23,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::net::{IpAddr, SocketAddr};
+use std::path::Path;
 use std::sync::{Arc, RwLock, mpsc};
 use std::thread;
+use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
 use tokio::process::Command;
+use tokio::sync::OnceCell;
+use trust_dns_resolver::TokioAsyncResolver;
+use trust_dns_resolver::config::{
+    NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig, ResolverOpts,
+};
+use trust_dns_resolver::proto::rr::{RData, RecordType};
 
 const RENEWAL_WINDOW_DAYS: i64 = 30;
 const RENEWAL_INTERVAL_HOURS: u64 = 12;
@@ -230,6 +243,414 @@ fn run_exec_dns_tokens(receiver: mpsc::Receiver<ExecDnsTokenCommand>) {
 }
 
 #[async_trait]
+trait DnsTxtResolver: Send + Sync {
+    async fn lookup_txt(&self, name: &str) -> io::Result<Vec<String>>;
+}
+
+fn parse_dns_resolver_addr(value: &str) -> io::Result<SocketAddr> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ACME DNS resolver cannot be empty",
+        ));
+    }
+    if let Ok(addr) = trimmed.parse::<SocketAddr>() {
+        return Ok(addr);
+    }
+    if let Ok(ip) = trimmed.parse::<IpAddr>() {
+        return Ok(SocketAddr::new(ip, 53));
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("Invalid DNS resolver address: {}", value),
+    ))
+}
+
+fn build_name_servers(addrs: &[SocketAddr]) -> NameServerConfigGroup {
+    let mut group = NameServerConfigGroup::with_capacity(addrs.len());
+    for addr in addrs {
+        group.push(NameServerConfig {
+            socket_addr: *addr,
+            protocol: Protocol::Udp,
+            tls_dns_name: None,
+            trust_negative_responses: false,
+            bind_addr: None,
+        });
+    }
+    group
+}
+
+fn format_resolver_label(addrs: &[SocketAddr]) -> String {
+    addrs
+        .iter()
+        .map(SocketAddr::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+async fn lookup_zone_for_name(resolver: &TokioAsyncResolver, name: &str) -> io::Result<String> {
+    let mut current = name.trim_end_matches('.').to_string();
+    loop {
+        let query = format!("{current}.");
+        if let Ok(lookup) = resolver.lookup(query.as_str(), RecordType::SOA).await {
+            if let Some(record) = lookup.record_iter().next() {
+                return Ok(record.name().to_utf8());
+            }
+        }
+        if let Some((_, parent)) = current.split_once('.') {
+            current = parent.to_string();
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Unable to discover SOA record for {}", name),
+            ));
+        }
+    }
+}
+
+async fn lookup_authoritative_servers(
+    resolver: &TokioAsyncResolver,
+    zone: &str,
+) -> io::Result<Vec<String>> {
+    let query = if zone.ends_with('.') {
+        zone.to_string()
+    } else {
+        format!("{zone}.")
+    };
+    let lookup = resolver
+        .lookup(query.as_str(), RecordType::NS)
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))?;
+    let mut names = Vec::new();
+    for record in lookup.record_iter() {
+        if let Some(RData::NS(ns)) = record.data() {
+            names.push(ns.to_utf8());
+        }
+    }
+    if names.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("No NS records found for {}", zone),
+        ));
+    }
+    Ok(names)
+}
+
+async fn resolve_name_server_addresses(
+    resolver: &TokioAsyncResolver,
+    servers: &[String],
+) -> io::Result<Vec<SocketAddr>> {
+    let mut addrs = Vec::new();
+    for server in servers {
+        let lookup = resolver
+            .lookup_ip(server.as_str())
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        for ip in lookup.iter() {
+            addrs.push(SocketAddr::new(ip, 53));
+        }
+    }
+    if addrs.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "No IP addresses resolved for authoritative name servers",
+        ));
+    }
+    Ok(addrs)
+}
+
+async fn build_authoritative_resolver(
+    resolver: &TokioAsyncResolver,
+    name: &str,
+) -> io::Result<(TokioAsyncResolver, Vec<SocketAddr>, String)> {
+    let zone = lookup_zone_for_name(resolver, name).await?;
+    let servers = lookup_authoritative_servers(resolver, &zone).await?;
+    let addrs = resolve_name_server_addresses(resolver, &servers).await?;
+    let name_servers = build_name_servers(&addrs);
+    let config = ResolverConfig::from_parts(None, Vec::new(), name_servers);
+    let resolver = TokioAsyncResolver::tokio(config, ResolverOpts::default());
+    Ok((resolver, addrs, zone))
+}
+
+struct ExplicitDnsResolver {
+    resolver: TokioAsyncResolver,
+}
+
+impl ExplicitDnsResolver {
+    fn new(dns: &AcmeDnsConfig) -> io::Result<Self> {
+        let mut addrs = Vec::with_capacity(dns.resolver.len());
+        for entry in &dns.resolver {
+            addrs.push(parse_dns_resolver_addr(entry)?);
+        }
+        if addrs.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "ACME DNS resolver override list is empty",
+            ));
+        }
+        let name_servers = build_name_servers(&addrs);
+        let config = ResolverConfig::from_parts(None, Vec::new(), name_servers);
+        let resolver = TokioAsyncResolver::tokio(config, ResolverOpts::default());
+        let label = format_resolver_label(&addrs);
+        info!("ACME DNS-01 resolver set to {}", label);
+        Ok(Self { resolver })
+    }
+}
+
+#[async_trait]
+impl DnsTxtResolver for ExplicitDnsResolver {
+    async fn lookup_txt(&self, name: &str) -> io::Result<Vec<String>> {
+        let response = self
+            .resolver
+            .txt_lookup(name)
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        let mut values = Vec::new();
+        for record in response.iter() {
+            for data in record.txt_data() {
+                if let Ok(text) = std::str::from_utf8(data) {
+                    values.push(text.trim_matches('"').to_string());
+                }
+            }
+        }
+        Ok(values)
+    }
+}
+
+struct AuthoritativeDnsResolver {
+    bootstrap: TokioAsyncResolver,
+    resolver: OnceCell<TokioAsyncResolver>,
+}
+
+impl AuthoritativeDnsResolver {
+    fn new() -> io::Result<Self> {
+        let bootstrap = TokioAsyncResolver::tokio_from_system_conf()
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        Ok(Self {
+            bootstrap,
+            resolver: OnceCell::new(),
+        })
+    }
+
+    async fn resolver_for(&self, name: &str) -> io::Result<&TokioAsyncResolver> {
+        self.resolver
+            .get_or_try_init(|| async {
+                let (resolver, addrs, zone) =
+                    build_authoritative_resolver(&self.bootstrap, name).await?;
+                info!(
+                    "ACME DNS-01 resolver set to authoritative servers for {} ({})",
+                    zone,
+                    format_resolver_label(&addrs)
+                );
+                Ok(resolver)
+            })
+            .await
+    }
+}
+
+#[async_trait]
+impl DnsTxtResolver for AuthoritativeDnsResolver {
+    async fn lookup_txt(&self, name: &str) -> io::Result<Vec<String>> {
+        let resolver = self.resolver_for(name).await?;
+        let response = resolver
+            .txt_lookup(name)
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        let mut values = Vec::new();
+        for record in response.iter() {
+            for data in record.txt_data() {
+                if let Ok(text) = std::str::from_utf8(data) {
+                    values.push(text.trim_matches('"').to_string());
+                }
+            }
+        }
+        Ok(values)
+    }
+}
+
+struct Dns01PropagationSolver {
+    inner: Box<dyn Solver + Send + Sync>,
+    resolver: Arc<dyn DnsTxtResolver>,
+    label: String,
+    propagation_check: bool,
+    propagation_delay: StdDuration,
+}
+
+impl Dns01PropagationSolver {
+    fn new(
+        inner: Box<dyn Solver + Send + Sync>,
+        resolver: Arc<dyn DnsTxtResolver>,
+        label: String,
+        propagation_check: bool,
+        propagation_delay: StdDuration,
+    ) -> Self {
+        Self {
+            inner,
+            resolver,
+            label,
+            propagation_check,
+            propagation_delay,
+        }
+    }
+
+    async fn wait_for_propagation(
+        &self,
+        name: &str,
+        expected: &str,
+        attempts: usize,
+        interval: StdDuration,
+    ) -> io::Result<()> {
+        let started = std::time::Instant::now();
+        let fqdn = if name.ends_with('.') {
+            name.to_string()
+        } else {
+            format!("{name}.")
+        };
+        let mut last_records: Vec<String> = Vec::new();
+        let mut last_error: Option<String> = None;
+        for attempt in 0..attempts {
+            match self.resolver.lookup_txt(&fqdn).await {
+                Ok(records) => {
+                    if attempt == 0 {
+                        info!(
+                            "ACME DNS-01 propagation check started (name={}, attempts={}, interval={:?}, solver={})",
+                            fqdn, attempts, interval, self.label
+                        );
+                    }
+                    if !records.is_empty() {
+                        log::debug!(
+                            "ACME DNS-01 lookup attempt {}/{} (name={}, records={:?})",
+                            attempt + 1,
+                            attempts,
+                            fqdn,
+                            records
+                        );
+                    } else {
+                        log::debug!(
+                            "ACME DNS-01 lookup attempt {}/{} (name={}, records=[])",
+                            attempt + 1,
+                            attempts,
+                            fqdn
+                        );
+                    }
+                    last_records = records;
+                    if last_records.iter().any(|value| value == expected) {
+                        info!(
+                            "ACME DNS-01 propagation confirmed after {:?} (name={}, solver={})",
+                            started.elapsed(),
+                            fqdn,
+                            self.label
+                        );
+                        return Ok(());
+                    }
+                }
+                Err(err) => {
+                    if attempt == 0 {
+                        info!(
+                            "ACME DNS-01 propagation check started (name={}, attempts={}, interval={:?}, solver={})",
+                            fqdn, attempts, interval, self.label
+                        );
+                    }
+                    last_error = Some(err.to_string());
+                    log::debug!(
+                        "ACME DNS-01 lookup attempt {}/{} failed (name={}, error={})",
+                        attempt + 1,
+                        attempts,
+                        fqdn,
+                        err
+                    );
+                }
+            }
+
+            if attempt + 1 < attempts {
+                tokio::time::sleep(interval).await;
+            }
+        }
+
+        if let Some(err) = last_error {
+            warn!(
+                "ACME DNS-01 propagation failed after {:?} (name={}, last_error={})",
+                started.elapsed(),
+                fqdn,
+                err
+            );
+        } else {
+            warn!(
+                "ACME DNS-01 propagation failed after {:?} (name={}, last_records={:?})",
+                started.elapsed(),
+                fqdn,
+                last_records
+            );
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("DNS-01 TXT record not propagated: {}", fqdn),
+        ))
+    }
+}
+
+#[async_trait]
+impl Solver for Dns01PropagationSolver {
+    async fn present(
+        &self,
+        domain: String,
+        token: String,
+        key_authorization: String,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+        info!(
+            "ACME DNS-01 presenting challenge (domain={}, solver={})",
+            domain, self.label
+        );
+        let cleanup_token = token.clone();
+        self.inner
+            .present(domain.clone(), token, key_authorization.clone())
+            .await?;
+        let name = format!("_acme-challenge.{domain}");
+        let attempts = self.inner.attempts();
+        let interval = self.inner.interval();
+        if self.propagation_delay.as_secs() > 0 {
+            info!(
+                "ACME DNS-01 propagation delay started (duration={:?}, domain={}, solver={})",
+                self.propagation_delay, domain, self.label
+            );
+            tokio::time::sleep(self.propagation_delay).await;
+        }
+        if self.propagation_check {
+            if let Err(err) = self
+                .wait_for_propagation(&name, &key_authorization, attempts, interval)
+                .await
+            {
+                if let Err(clean_err) = self.inner.cleanup(&cleanup_token).await {
+                    warn!(
+                        "ACME DNS-01 cleanup failed after propagation error (domain={}, error={})",
+                        domain, clean_err
+                    );
+                }
+                return Err(Box::new(err));
+            }
+        }
+        Ok(())
+    }
+
+    async fn cleanup(
+        &self,
+        token: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+        self.inner.cleanup(token).await
+    }
+
+    fn attempts(&self) -> usize {
+        self.inner.attempts()
+    }
+
+    fn interval(&self) -> StdDuration {
+        self.inner.interval()
+    }
+}
+
+#[async_trait]
 impl Solver for ExecDns01Solver {
     async fn present(
         &self,
@@ -303,16 +724,68 @@ pub async fn ensure_acme_certificate(
     let cert_path = tls_dir.join("cert.pem");
     let key_path = tls_dir.join("key.pem");
 
-    let status = cert_status(&cert_path, &key_path)?;
+    let fingerprint = tls_config_fingerprint(tls)?;
+    let state = match read_tls_state(runtime_paths) {
+        Ok(state) => state,
+        Err(err) => {
+            warn!("TLS state invalid; forcing ACME issuance: {}", err);
+            None
+        }
+    };
+    let state_matches = state
+        .as_ref()
+        .map(|state| {
+            state.mode == TlsMode::Acme
+                && state.config_fingerprint == fingerprint
+                && state.acme.is_some()
+        })
+        .unwrap_or(false);
+
+    let mut status = cert_status(&cert_path, &key_path)?;
+    if matches!(status, CertStatus::Valid | CertStatus::ExpiringSoon)
+        && validate_private_key(&key_path).is_err()
+    {
+        status = CertStatus::Invalid;
+    }
+
+    let domains_match = if matches!(status, CertStatus::Valid | CertStatus::ExpiringSoon) {
+        cert_covers_domains(&cert_path, &tls.domains).unwrap_or(false)
+    } else {
+        false
+    };
+
     let must_issue = matches!(
         status,
         CertStatus::Missing | CertStatus::Expired | CertStatus::Invalid
-    );
-    let should_issue = matches!(status, CertStatus::ExpiringSoon);
+    ) || !state_matches
+        || !domains_match;
+    let should_issue = matches!(status, CertStatus::ExpiringSoon) && state_matches && domains_match;
 
     if !must_issue && !should_issue {
         return Ok(false);
     }
+
+    let mut reasons = Vec::new();
+    match status {
+        CertStatus::Missing => reasons.push("cert_missing"),
+        CertStatus::Expired => reasons.push("cert_expired"),
+        CertStatus::Invalid => reasons.push("cert_invalid"),
+        CertStatus::ExpiringSoon => reasons.push("cert_expiring_soon"),
+        CertStatus::Valid => {}
+    }
+    if !state_matches {
+        reasons.push("state_mismatch");
+    }
+    if !domains_match {
+        reasons.push("domains_mismatch");
+    }
+    info!(
+        "ACME issuance decision (must_issue={}, should_issue={}, reasons={:?}, domains={})",
+        must_issue,
+        should_issue,
+        reasons,
+        tls.domains.join(", ")
+    );
 
     let result = issue_certificate(runtime_paths, tls, acme, token_store, solver_override).await;
 
@@ -368,6 +841,12 @@ async fn issue_certificate(
     let directory_url = resolve_directory_url(acme)?;
     let client = build_client(acme)?;
     let mut builder = Directory::builder(directory_url.clone()).client(client);
+    info!(
+        "ACME issuance starting (challenge={:?}, domains={}, directory_url={})",
+        acme.challenge,
+        tls.domains.join(", "),
+        directory_url
+    );
 
     match acme.challenge {
         AcmeChallenge::Http01 => {
@@ -428,15 +907,12 @@ async fn issue_certificate(
         .await
         .map_err(|err| io::Error::other(err.to_string()))?;
 
-    write_acme_metadata(
-        runtime_paths
-            .state_sys_dir
-            .join("tls")
-            .join("acme-meta.json"),
-        acme,
-        &directory_url,
-        None,
-    )?;
+    let acme_state = TlsAcmeState {
+        provider: acme.provider.clone(),
+        directory_url: directory_url.clone(),
+        contact_email: acme.contact_email.clone(),
+        account_id: None,
+    };
 
     let mut cert_builder = account.certificate();
     for domain in &tls.domains {
@@ -470,6 +946,9 @@ async fn issue_certificate(
             .unwrap_or_else(|_| "unknown".to_string()),
     )?;
 
+    let state = build_tls_state(tls, OffsetDateTime::now_utc(), Some(acme_state))?;
+    write_tls_state(runtime_paths, &state)?;
+
     info!("ACME certificate issued for {}", tls.domains.join(", "));
 
     Ok(())
@@ -496,7 +975,12 @@ fn build_dns_solver(acme: &AcmeConfig) -> io::Result<Box<dyn Solver + Send + Syn
     })?;
 
     let provider = dns.provider.trim().to_lowercase();
-    match provider.as_str() {
+    info!(
+        "ACME DNS-01 solver configured (provider={}, exec_present={})",
+        provider,
+        dns.exec.is_some()
+    );
+    let solver: Box<dyn Solver + Send + Sync> = match provider.as_str() {
         "cloudflare" => {
             let token = dns
                 .api_token
@@ -524,13 +1008,33 @@ fn build_dns_solver(acme: &AcmeConfig) -> io::Result<Box<dyn Solver + Send + Syn
             Ok(Box::new(ExecDns01Solver::new(
                 exec.present_command.clone(),
                 exec.cleanup_command.clone(),
-            )))
+            )) as Box<dyn Solver + Send + Sync>)
         }
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("Unsupported DNS-01 provider: {}", dns.provider),
         )),
-    }
+    }?;
+
+    let resolver: Arc<dyn DnsTxtResolver> = if dns.resolver.is_empty() {
+        Arc::new(AuthoritativeDnsResolver::new()?)
+    } else {
+        Arc::new(ExplicitDnsResolver::new(dns)?)
+    };
+    let propagation_delay = StdDuration::from_secs(dns.propagation_delay_seconds);
+    info!(
+        "ACME DNS-01 propagation configured (check_enabled={}, delay={:?}, solver={})",
+        dns.propagation_check,
+        propagation_delay,
+        format!("dns-01:{}", provider)
+    );
+    Ok(Box::new(Dns01PropagationSolver::new(
+        solver,
+        resolver,
+        format!("dns-01:{}", provider),
+        dns.propagation_check,
+        propagation_delay,
+    )))
 }
 
 fn resolve_directory_url(acme: &AcmeConfig) -> io::Result<String> {
@@ -582,26 +1086,6 @@ fn resolve_secret(secret: &str) -> io::Result<String> {
     Ok(secret.to_string())
 }
 
-fn write_acme_metadata(
-    path: PathBuf,
-    acme: &AcmeConfig,
-    directory_url: &str,
-    account_id: Option<String>,
-) -> io::Result<()> {
-    let metadata = AcmeMetadata {
-        provider: acme.provider.clone(),
-        directory_url: directory_url.to_string(),
-        contact_email: acme.contact_email.clone(),
-        account_id,
-        created_at: OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| "unknown".to_string()),
-    };
-    let payload = serde_json::to_vec_pretty(&metadata).map_err(io::Error::other)?;
-    fs::write(path, payload)?;
-    Ok(())
-}
-
 fn cert_status(cert_path: &Path, key_path: &Path) -> io::Result<CertStatus> {
     if !cert_path.exists() || !key_path.exists() {
         return Ok(CertStatus::Missing);
@@ -640,15 +1124,6 @@ struct AcmeTokenEntry {
     created_at_unix: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct AcmeMetadata {
-    provider: String,
-    directory_url: String,
-    contact_email: String,
-    account_id: Option<String>,
-    created_at: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -663,6 +1138,7 @@ mod tests {
     use std::fs;
     use std::future::Future;
     use std::net::TcpStream;
+    use std::path::PathBuf;
     use std::process::Command;
     use std::sync::{Arc, OnceLock, mpsc};
     use std::thread;
@@ -709,6 +1185,70 @@ mod tests {
         );
         let _ = store.remove("token");
         assert!(store.get_key_authorization("token").is_none());
+    }
+
+    #[tokio::test]
+    async fn dns_propagation_waits_for_txt() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct StubResolver {
+            calls: AtomicUsize,
+            expected: String,
+        }
+
+        #[async_trait]
+        impl DnsTxtResolver for StubResolver {
+            async fn lookup_txt(&self, _name: &str) -> io::Result<Vec<String>> {
+                let count = self.calls.fetch_add(1, Ordering::SeqCst);
+                if count >= 1 {
+                    Ok(vec![self.expected.clone()])
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+        }
+
+        struct NoopSolver;
+
+        #[async_trait]
+        impl Solver for NoopSolver {
+            async fn present(
+                &self,
+                _domain: String,
+                _token: String,
+                _key_authorization: String,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+                Ok(())
+            }
+
+            async fn cleanup(
+                &self,
+                _token: &str,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+                Ok(())
+            }
+        }
+
+        let resolver = Arc::new(StubResolver {
+            calls: AtomicUsize::new(0),
+            expected: "token".to_string(),
+        });
+        let solver = Dns01PropagationSolver::new(
+            Box::new(NoopSolver),
+            resolver,
+            "test".to_string(),
+            true,
+            StdDuration::from_secs(0),
+        );
+        let result = solver
+            .wait_for_propagation(
+                "_acme-challenge.example.com",
+                "token",
+                3,
+                StdDuration::from_millis(1),
+            )
+            .await;
+        assert!(result.is_ok(), "expected propagation wait to succeed");
     }
 
     static PEBBLE_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();

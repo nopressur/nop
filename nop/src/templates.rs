@@ -10,10 +10,7 @@ use uuid::Uuid;
 mod context;
 mod engine;
 
-pub use context::{
-    AdminSpaShellContext, ErrorPageContext, LoginSpaShellContext, UserNavLocalContext,
-    UserNavOidcContext,
-};
+pub use context::{AdminSpaShellContext, ErrorPageContext, LoginSpaShellContext};
 pub use engine::{MiniJinjaEngine, TemplateEngine};
 
 /// Simple template rendering utility that replaces placeholders with values

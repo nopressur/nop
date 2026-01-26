@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 mod acme;
 mod admin;
+mod api;
 mod app_state;
 mod bootstrap;
 mod builtin;
@@ -437,6 +438,7 @@ async fn run_server(
                 .wrap(JwtAuthMiddlewareFactory)
                 .configure(move |cfg| admin::configure(cfg, &admin_path_clone, &config_for_admin))
                 .configure(move |cfg| login::configure(cfg, &config_for_login))
+                .configure(api::configure)
                 .configure(builtin::configure)
                 .configure(public::configure)
         }

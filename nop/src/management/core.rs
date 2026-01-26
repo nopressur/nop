@@ -306,6 +306,7 @@ pub struct ManagementRequest {
     pub workflow_id: u32,
     pub connection_id: u32,
     pub command: ManagementCommand,
+    pub actor_email: Option<String>,
 }
 
 impl ManagementRequest {

@@ -37,6 +37,9 @@ Status: Developed
 - `ManagementCommand::{ System(SystemCommand), Users(UserCommand) }` carries domain-specific requests.
 - `ManagementRequest { connection_id, workflow_id, command }` is the bus payload; connectors and
   internal callers must supply both IDs.
+- `ManagementRequest` also carries optional actor metadata (for example, `actor_email`) injected by
+  trusted connectors such as the authenticated admin WebSocket; this metadata is not part of any
+  wire protocol and is never supplied by clients.
 - `connection_id` is a required `u32` allocated sequentially for every new connector/session/request.
   It is internal metadata used for correlation and isolation, not part of any wire protocol.
 - `workflow_id` is a required `u32` that must be monotonic per connection.

@@ -58,10 +58,16 @@ All TLS-related files live directly in `state/sys/tls/`.
 - `state/sys/tls/cert.pem`
 - `state/sys/tls/key.pem`
 
-**ACME account and metadata**
+**TLS state and ACME account**
+- `state/sys/tls/state.yaml`
 - `state/sys/tls/acme-account.pem`
-- `state/sys/tls/acme-meta.json`
-  - Records provider, directory URL, contact email, and optional account ID.
+
+`state.yaml` tracks issuance provenance and the current TLS configuration fingerprint. It records:
+- `mode` (`self-signed`, `user-provided`, `acme`)
+- `domains`
+- `config_fingerprint`
+- `issued_at`
+- `acme` (provider, directory URL, contact email, optional account ID) when in ACME mode
 
 **Optional bookkeeping**
 - `state/sys/tls/last-renewed.txt` (timestamp for diagnostics)
@@ -96,6 +102,9 @@ server:
 #     dns:
 #       provider: "cloudflare" # cloudflare | exec
 #       api_token: "env:CF_API_TOKEN" # supports env:NAME lookups
+#       resolver: ["1.1.1.1", "1.0.0.1"] # optional DNS resolver override
+#       propagation_check: false # optional, defaults to false
+#       propagation_delay_seconds: 30 # optional delay before ACME validation
 #       exec:
 #         present_command: "/usr/local/bin/acme-dns-present"
 #         cleanup_command: "/usr/local/bin/acme-dns-cleanup"
@@ -130,6 +139,9 @@ Validation rules:
 - `acme.provider` must be `lers`.
 - `acme.dns.provider` must be `cloudflare` or `exec`.
 - `acme.dns.exec` requires `present_command` and `cleanup_command`.
+- `acme.dns.resolver` optional list of DNS resolvers for DNS-01 TXT checks; defaults to authoritative name servers.
+- `acme.dns.propagation_check` optional boolean to enable DNS-01 TXT propagation checks; defaults to false.
+- `acme.dns.propagation_delay_seconds` optional delay before ACME validation; defaults to 30 seconds.
 - `acme.directory_url`, when set, must start with `https://`.
 
 ### ACME With lers
@@ -145,6 +157,7 @@ Validation rules:
 - Use `lers` DNS solver with `cloudflare`, or `exec` to run custom commands.
 - `exec` provider receives `ACME_DOMAIN`, `ACME_TOKEN`, and `ACME_KEY_AUTHORIZATION`.
 - `exec` commands are executed via `sh -c` on the host.
+- DNS-01 waits for TXT propagation before ACME validation proceeds.
 - No HTTP exposure required for validation; HTTP listener still runs for
   redirects if TLS mode requires it.
 
@@ -153,9 +166,21 @@ Validation rules:
 - Write the resulting chain and key to `state/sys/tls/cert.pem` and
   `state/sys/tls/key.pem`.
 
+**Issuance triggers**
+- TLS issuance is driven by `state.yaml` plus certificate validation.
+- If `state.yaml` is missing or invalid:
+  - `self-signed` and `acme` modes regenerate/re-issue.
+  - `user-provided` mode validates existing materials and writes state if valid.
+- If the recorded `mode` or `config_fingerprint` does not match the current config:
+  - `self-signed` and `acme` modes re-issue.
+  - `user-provided` mode requires manual certificate updates.
+- All modes validate `cert.pem`/`key.pem` and ensure the certificate covers `tls.domains`.
+- Self-signed regenerates at startup when the certificate is missing, invalid, expired, or expires
+  within 2 days.
+
 **Current implementation note**
-- ACME mode uses lers to issue and renew certificates at runtime. If a
-  certificate is missing or expired, startup fails until issuance succeeds.
+- ACME mode uses lers to issue and renew certificates at runtime. If issuance
+  is required and fails, startup fails until issuance succeeds.
 
 ### Reload and Renewal
 

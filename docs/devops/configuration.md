@@ -76,8 +76,10 @@ block; when TLS is enabled, the HTTP port is provided by `server.http_port`.
   - `tls.domains` is required for ACME and should be set for self-signed SANs.
   - All TLS files live in `state/sys/tls/` with no subdirectories:
     - Active cert/key: `state/sys/tls/cert.pem`, `state/sys/tls/key.pem`
-    - ACME account/metadata: `state/sys/tls/acme-account.pem`, `state/sys/tls/acme-meta.json`
+    - TLS state + ACME account: `state/sys/tls/state.yaml`, `state/sys/tls/acme-account.pem`
     - Renewal marker: `state/sys/tls/last-renewed.txt`
+  - Self-signed TLS regenerates at startup when the certificate is missing, invalid, expired, or
+    expires within 2 days.
   - `/.well-known/*` responses are served by in-memory handlers (no filesystem root).
   - When TLS is disabled, `/.well-known/*` routes are not mounted.
   - `tls.acme.provider` must be `lers`.
@@ -86,8 +88,11 @@ block; when TLS is enabled, the HTTP port is provided by `server.http_port`.
   - `tls.acme.contact_email` is required for ACME; `tls.acme.dns.*` is required for DNS-01.
   - `tls.acme.dns.provider` must be `cloudflare` or `exec`; `api_token` supports `env:NAME` lookups for Cloudflare.
   - `tls.acme.dns.exec.present_command` and `cleanup_command` are required when using `exec`.
+  - `tls.acme.dns.resolver` optionally overrides the DNS resolvers used for DNS-01 TXT lookups (defaults to authoritative name servers).
+  - `tls.acme.dns.propagation_check` enables DNS-01 TXT propagation checks (defaults to false).
+  - `tls.acme.dns.propagation_delay_seconds` adds a delay before ACME validation (defaults to 30).
   - `exec` commands run via `sh -c` with `ACME_DOMAIN`, `ACME_TOKEN`, and `ACME_KEY_AUTHORIZATION` set.
-  - ACME issues certificates at startup (fails fast if missing/expired) and renews within 30 days.
+  - ACME issues certificates at startup when required (missing/expired/config mismatch) and renews within 30 days.
   - TLS reloads certificates on new handshakes after files change.
   - ACME integration test uses a local Pebble stack via Docker; tests warn and skip if Docker is unavailable.
 - **Logging**:

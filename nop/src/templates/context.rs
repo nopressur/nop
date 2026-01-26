@@ -132,52 +132,5 @@ impl OidcAuthContext {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct UserNavLocalContext {
-    user_name: String,
-    admin_path: String,
-    has_admin_role: bool,
-}
-
-impl UserNavLocalContext {
-    pub fn new(user_name: &str, admin_path: &str, has_admin_role: bool) -> Self {
-        Self {
-            user_name: user_name.to_string(),
-            admin_path: admin_path.to_string(),
-            has_admin_role,
-        }
-    }
-
-    pub fn to_value(&self) -> Value {
-        context! {
-            user_name => &self.user_name,
-            admin_path => &self.admin_path,
-            has_admin_role => self.has_admin_role
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct UserNavOidcContext {
-    user_name: String,
-    user_email: String,
-}
-
-impl UserNavOidcContext {
-    pub fn new(user_name: &str, user_email: &str) -> Self {
-        Self {
-            user_name: user_name.to_string(),
-            user_email: user_email.to_string(),
-        }
-    }
-
-    pub fn to_value(&self) -> Value {
-        context! {
-            user_name => &self.user_name,
-            user_email => &self.user_email
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {}

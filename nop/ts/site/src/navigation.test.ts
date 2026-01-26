@@ -107,4 +107,32 @@ describe('site navigation', () => {
     dropdown?.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
     expect(dropdown?.classList.contains('is-active')).toBe(false);
   });
+
+  it('registers dropdowns added after initialization', () => {
+    document.body.innerHTML = `
+      <div data-site-root>
+        <div data-site-close-dropdowns></div>
+      </div>
+    `;
+
+    const controller = initSiteNavigation(document);
+
+    const root = document.querySelector<HTMLElement>('[data-site-root]');
+    const dropdown = document.createElement('div');
+    dropdown.dataset.siteDropdown = '';
+    const toggle = document.createElement('a');
+    toggle.dataset.siteDropdownToggle = '';
+    toggle.className = 'navbar-link';
+    toggle.setAttribute('aria-expanded', 'false');
+    const menu = document.createElement('div');
+    menu.className = 'navbar-dropdown';
+    dropdown.appendChild(toggle);
+    dropdown.appendChild(menu);
+    root?.appendChild(dropdown);
+
+    controller.registerDropdowns(dropdown);
+
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(dropdown.classList.contains('is-active')).toBe(true);
+  });
 });

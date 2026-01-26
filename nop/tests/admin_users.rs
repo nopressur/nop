@@ -15,7 +15,7 @@ use nop::management::ws::{AuthFrame, WsFrame, encode_frame};
 use nop::management::{
     MessageResponse, PasswordPayload, PasswordSaltResponse, PasswordValidateResponse,
     USER_ACTION_ADD, USER_ACTION_ADD_OK, USER_ACTION_CHANGE, USER_ACTION_CHANGE_OK,
-    USER_ACTION_DELETE, USER_ACTION_DELETE_OK, USER_ACTION_PASSWORD_SALT,
+    USER_ACTION_DELETE, USER_ACTION_DELETE_ERR, USER_ACTION_DELETE_OK, USER_ACTION_PASSWORD_SALT,
     USER_ACTION_PASSWORD_SALT_OK, USER_ACTION_PASSWORD_SET, USER_ACTION_PASSWORD_SET_OK,
     USER_ACTION_PASSWORD_UPDATE, USER_ACTION_PASSWORD_UPDATE_ERR, USER_ACTION_PASSWORD_VALIDATE,
     USER_ACTION_PASSWORD_VALIDATE_OK, USER_ACTION_ROLE_ADD, USER_ACTION_ROLE_ADD_OK,
@@ -163,6 +163,55 @@ async fn create_update_delete_user() {
     let users_yaml =
         std::fs::read_to_string(&harness.runtime_paths.users_file).expect("users.yaml");
     assert!(!users_yaml.contains(user_email));
+}
+
+#[actix_web::test]
+async fn delete_rejects_self() {
+    let harness = common::TestHarness::new().await;
+    let session = harness.admin_auth();
+    let base_url = ws::start_test_server(harness.app_bundle()).await;
+
+    let client = Client::new();
+    let ticket = harness.ws_ticket_store.issue(&session.jwt_id);
+
+    let (_resp, mut framed) = client
+        .ws(format!("{}/admin/ws", base_url))
+        .cookie(session.cookie.clone())
+        .connect()
+        .await
+        .expect("connect");
+
+    let auth = WsFrame::Auth(AuthFrame {
+        ticket,
+        csrf_token: session.csrf_token.clone(),
+    });
+    let auth_bytes = encode_frame(&auth).expect("encode auth");
+    framed
+        .send(ClientMessage::Binary(auth_bytes.into()))
+        .await
+        .expect("send auth");
+
+    match ws::read_ws_frame(&mut framed).await {
+        WsFrame::AuthOk(_) => {}
+        other => panic!("Expected AuthOk, got {:?}", other),
+    }
+
+    let delete_payload = ws::encode_payload(&UserDeleteRequest {
+        email: common::ADMIN_EMAIL.to_string(),
+    });
+
+    let response = ws::send_request(
+        &mut framed,
+        1,
+        USERS_DOMAIN_ID,
+        USER_ACTION_DELETE,
+        delete_payload,
+    )
+    .await;
+    assert_eq!(response.action_id, USER_ACTION_DELETE_ERR);
+
+    let message: MessageResponse = ws::decode_payload(&response.payload);
+    assert_eq!(message.message, "You cannot delete your own account");
 }
 
 #[actix_web::test]

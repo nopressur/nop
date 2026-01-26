@@ -3,13 +3,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use crate::config::{TlsMode, ValidatedConfig};
+use crate::config::{AcmeChallenge, AcmeEnvironment, TlsConfig, TlsMode, ValidatedConfig};
 use crate::runtime_paths::RuntimePaths;
+use log::warn;
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
 use std::io::{self, BufReader};
@@ -17,11 +21,49 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::Duration as StdDuration;
 use std::time::SystemTime;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
+use x509_parser::extensions::GeneralName;
 use x509_parser::pem::parse_x509_pem;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
 const RELOAD_DEBOUNCE: StdDuration = StdDuration::from_secs(1);
+const TLS_STATE_FILE_NAME: &str = "state.yaml";
+const SELF_SIGNED_RENEWAL_WINDOW_DAYS: i64 = 2;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) struct TlsState {
+    pub mode: TlsMode,
+    pub domains: Vec<String>,
+    pub config_fingerprint: String,
+    pub issued_at: String,
+    pub acme: Option<TlsAcmeState>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) struct TlsAcmeState {
+    pub provider: String,
+    pub directory_url: String,
+    pub contact_email: String,
+    pub account_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TlsFingerprintPayload {
+    mode: TlsMode,
+    domains: Vec<String>,
+    acme: Option<AcmeFingerprintPayload>,
+}
+
+#[derive(Debug, Serialize)]
+struct AcmeFingerprintPayload {
+    provider: String,
+    environment: AcmeEnvironment,
+    directory_url: Option<String>,
+    contact_email: String,
+    challenge: AcmeChallenge,
+    dns_provider: Option<String>,
+    dns_exec_present: bool,
+}
 pub fn load_rustls_config(
     runtime_paths: &RuntimePaths,
     config: &ValidatedConfig,
@@ -35,9 +77,13 @@ pub fn load_rustls_config(
     let key_path = tls_dir.join("key.pem");
 
     match tls_config.mode {
-        TlsMode::SelfSigned => ensure_self_signed(&tls_dir, &cert_path, &key_path, tls_config)?,
-        TlsMode::UserProvided => ensure_manual(&cert_path, &key_path)?,
-        TlsMode::Acme => ensure_manual(&cert_path, &key_path)?,
+        TlsMode::SelfSigned => {
+            ensure_self_signed(runtime_paths, &tls_dir, &cert_path, &key_path, tls_config)?
+        }
+        TlsMode::UserProvided => {
+            ensure_user_provided(runtime_paths, &cert_path, &key_path, tls_config)?
+        }
+        TlsMode::Acme => ensure_existing_cert(&cert_path, &key_path)?,
     }
 
     let resolver = FileReloadingResolver::new(cert_path, key_path)?;
@@ -45,6 +91,93 @@ pub fn load_rustls_config(
     Ok(rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_cert_resolver(Arc::new(resolver)))
+}
+
+pub(crate) fn tls_state_path(runtime_paths: &RuntimePaths) -> std::path::PathBuf {
+    runtime_paths
+        .state_sys_dir
+        .join("tls")
+        .join(TLS_STATE_FILE_NAME)
+}
+
+pub(crate) fn read_tls_state(runtime_paths: &RuntimePaths) -> io::Result<Option<TlsState>> {
+    let path = tls_state_path(runtime_paths);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&path)?;
+    let state = serde_yaml::from_str(&content)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err.to_string()))?;
+    Ok(Some(state))
+}
+
+pub(crate) fn write_tls_state(runtime_paths: &RuntimePaths, state: &TlsState) -> io::Result<()> {
+    let tls_dir = runtime_paths.state_sys_dir.join("tls");
+    fs::create_dir_all(&tls_dir)?;
+    let path = tls_state_path(runtime_paths);
+    let content = serde_yaml::to_string(state)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err.to_string()))?;
+    fs::write(path, content)?;
+    Ok(())
+}
+
+pub(crate) fn build_tls_state(
+    tls_config: &TlsConfig,
+    issued_at: OffsetDateTime,
+    acme: Option<TlsAcmeState>,
+) -> io::Result<TlsState> {
+    let fingerprint = tls_config_fingerprint(tls_config)?;
+    Ok(TlsState {
+        mode: tls_config.mode,
+        domains: normalized_domains(&tls_config.domains),
+        config_fingerprint: fingerprint,
+        issued_at: issued_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string()),
+        acme,
+    })
+}
+
+pub(crate) fn tls_config_fingerprint(tls_config: &TlsConfig) -> io::Result<String> {
+    let domains = normalized_domains(&tls_config.domains);
+    let acme = if tls_config.mode == TlsMode::Acme {
+        let acme = tls_config
+            .acme
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "ACME config missing"))?;
+        let dns = acme.dns.as_ref();
+        Some(AcmeFingerprintPayload {
+            provider: acme.provider.clone(),
+            environment: acme.environment,
+            directory_url: acme.directory_url.clone(),
+            contact_email: acme.contact_email.clone(),
+            challenge: acme.challenge,
+            dns_provider: dns.map(|dns| dns.provider.clone()),
+            dns_exec_present: dns.and_then(|dns| dns.exec.as_ref()).is_some(),
+        })
+    } else {
+        None
+    };
+
+    let payload = TlsFingerprintPayload {
+        mode: tls_config.mode,
+        domains,
+        acme,
+    };
+    let bytes = serde_json::to_vec(&payload).map_err(|err| io::Error::other(err.to_string()))?;
+    let digest = Sha256::digest(&bytes);
+    Ok(hex::encode(digest))
+}
+
+pub(crate) fn normalized_domains(domains: &[String]) -> Vec<String> {
+    let mut normalized: Vec<String> = domains
+        .iter()
+        .map(|domain| normalize_domain(domain))
+        .filter(|domain| !domain.is_empty())
+        .collect();
+    normalized.sort();
+    normalized.dedup();
+    normalized
 }
 
 fn load_cert_chain(path: &std::path::Path) -> io::Result<Vec<CertificateDer<'static>>> {
@@ -78,27 +211,126 @@ fn load_private_key(path: &std::path::Path) -> io::Result<PrivateKeyDer<'static>
     })
 }
 
+pub(crate) fn validate_private_key(path: &Path) -> io::Result<()> {
+    let _ = load_private_key(path)?;
+    Ok(())
+}
+
+fn normalize_domain(domain: &str) -> String {
+    domain.trim().trim_end_matches('.').to_lowercase()
+}
+
+fn cert_domains(cert_path: &Path) -> io::Result<HashSet<String>> {
+    let bytes = fs::read(cert_path)?;
+    let (_, pem) = parse_x509_pem(&bytes)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err.to_string()))?;
+    let (_, cert) = X509Certificate::from_der(pem.contents.as_slice())
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err.to_string()))?;
+
+    let mut domains = HashSet::new();
+    if let Ok(Some(san)) = cert.subject_alternative_name() {
+        for name in san.value.general_names.iter() {
+            if let GeneralName::DNSName(dns_name) = name {
+                let normalized = normalize_domain(dns_name);
+                if !normalized.is_empty() {
+                    domains.insert(normalized);
+                }
+            }
+        }
+    }
+
+    for cn in cert.subject().iter_common_name() {
+        if let Ok(value) = cn.as_str() {
+            let normalized = normalize_domain(value);
+            if !normalized.is_empty() {
+                domains.insert(normalized);
+            }
+        }
+    }
+
+    Ok(domains)
+}
+
+fn wildcard_matches(pattern: &str, domain: &str) -> bool {
+    if let Some(base) = pattern.strip_prefix("*.") {
+        if domain == base {
+            return false;
+        }
+        if !domain.ends_with(base) {
+            return false;
+        }
+        let domain_labels = domain.split('.').count();
+        let base_labels = base.split('.').count();
+        return domain_labels == base_labels + 1;
+    }
+    false
+}
+
+pub(crate) fn cert_covers_domains(cert_path: &Path, domains: &[String]) -> io::Result<bool> {
+    let cert_domains = cert_domains(cert_path)?;
+    for domain in domains {
+        let normalized = normalize_domain(domain);
+        if normalized.is_empty() {
+            continue;
+        }
+        if cert_domains.contains(&normalized) {
+            continue;
+        }
+        let matched = cert_domains
+            .iter()
+            .any(|entry| wildcard_matches(entry, &normalized));
+        if !matched {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn ensure_self_signed(
+    runtime_paths: &RuntimePaths,
     tls_dir: &Path,
     cert_path: &Path,
     key_path: &Path,
-    tls_config: &crate::config::TlsConfig,
+    tls_config: &TlsConfig,
 ) -> io::Result<()> {
-    let needs_generation = if !cert_path.exists() || !key_path.exists() {
-        true
-    } else {
-        cert_is_expired(cert_path).unwrap_or(true)
-    };
-
-    if !needs_generation {
-        return Ok(());
-    }
-
-    if tls_config.domains.is_empty() {
+    let normalized_domains = normalized_domains(&tls_config.domains);
+    if normalized_domains.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Self-signed TLS requires at least one domain",
         ));
+    }
+
+    let state = match read_tls_state(runtime_paths) {
+        Ok(state) => state,
+        Err(err) => {
+            warn!("TLS state invalid; regenerating self-signed cert: {}", err);
+            None
+        }
+    };
+
+    let fingerprint = tls_config_fingerprint(tls_config)?;
+    let state_matches = state
+        .as_ref()
+        .map(|state| state.mode == TlsMode::SelfSigned && state.config_fingerprint == fingerprint)
+        .unwrap_or(false);
+
+    let mut cert_ok = cert_path.exists() && key_path.exists();
+    if cert_ok {
+        cert_ok = !cert_is_expired(cert_path).unwrap_or(true)
+            && !cert_expires_within_days(cert_path, SELF_SIGNED_RENEWAL_WINDOW_DAYS)
+                .unwrap_or(true)
+            && validate_private_key(key_path).is_ok();
+    }
+
+    let domains_match = if cert_ok {
+        cert_covers_domains(cert_path, &normalized_domains).unwrap_or(false)
+    } else {
+        false
+    };
+
+    if state_matches && cert_ok && domains_match {
+        return Ok(());
     }
 
     let mut params = CertificateParams::new(tls_config.domains.clone())
@@ -110,8 +342,8 @@ fn ensure_self_signed(
     params.distinguished_name = dn;
 
     let now = OffsetDateTime::now_utc();
-    params.not_before = now - time::Duration::seconds(60);
-    params.not_after = now + time::Duration::days(90);
+    params.not_before = now - Duration::seconds(60);
+    params.not_after = now + Duration::days(90);
     let key_pair =
         KeyPair::generate().map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
     let cert = params
@@ -124,10 +356,13 @@ fn ensure_self_signed(
     fs::write(cert_path, cert_pem)?;
     fs::write(key_path, key_pem)?;
 
+    let state = build_tls_state(tls_config, OffsetDateTime::now_utc(), None)?;
+    write_tls_state(runtime_paths, &state)?;
+
     Ok(())
 }
 
-fn ensure_manual(cert_path: &Path, key_path: &Path) -> io::Result<()> {
+fn ensure_existing_cert(cert_path: &Path, key_path: &Path) -> io::Result<()> {
     if !cert_path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -148,8 +383,56 @@ fn ensure_manual(cert_path: &Path, key_path: &Path) -> io::Result<()> {
         ));
     }
 
-    // Validate key readability by parsing it once.
-    let _ = load_private_key(key_path)?;
+    validate_private_key(key_path)?;
+    Ok(())
+}
+
+fn ensure_user_provided(
+    runtime_paths: &RuntimePaths,
+    cert_path: &Path,
+    key_path: &Path,
+    tls_config: &TlsConfig,
+) -> io::Result<()> {
+    ensure_existing_cert(cert_path, key_path)?;
+
+    let normalized_domains = normalized_domains(&tls_config.domains);
+    if !normalized_domains.is_empty() && !cert_covers_domains(cert_path, &normalized_domains)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "TLS certificate does not cover configured domains: {}",
+                cert_path.display()
+            ),
+        ));
+    }
+
+    let fingerprint = tls_config_fingerprint(tls_config)?;
+    let state = match read_tls_state(runtime_paths) {
+        Ok(state) => state,
+        Err(err) => {
+            warn!(
+                "TLS state invalid; rebuilding for user-provided cert: {}",
+                err
+            );
+            None
+        }
+    };
+
+    if let Some(state) = state.as_ref() {
+        if state.mode != TlsMode::UserProvided {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "TLS state mismatch; user-provided mode requires manual certificate updates",
+            ));
+        }
+        if state.config_fingerprint == fingerprint {
+            return Ok(());
+        }
+    }
+
+    let issued_at = cert_not_before(cert_path).unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let state = build_tls_state(tls_config, issued_at, None)?;
+    write_tls_state(runtime_paths, &state)?;
     Ok(())
 }
 
@@ -162,10 +445,25 @@ pub(crate) fn cert_not_after(path: &Path) -> io::Result<OffsetDateTime> {
     Ok(cert.validity().not_after.to_datetime())
 }
 
+pub(crate) fn cert_not_before(path: &Path) -> io::Result<OffsetDateTime> {
+    let bytes = fs::read(path)?;
+    let (_, pem) = parse_x509_pem(&bytes)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err.to_string()))?;
+    let (_, cert) = X509Certificate::from_der(pem.contents.as_slice())
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err.to_string()))?;
+    Ok(cert.validity().not_before.to_datetime())
+}
+
 fn cert_is_expired(path: &Path) -> io::Result<bool> {
     let not_after = cert_not_after(path)?;
     let now = OffsetDateTime::now_utc();
     Ok(now >= not_after)
+}
+
+fn cert_expires_within_days(path: &Path, window_days: i64) -> io::Result<bool> {
+    let not_after = cert_not_after(path)?;
+    let now = OffsetDateTime::now_utc();
+    Ok(now + Duration::days(window_days) >= not_after)
 }
 
 #[derive(Debug)]
@@ -340,6 +638,15 @@ mod tests {
         }
     }
 
+    fn self_signed_tls_with_domains(domains: Vec<String>) -> TlsConfig {
+        TlsConfig {
+            mode: TlsMode::SelfSigned,
+            domains,
+            redirect_base_url: None,
+            acme: None,
+        }
+    }
+
     fn user_provided_tls() -> TlsConfig {
         TlsConfig {
             mode: TlsMode::UserProvided,
@@ -394,6 +701,34 @@ mod tests {
         assert!(result.is_ok(), "expected expired cert to regenerate");
         let expired = cert_is_expired(&tls_dir.join("cert.pem")).unwrap();
         assert!(!expired, "expected regenerated cert to be valid");
+    }
+
+    #[test]
+    fn self_signed_regenerates_near_expiry_certificates() {
+        let fixture = TestFixtureRoot::new_unique("tls-self-near-expiry").unwrap();
+        let runtime_paths = fixture.runtime_paths().unwrap();
+        let tls_dir = runtime_paths.state_sys_dir.join("tls");
+        fs::create_dir_all(&tls_dir).unwrap();
+
+        let mut params = CertificateParams::new(vec!["example.com".to_string()]).unwrap();
+        let now = OffsetDateTime::now_utc();
+        params.not_before = now - time::Duration::days(1);
+        params.not_after = now + time::Duration::hours(12);
+        let key_pair = KeyPair::generate().unwrap();
+        let cert = params.self_signed(&key_pair).unwrap();
+        fs::write(tls_dir.join("cert.pem"), cert.pem()).unwrap();
+        fs::write(tls_dir.join("key.pem"), key_pair.serialize_pem()).unwrap();
+
+        let config = build_test_config(https_main_and_well_known(), self_signed_tls());
+        let result = load_rustls_config(&runtime_paths, &config);
+        assert!(result.is_ok(), "expected near-expiry cert to regenerate");
+        let expiring_soon =
+            cert_expires_within_days(&tls_dir.join("cert.pem"), SELF_SIGNED_RENEWAL_WINDOW_DAYS)
+                .unwrap();
+        assert!(
+            !expiring_soon,
+            "expected regenerated cert to be outside renewal window"
+        );
     }
 
     #[test]
@@ -460,6 +795,48 @@ mod tests {
             .to_vec();
 
         assert_ne!(initial, updated, "expected cert to reload");
+    }
+
+    #[test]
+    fn self_signed_regenerates_on_state_mismatch() {
+        let fixture = TestFixtureRoot::new_unique("tls-state-mismatch").unwrap();
+        let runtime_paths = fixture.runtime_paths().unwrap();
+        let tls_dir = runtime_paths.state_sys_dir.join("tls");
+        fs::create_dir_all(&tls_dir).unwrap();
+        let cert_path = tls_dir.join("cert.pem");
+        let key_path = tls_dir.join("key.pem");
+
+        write_self_signed_cert(&cert_path, &key_path, "old.example.com");
+        let old_tls = self_signed_tls_with_domains(vec!["old.example.com".to_string()]);
+        let old_state = build_tls_state(&old_tls, OffsetDateTime::now_utc(), None).unwrap();
+        write_tls_state(&runtime_paths, &old_state).unwrap();
+
+        let new_tls = self_signed_tls_with_domains(vec!["new.example.com".to_string()]);
+        let config = build_test_config(https_main_and_well_known(), new_tls);
+        let result = load_rustls_config(&runtime_paths, &config);
+        assert!(result.is_ok(), "expected self-signed TLS to regenerate");
+        assert!(cert_covers_domains(&cert_path, &vec!["new.example.com".to_string()]).unwrap());
+    }
+
+    #[test]
+    fn user_provided_writes_state_when_missing() {
+        let fixture = TestFixtureRoot::new_unique("tls-user-state").unwrap();
+        let runtime_paths = fixture.runtime_paths().unwrap();
+        let tls_dir = runtime_paths.state_sys_dir.join("tls");
+        fs::create_dir_all(&tls_dir).unwrap();
+        let cert_path = tls_dir.join("cert.pem");
+        let key_path = tls_dir.join("key.pem");
+
+        write_self_signed_cert(&cert_path, &key_path, "example.com");
+        let mut tls = user_provided_tls();
+        tls.domains = vec!["example.com".to_string()];
+        let config = build_test_config(https_main_and_well_known(), tls);
+        let result = load_rustls_config(&runtime_paths, &config);
+        assert!(result.is_ok(), "expected user-provided TLS to load");
+
+        let state = read_tls_state(&runtime_paths).unwrap();
+        assert!(state.is_some(), "expected TLS state to be written");
+        assert_eq!(state.unwrap().mode, TlsMode::UserProvided);
     }
 
     fn write_self_signed_cert(cert_path: &Path, key_path: &Path, domain: &str) {

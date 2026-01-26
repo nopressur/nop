@@ -38,6 +38,50 @@ used across public and admin surfaces. Login flows feed into this pipeline, but 
 - `req.user_info()` returns `Option<User>` for route handlers.
 - `req.has_group("admin")` drives admin gating and UI decisions.
 - `req.jwt_id()` exposes the `jti` claim for CSRF binding.
+- WebSocket admin sessions derive the acting user identity from the authenticated JWT and bind it
+  server-side; management requests never include identity fields from the client.
+
+## Profile Menu API
+
+`GET /api/profile` returns the authenticated status and any user-menu links. This endpoint is the
+only source of user menu links for the public site; public HTML never embeds profile/admin links.
+
+Response shapes:
+
+```json
+// Unauthenticated
+{
+  "authenticated": false
+}
+
+// Authenticated (non-admin)
+{
+  "authenticated": true,
+  "display_name": "<user display name>",
+  "menu_items": [
+    { "key": "profile", "label": "Profile", "href": "/login/profile" },
+    { "key": "logout", "label": "Logout", "href": "/login/logout-api", "method": "POST" }
+  ]
+}
+
+// Authenticated (admin)
+{
+  "authenticated": true,
+  "display_name": "<user display name>",
+  "menu_items": [
+    { "key": "profile", "label": "Profile", "href": "/login/profile" },
+    { "key": "admin", "label": "Admin", "href": "<admin_path>" },
+    { "key": "logout", "label": "Logout", "href": "/login/logout-api", "method": "POST" }
+  ]
+}
+```
+
+Notes:
+- `menu_items` is only present when `authenticated: true`.
+- `display_name` is only present when `authenticated: true` and matches the user's display name.
+- The `admin` item is only present when the user has the `admin` role.
+- `method` is included only when the action requires a non-GET request.
+- Responses are served with `Cache-Control: no-store, private` and `Vary: Cookie`.
 
 ## Configuration
 

@@ -112,8 +112,9 @@ test("user management CRUD and listing", async ({ page, harness, rng }) => {
     expectedPath: "/",
   });
 
+  const userMenu = page.locator("[data-site-user-menu]");
   await expect(
-    page.getByRole("link", { name: NEW_USER.updatedName })
+    userMenu.getByRole("link", { name: NEW_USER.updatedName })
   ).toBeVisible({ timeout: 15000 });
 
   await logoutViaApi({
@@ -141,7 +142,10 @@ test("user management CRUD and listing", async ({ page, harness, rng }) => {
 
   await logoutViaApi({ page, baseUrl: harness.baseUrl });
   await page.goto(`${harness.baseUrl}/`);
-  await expect(page.getByRole("link", { name: harness.users.admin.name })).toHaveCount(0);
+  const adminMenu = page.locator("[data-site-user-menu]");
+  await expect(
+    adminMenu.getByRole("link", { name: harness.users.admin.name })
+  ).toHaveCount(0);
 });
 
 test("non-admin users are redirected from admin routes", async ({
@@ -164,12 +168,13 @@ test("non-admin users are redirected from admin routes", async ({
       expectedPath: "/",
     });
 
-    await expect(page.getByRole("link", { name: user.name })).toBeVisible({
+    const userMenu = page.locator("[data-site-user-menu]");
+    await expect(userMenu.getByRole("link", { name: user.name })).toBeVisible({
       timeout: 15000,
     });
     await expect(page).toHaveURL(new RegExp(`${harness.baseUrl}/?$`));
     await expect(
-      page.getByRole("link", { name: "Admin Dashboard" })
+      userMenu.getByRole("link", { name: "Admin" })
     ).toHaveCount(0);
 
     await context.close();

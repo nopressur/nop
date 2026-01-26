@@ -3,17 +3,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use crate::config::ValidatedConfig;
-use crate::config::ValidatedUsersConfig;
-use crate::iam::User;
 use crate::public::PageRenderContext;
 use crate::public::nav::NavItem;
-use crate::templates::{
-    TemplateEngine, UserNavLocalContext, UserNavOidcContext, load_template,
-    render_minijinja_template, render_template,
-};
+use crate::templates::{load_template, render_template};
 
 use super::theme::load_theme_content;
+
+const USER_MENU_PLACEHOLDER: &str = r#"<div data-site-user-menu></div>"#;
 
 pub async fn generate_html_page_with_user(
     title: &str,
@@ -30,11 +26,7 @@ pub async fn generate_html_page_with_user(
         crate::public::nav::generate_navigation_html(navigation, render_ctx.template_engine);
 
     // Generate user navigation HTML
-    let user_nav_html = generate_user_navigation_html(
-        render_ctx.config,
-        render_ctx.user,
-        render_ctx.template_engine,
-    );
+    let user_nav_html = generate_user_navigation_placeholder();
 
     // Load template
     let template = load_template("public/main_layout").unwrap_or_else(|_| {
@@ -77,48 +69,6 @@ pub async fn generate_html_page_with_user(
     render_template(&template, &vars)
 }
 
-fn generate_user_navigation_html(
-    config: &ValidatedConfig,
-    user: Option<&User>,
-    template_engine: &dyn TemplateEngine,
-) -> String {
-    match (&config.users, user) {
-        // Local authentication with logged-in user
-        (ValidatedUsersConfig::Local(_), Some(user)) => {
-            // Check if user has admin role
-            let has_admin_role = user.roles.contains(&"admin".to_string());
-
-            // Create context for local user navigation template
-            let context =
-                UserNavLocalContext::new(&user.name, &config.admin.path, has_admin_role).to_value();
-
-            // Render template with automatic HTML escaping
-            match render_minijinja_template(template_engine, "public/user_nav_local.html", context)
-            {
-                Ok(html) => html,
-                Err(e) => {
-                    log::error!("Failed to render local user navigation template: {}", e);
-                    // Fallback to empty string on template error
-                    String::new()
-                }
-            }
-        }
-        // OIDC authentication with logged-in user (just show user info, no link)
-        (ValidatedUsersConfig::Oidc(_), Some(user)) => {
-            // Create context for OIDC user navigation template
-            let context = UserNavOidcContext::new(&user.name, &user.email).to_value();
-
-            // Render template with automatic HTML escaping
-            match render_minijinja_template(template_engine, "public/user_nav_oidc.html", context) {
-                Ok(html) => html,
-                Err(e) => {
-                    log::error!("Failed to render OIDC user navigation template: {}", e);
-                    // Fallback to empty string on template error
-                    String::new()
-                }
-            }
-        }
-        // No user logged in - show nothing
-        _ => String::new(),
-    }
+fn generate_user_navigation_placeholder() -> String {
+    USER_MENU_PLACEHOLDER.to_string()
 }

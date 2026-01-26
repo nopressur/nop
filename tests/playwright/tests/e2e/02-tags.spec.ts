@@ -105,12 +105,13 @@ test("non-admin users are redirected from tag management", async ({
       expectedPath: "/",
     });
 
-    await expect(page.getByRole("link", { name: user.name })).toBeVisible({
+    const userMenu = page.locator("[data-site-user-menu]");
+    await expect(userMenu.getByRole("link", { name: user.name })).toBeVisible({
       timeout: 15000,
     });
     await expect(page).toHaveURL(new RegExp(`${harness.baseUrl}/?$`));
     await expect(
-      page.getByRole("link", { name: "Admin Dashboard" })
+      userMenu.getByRole("link", { name: "Admin" })
     ).toHaveCount(0);
 
     await context.close();

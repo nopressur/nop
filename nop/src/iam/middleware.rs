@@ -91,6 +91,8 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let user_services_data = req.app_data::<Data<UserServices>>().cloned();
         let config_data = req.app_data::<Data<ValidatedConfig>>().cloned();
+        let is_logout_request =
+            req.path() == "/login/logout-api" && req.method() == actix_web::http::Method::POST;
         let service = self.service.clone();
 
         Box::pin(async move {
@@ -117,7 +119,9 @@ where
                                         req.extensions_mut().insert(user);
 
                                         // Check if token should be refreshed
-                                        if jwt_service.should_refresh_token(&claims) {
+                                        if !is_logout_request
+                                            && jwt_service.should_refresh_token(&claims)
+                                        {
                                             match jwt_service.create_refreshed_token(&claims) {
                                                 Ok(new_token) => {
                                                     // Create new cookie with refreshed token

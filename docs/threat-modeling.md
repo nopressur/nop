@@ -13,6 +13,9 @@ and decisions about them.
 - Dev mode access bypass is only compiled in debug builds (`cfg!(debug_assertions)`); release
   builds do not allow dev-mode bypass. Keep this constraint in mind when evaluating threat
   scenarios.
+- Admin WebSocket connections are authenticated and treated as the authoritative source of actor
+  identity; server-side handlers must enforce self-action restrictions (for example, self-delete)
+  based on the WS session identity rather than client-supplied fields.
 
 <!--
 This file is part of the product NoPressure.

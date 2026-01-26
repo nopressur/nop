@@ -105,7 +105,6 @@ pub async fn serve_markdown_alias(
         config,
         runtime_paths: &ctx.app_state.runtime_paths,
         theme: theme.as_deref(),
-        user,
         release_tracker,
         template_engine,
     };

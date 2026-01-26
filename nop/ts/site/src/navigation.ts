@@ -13,6 +13,7 @@ const SELECTORS = {
 
 export type SiteNavigationController = {
   closeAllDropdowns: () => void;
+  registerDropdowns: (root?: ParentNode) => void;
   destroy: () => void;
 };
 
@@ -31,17 +32,14 @@ function setMobileActive(toggle: HTMLElement, menu: HTMLElement, active: boolean
 }
 
 export function initSiteNavigation(root: ParentNode = document): SiteNavigationController {
-  const scope = root;
   const cleanup: Array<() => void> = [];
-
-  const dropdowns = Array.from(
-    scope.querySelectorAll<HTMLElement>(SELECTORS.dropdown)
-  );
+  const dropdowns = new Set<HTMLElement>();
 
   const closeAllDropdowns = () => {
     dropdowns.forEach((dropdown) => setDropdownActive(dropdown, false));
   };
 
+  const scope = root;
   const mobileToggle = scope.querySelector<HTMLElement>(SELECTORS.mobileToggle);
   const mobileMenu = scope.querySelector<HTMLElement>(SELECTORS.mobileMenu);
   if (mobileToggle && mobileMenu) {
@@ -65,33 +63,32 @@ export function initSiteNavigation(root: ParentNode = document): SiteNavigationC
     setDropdownActive(dropdown, true);
   };
 
-  dropdowns.forEach((dropdown) => {
-    const toggle = dropdown.querySelector<HTMLElement>(SELECTORS.dropdownToggle);
-    if (!toggle) {
+  const registerDropdown = (dropdown: HTMLElement) => {
+    if (dropdowns.has(dropdown)) {
       return;
     }
+    dropdowns.add(dropdown);
+    const toggle = dropdown.querySelector<HTMLElement>(SELECTORS.dropdownToggle);
+    if (toggle) {
+      const onClick = (event: Event) => {
+        event.preventDefault();
+        toggleDropdown(dropdown);
+      };
+      const onKeydown = (event: KeyboardEvent) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+          return;
+        }
+        event.preventDefault();
+        toggleDropdown(dropdown);
+      };
 
-    const onClick = (event: Event) => {
-      event.preventDefault();
-      toggleDropdown(dropdown);
-    };
-    const onKeydown = (event: KeyboardEvent) => {
-      if (event.key !== 'Enter' && event.key !== ' ') {
-        return;
-      }
-      event.preventDefault();
-      toggleDropdown(dropdown);
-    };
+      toggle.addEventListener('click', onClick);
+      toggle.addEventListener('keydown', onKeydown);
+      cleanup.push(() => toggle.removeEventListener('click', onClick));
+      cleanup.push(() => toggle.removeEventListener('keydown', onKeydown));
+    }
 
-    toggle.addEventListener('click', onClick);
-    toggle.addEventListener('keydown', onKeydown);
-    cleanup.push(() => toggle.removeEventListener('click', onClick));
-    cleanup.push(() => toggle.removeEventListener('keydown', onKeydown));
-  });
-
-  dropdowns
-    .filter((dropdown) => dropdown.dataset.siteDropdownHover === 'true')
-    .forEach((dropdown) => {
+    if (dropdown.dataset.siteDropdownHover === 'true') {
       const onEnter = () => {
         closeAllDropdowns();
         setDropdownActive(dropdown, true);
@@ -103,7 +100,20 @@ export function initSiteNavigation(root: ParentNode = document): SiteNavigationC
       dropdown.addEventListener('mouseleave', onLeave);
       cleanup.push(() => dropdown.removeEventListener('mouseenter', onEnter));
       cleanup.push(() => dropdown.removeEventListener('mouseleave', onLeave));
-    });
+    }
+  };
+
+  const registerDropdowns = (scope: ParentNode = root) => {
+    const candidates = Array.from(
+      scope.querySelectorAll<HTMLElement>(SELECTORS.dropdown)
+    );
+    if (scope instanceof HTMLElement && scope.matches(SELECTORS.dropdown)) {
+      candidates.unshift(scope);
+    }
+    candidates.forEach((dropdown) => registerDropdown(dropdown));
+  };
+
+  registerDropdowns(scope);
 
   const closeTargets = Array.from(
     scope.querySelectorAll<HTMLElement>(SELECTORS.closeTargets)
@@ -118,6 +128,7 @@ export function initSiteNavigation(root: ParentNode = document): SiteNavigationC
 
   return {
     closeAllDropdowns,
+    registerDropdowns,
     destroy: () => {
       cleanup.forEach((fn) => fn());
     }

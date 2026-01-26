@@ -54,7 +54,6 @@ pub struct PageRenderContext<'a> {
     pub config: &'a ValidatedConfig,
     pub runtime_paths: &'a RuntimePaths,
     pub theme: Option<&'a str>,
-    pub user: Option<&'a User>,
     pub release_tracker: &'a ReleaseTracker,
     pub template_engine: &'a dyn TemplateEngine,
 }

@@ -72,6 +72,9 @@ Status: Developed
 - Inline optional bootstrap data (`window.nopAdminBootstrap`) for server-provided payloads (for example,
   theme list data on `/themes`, theme content on `/themes/new` and `/themes/customize/:theme`, and
   errors on missing themes).
+- The admin shell also includes the authenticated user's email for UI-only guardrails (for example,
+  self-delete disabling). This value is held in memory only; admin identity must never be cached in
+  `sessionStorage` or `localStorage`.
 - Keep backend endpoints and auth middleware unchanged; only the HTML shell replaces per-page SSR.
 
 #### Routing and navigation
@@ -122,6 +125,8 @@ Status: Developed
   - Authenticated non-admins redirect to `/`.
   - Dev-mode bypass is allowed only in debug builds with localhost settings (release builds ignore it).
 - The admin SPA uses the same JWT cookie as the public site; no separate admin session cookie is minted.
+- The authenticated WebSocket session is the authoritative source of the acting user identity; the
+  client does not send identity fields in management requests.
 - Login return-path validation only allows `/`, `/id/<hex>`, known markdown aliases, or admin paths for admins; invalid values default to `/`.
 - CSRF flow for the SPA:
   - Fetch token from `<admin_path>/csrf-token-api`.

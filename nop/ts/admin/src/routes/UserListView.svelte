@@ -9,7 +9,6 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import { onMount } from "svelte";
   import Button from "../components/Button.svelte";
   import { getAdminBootstrap } from "../config/runtime";
-  import { getSessionStorage } from "../services/browser";
   import { useListViewLogic } from "./useListViewLogic";
   import { navigate } from "../stores/router";
   import { deleteUser, getUser, listUsers } from "../services/users";
@@ -19,12 +18,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
   };
 
   const bootstrap = getAdminBootstrap<Bootstrap>();
-  const cachedEmail = getSessionStorage()?.getItem("nopAdminCurrentUserEmail") ?? null;
-  const currentUserEmail = bootstrap?.currentUserEmail || cachedEmail || "";
-
-  if (bootstrap?.currentUserEmail) {
-    getSessionStorage()?.setItem("nopAdminCurrentUserEmail", bootstrap.currentUserEmail);
-  }
+  const currentUserEmail = (bootstrap?.currentUserEmail ?? "").trim();
+  const normalizedCurrentUserEmail = currentUserEmail.toLowerCase();
 
   let users: Awaited<ReturnType<typeof listUsers>> = [];
   let rolesMap = new Map<string, string[]>();
@@ -76,7 +71,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   }
 
   async function removeUser(email: string): Promise<void> {
-    if (email === currentUserEmail) {
+    if (email.toLowerCase() === normalizedCurrentUserEmail) {
       notifyError(null, "You cannot delete your own account");
       return;
     }
@@ -149,7 +144,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
                 <Button
                   variant="danger"
                   size="sm"
-                  disabled={user.email === currentUserEmail}
+                  disabled={user.email.toLowerCase() === normalizedCurrentUserEmail}
                   className="h-7 w-7 px-0 text-[10px] tracking-[0.12em]"
                   on:click={() => removeUser(user.email)}
                 >
@@ -214,7 +209,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={user.email === currentUserEmail}
+                    disabled={user.email.toLowerCase() === normalizedCurrentUserEmail}
                     on:click={() => removeUser(user.email)}
                   >
                     Delete

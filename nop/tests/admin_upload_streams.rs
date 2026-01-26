@@ -129,6 +129,7 @@ async fn binary_stream_upload_commits() {
             workflow_id: 1,
             connection_id,
             command: ManagementCommand::Content(ContentCommand::BinaryUploadInit(init_request)),
+            actor_email: None,
         })
         .await
         .expect("init response");
@@ -156,6 +157,7 @@ async fn binary_stream_upload_commits() {
                     upload_id: init_payload.upload_id,
                 },
             )),
+            actor_email: None,
         })
         .await
         .expect("commit response");
@@ -198,6 +200,7 @@ async fn upload_cleanup_removes_temp_files_on_disconnect() {
             workflow_id: 1,
             connection_id,
             command: ManagementCommand::Content(ContentCommand::BinaryUploadInit(init_request)),
+            actor_email: None,
         })
         .await
         .expect("init response");
@@ -263,6 +266,7 @@ async fn markdown_stream_create_and_update() {
             workflow_id: 1,
             connection_id,
             command: ManagementCommand::Content(ContentCommand::UploadStreamInit(init_request)),
+            actor_email: None,
         })
         .await
         .expect("stream init response");
@@ -290,6 +294,7 @@ async fn markdown_stream_create_and_update() {
                     upload_id: init_payload.upload_id,
                 },
             )),
+            actor_email: None,
         })
         .await
         .expect("stream commit response");
@@ -343,6 +348,7 @@ async fn markdown_stream_create_and_update() {
             workflow_id: 4,
             connection_id,
             command: ManagementCommand::Content(ContentCommand::UpdateStreamInit(update_request)),
+            actor_email: None,
         })
         .await
         .expect("update init response");
@@ -367,6 +373,7 @@ async fn markdown_stream_create_and_update() {
                     upload_id: update_payload.upload_id,
                 },
             )),
+            actor_email: None,
         })
         .await
         .expect("update commit response");

@@ -10,6 +10,7 @@ pub mod ws;
 use actix_web::dev::{ServiceFactory, ServiceRequest, ServiceResponse};
 use actix_web::{App, web};
 use nop::admin;
+use nop::api;
 use nop::app_state::AppState;
 use nop::builtin;
 use nop::config::{
@@ -250,6 +251,7 @@ pub fn build_test_app(
         .wrap(JwtAuthMiddlewareFactory)
         .configure(move |cfg| admin::configure(cfg, &admin_path, &config_for_admin))
         .configure(move |cfg| login::configure(cfg, &config_for_login))
+        .configure(api::configure)
         .configure(builtin::configure)
         .configure(public::configure)
 }

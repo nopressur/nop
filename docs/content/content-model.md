@@ -41,7 +41,13 @@ This document is the single source of truth for public content resolution and re
    - Markdown files render through the Markdown pipeline.
    - Non-Markdown assets stream directly with range support when enabled.
 6. **Auth outcomes**: access denial redirects anonymous users to `/login?return_path=...` or serves 404 to authenticated users.
-7. **Response headers**: public content responses disable browser caching to reflect edits immediately.
+7. **Response headers**:
+   - Public content (HTML + assets) is cacheable but always includes `Vary: Cookie` so shared caches
+     separate anonymous and authenticated responses.
+   - Restricted content (RBAC-required) is served with `Cache-Control: no-store, private` and
+     `Vary: Cookie`.
+   - Login and profile pages (`/login`, `/login/profile`) are served with
+     `Cache-Control: no-store, private` and `Vary: Cookie`.
 
 ### Alias Resolution
 

@@ -9,7 +9,10 @@ use actix_http::Request;
 use actix_web::body::BoxBody;
 use actix_web::dev::{Service, ServiceResponse};
 use actix_web::{http::StatusCode, test};
+use chrono::{Duration, Utc};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use nop::iam::derive_front_end_hash;
+use nop::iam::jwt::Claims;
 use nop::login::types::{
     LoginBootstrapRequest, LoginBootstrapResponse, LoginErrorResponse, LoginSuccessResponse,
     PasswordEmailRequest, PasswordEmailResponse, PasswordLoginRequest,
@@ -17,6 +20,7 @@ use nop::login::types::{
 };
 use nop::util::csrf_validation::CSRF_HEADER_NAME;
 use serde_json::Value;
+use uuid::Uuid;
 
 const TEST_PEER_ADDR: &str = "127.0.0.1:1234";
 const LOGIN_CONFIG_MARKER: &str = "window.nopLoginConfig = ";
@@ -208,6 +212,48 @@ async fn login_rejects_unsafe_return_paths() {
     let body = test::read_body(resp).await;
     let json: LoginSuccessResponse = serde_json::from_slice(&body).expect("login response");
     assert_eq!(json.return_path, "/admin");
+}
+
+#[actix_web::test]
+async fn logout_clears_cookie_without_refresh() {
+    let harness = common::TestHarness::new().await;
+    let app = test::init_service(common::build_test_app(harness.app_bundle())).await;
+    let jwt_service = harness.user_services.jwt_service().expect("jwt service");
+    let local_config = harness.config.users.local().expect("local auth config");
+    let now = Utc::now();
+    let claims = Claims {
+        sub: harness.admin_user.email.clone(),
+        name: harness.admin_user.name.clone(),
+        groups: harness.admin_user.roles.clone(),
+        iat: (now - Duration::hours(2)).timestamp(),
+        exp: (now + Duration::hours(10)).timestamp(),
+        iss: local_config.jwt.issuer.clone(),
+        aud: local_config.jwt.audience.clone(),
+        jti: Uuid::new_v4().to_string(),
+        password_version: harness.admin_user.password_version,
+    };
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(local_config.jwt.secret.as_ref()),
+    )
+    .expect("token");
+    let cookie = jwt_service.create_auth_cookie(&token).into_owned();
+
+    let req = test::TestRequest::post()
+        .uri("/login/logout-api")
+        .cookie(cookie)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let auth_cookies: Vec<_> = resp
+        .response()
+        .cookies()
+        .filter(|cookie| cookie.name() == local_config.jwt.cookie_name)
+        .collect();
+    assert!(!auth_cookies.is_empty());
+    assert!(auth_cookies.iter().all(|cookie| cookie.value().is_empty()));
 }
 
 #[actix_web::test]

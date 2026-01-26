@@ -1,6 +1,6 @@
 [package]
 name = "nop"
-version = "0.1.22"
+version = "0.1.23"
 edition = "2024"
 build = "build.rs"
 default-run = "nop"
@@ -45,6 +45,7 @@ lers = { version = "0.4", default-features = false, features = ["http-01", "dns-
 openssl = "0.10"
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 async-trait = "0.1"
+trust-dns-resolver = "0.23"
 rustls-native-certs = "0.7"
 hmac = "0.12"
 sha2 = "0.10"

@@ -280,6 +280,7 @@ fn decode_request(
         workflow_id,
         connection_id,
         command,
+        actor_email: None,
     })
 }
 

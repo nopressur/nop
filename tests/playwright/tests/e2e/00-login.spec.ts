@@ -37,9 +37,10 @@ test("login flow renders and signs in", async ({ page, harness, rng }) => {
     humanClick(page.getByRole("button", { name: "Sign in" }), rng),
   ]);
 
+  const userMenu = page.locator("[data-site-user-menu]");
   await expect(
-    page.getByRole("link", { name: harness.users.admin.name })
-  ).toBeVisible();
+    userMenu.getByRole("link", { name: harness.users.admin.name })
+  ).toBeVisible({ timeout: 15000 });
 });
 
 test("profile view updates display name", async ({ page, harness, rng }) => {
@@ -201,6 +202,62 @@ test("profile wrong current password shows error", async ({ page, harness, rng }
   await expect(
     page.getByText("Current password is invalid")
   ).toBeVisible({ timeout: 15000 });
+});
+
+test("public navbar logout clears auth cookie", async ({ page, harness, rng }) => {
+  await login({
+    page,
+    baseUrl: harness.baseUrl,
+    user: harness.users.admin,
+    rng,
+    returnPath: "/admin",
+    expectedPath: "/admin",
+  });
+
+  await page.goto(`${harness.baseUrl}/`);
+  await page.waitForFunction(() => {
+    return Boolean((window as { __nopSiteNavigationInit?: boolean }).__nopSiteNavigationInit);
+  });
+
+  const userMenu = page.locator("[data-site-user-menu]");
+  const userNav = userMenu.getByRole("link", { name: harness.users.admin.name });
+  await expect(userNav).toBeVisible({ timeout: 15000 });
+
+  await humanClick(userNav, rng);
+  const dropdown = userMenu.locator("[data-site-dropdown]");
+  await expect(dropdown).toHaveClass(/is-active/, { timeout: 15000 });
+  const logoutLink = userMenu.getByRole("link", { name: "Logout" });
+  await expect(logoutLink).toBeVisible({ timeout: 15000 });
+
+  const logoutResponsePromise = page.waitForResponse((response) => {
+    return (
+      response.url().endsWith("/login/logout-api") &&
+      response.request().method() === "POST"
+    );
+  });
+
+  const homePattern = new RegExp(`${escapeRegex(harness.baseUrl)}/?$`);
+  await Promise.all([
+    page.waitForURL(homePattern, { timeout: 15000 }),
+    humanClick(logoutLink, rng),
+  ]);
+
+  const logoutResponse = await logoutResponsePromise;
+  expect(logoutResponse.ok()).toBeTruthy();
+
+  const cookies = await page.context().cookies();
+  expect(cookies.some((cookie) => cookie.name === "nop_auth")).toBeFalsy();
+
+  const browser = page.context().browser();
+  if (!browser) {
+    throw new Error("Browser instance unavailable for logout check");
+  }
+
+  const freshContext = await browser.newContext();
+  const freshPage = await freshContext.newPage();
+  await freshPage.goto(`${harness.baseUrl}/login/profile`);
+  await expect(freshPage.getByRole("heading", { name: /sign in/i })).toBeVisible();
+  await freshContext.close();
 });
 
 test("profile logout returns to login", async ({ page, harness, rng }) => {

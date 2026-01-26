@@ -6,12 +6,14 @@
 use crate::app_state::AppState;
 use crate::config::{PasswordHashingParams, ValidatedConfig, ValidatedUsersConfig};
 use crate::headers::{generate_csp_nonce, set_strict_csp};
+use crate::iam::AuthRequest;
 use crate::templates::AdminSpaShellContext;
 use crate::templates::render_minijinja_template;
 use actix_web::Result;
 use actix_web::{HttpRequest, HttpResponse, http::StatusCode};
 use log;
 use serde::Serialize;
+use serde_json::{Value, json};
 
 pub mod file_utils;
 
@@ -132,10 +134,28 @@ pub async fn render_admin_spa_shell_response(
     app_state: &AppState,
     bootstrap: Option<serde_json::Value>,
 ) -> Result<HttpResponse> {
+    let current_email = req.user_info().map(|user| user.email);
+    let bootstrap = merge_bootstrap_with_current_user(bootstrap, current_email);
     let csp_nonce = generate_csp_nonce();
     set_strict_csp(req, &csp_nonce);
     let html = render_admin_spa_shell_html(config, app_state, bootstrap, &csp_nonce).await?;
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(html))
+}
+
+fn merge_bootstrap_with_current_user(
+    bootstrap: Option<Value>,
+    current_email: Option<String>,
+) -> Option<Value> {
+    let current_email = current_email?;
+    let mut value = bootstrap.unwrap_or_else(|| json!({}));
+    if let Some(object) = value.as_object_mut() {
+        object.insert("currentUserEmail".to_string(), Value::String(current_email));
+        return Some(value);
+    }
+    let mut wrapped = serde_json::Map::new();
+    wrapped.insert("currentUserEmail".to_string(), Value::String(current_email));
+    wrapped.insert("bootstrap".to_string(), value);
+    Some(Value::Object(wrapped))
 }

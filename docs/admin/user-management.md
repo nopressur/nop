@@ -176,6 +176,7 @@ Password helper responses:
   - Increments `password_version` in `users.yaml`, invalidating existing JWTs for that user.
 - `delete`:
   - Fails if the user does not exist.
+  - Rejects when the authenticated admin attempts to delete themselves (self-delete).
 
 ### Password Flow (UI vs CLI)
 
@@ -320,6 +321,10 @@ Notes:
 
 - Only authenticated admins can open the WebSocket; JWT cookie + CSRF tokens are required.
 - The UI must block self-delete requests before sending a bus command.
+- The authenticated WebSocket session is the authoritative source of the acting user identity.
+  Management requests never include client-supplied identity fields.
+- The server enforces self-delete rejection using the WebSocket session identity; CLI and other
+  non-admin connectors do not supply an acting identity and are not subject to the self-delete guard.
 - Manual edits to `users.yaml` while the daemon is running remain unsupported.
 
 ### Testing Scope

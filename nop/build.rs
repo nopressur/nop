@@ -20,10 +20,7 @@ use walkdir::WalkDir;
 fn main() {
     // Tell Cargo to rerun this build script if these files change
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let repo_root = manifest_dir
-        .parent()
-        .unwrap_or(&manifest_dir)
-        .to_path_buf();
+    let repo_root = manifest_dir.parent().unwrap_or(&manifest_dir).to_path_buf();
     let scripts_root = repo_root.join("scripts");
     let builtin_root = manifest_dir.join("builtin");
     let admin_root = manifest_dir.join("ts").join("admin");
@@ -174,7 +171,13 @@ fn main() {
     }
 
     ensure_bulma_css(&bulma_script, &bulma_version, &bulma_css, &manifest_dir);
-    ensure_ace_assets(&ace_script, &ace_version, &builtin_root, &ace_assets, &manifest_dir);
+    ensure_ace_assets(
+        &ace_script,
+        &ace_version,
+        &builtin_root,
+        &ace_assets,
+        &manifest_dir,
+    );
     ensure_admin_spa(&admin_root, &admin_output);
     let login_version = ensure_login_spa(&login_root, &builtin_root, &login_version_file);
     ensure_site_bundle(&site_root, &site_output);
@@ -207,10 +210,7 @@ fn ensure_bulma_css(
     }
 
     if !bulma_script.is_file() {
-        panic!(
-            "Bulma updater script missing: {}",
-            bulma_script.display()
-        );
+        panic!("Bulma updater script missing: {}", bulma_script.display());
     }
     if !bulma_version.is_file() {
         panic!("Bulma version file missing: {}", bulma_version.display());

@@ -880,6 +880,7 @@ async fn handle_users_request(
     request: ManagementRequest,
     context: Arc<ManagementContext>,
 ) -> DomainResult<ManagementResponse> {
+    let actor_email = request.actor_email.as_deref();
     let response = match request.command {
         ManagementCommand::Users(UserCommand::Add(payload)) => {
             handle_add(payload, request.workflow_id, &context).await
@@ -888,7 +889,7 @@ async fn handle_users_request(
             handle_change(payload, request.workflow_id, &context).await
         }
         ManagementCommand::Users(UserCommand::Delete(payload)) => {
-            handle_delete(payload, request.workflow_id, &context).await
+            handle_delete(payload, request.workflow_id, &context, actor_email).await
         }
         ManagementCommand::Users(UserCommand::PasswordSet(payload)) => {
             handle_password_set(payload, request.workflow_id, &context).await
@@ -1042,6 +1043,7 @@ async fn handle_delete(
     payload: UserDeleteRequest,
     workflow_id: u32,
     context: &ManagementContext,
+    actor_email: Option<&str>,
 ) -> ManagementResponse {
     if let Err(err) = payload.validate() {
         return response_err(USER_ACTION_DELETE_ERR, workflow_id, &err.to_string());
@@ -1057,6 +1059,26 @@ async fn handle_delete(
         Ok(email) => email,
         Err(err) => return response_err(USER_ACTION_DELETE_ERR, workflow_id, &err.to_string()),
     };
+    if let Some(actor_email) = actor_email {
+        let actor_email = match normalize_email(actor_email) {
+            Ok(email) => email,
+            Err(err) => {
+                log::warn!("User delete actor email normalization failed: {}", err);
+                return response_err(
+                    USER_ACTION_DELETE_ERR,
+                    workflow_id,
+                    "Unable to validate current user",
+                );
+            }
+        };
+        if actor_email == email {
+            return response_err(
+                USER_ACTION_DELETE_ERR,
+                workflow_id,
+                "You cannot delete your own account",
+            );
+        }
+    }
 
     match user_services.delete_user(&email).await {
         Ok(_) => response_ok(
@@ -2786,6 +2808,7 @@ mod tests {
             workflow_id: 1,
             connection_id,
             command: ManagementCommand::Users(UserCommand::List(UserListRequest {})),
+            actor_email: None,
         };
         let response = handle_users_request(request, Arc::new(context))
             .await
@@ -2822,6 +2845,7 @@ mod tests {
             command: ManagementCommand::Users(UserCommand::Show(UserShowRequest {
                 email: "USER@example.com".to_string(),
             })),
+            actor_email: None,
         };
         let response = handle_users_request(request, Arc::new(context))
             .await
@@ -2856,6 +2880,7 @@ mod tests {
             workflow_id: 1,
             connection_id,
             command: ManagementCommand::Users(UserCommand::RolesList(UserRolesListRequest {})),
+            actor_email: None,
         };
         let response = handle_users_request(request, Arc::new(context))
             .await
@@ -2893,6 +2918,7 @@ mod tests {
                 email: "user@example.com".to_string(),
                 role: "editor".to_string(),
             })),
+            actor_email: None,
         };
         handle_users_request(add_request, context.clone())
             .await
@@ -2912,6 +2938,7 @@ mod tests {
                 email: "user@example.com".to_string(),
                 role: "editor".to_string(),
             })),
+            actor_email: None,
         };
         handle_users_request(remove_request, context)
             .await

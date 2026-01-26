@@ -91,6 +91,8 @@ The middleware resolves the JWT ID using this priority:
 
 - The admin SPA is the primary consumer of CSRF tokens and WebSocket tickets. The UI flow, endpoint
   usage, and auth-frame requirements are documented in `docs/admin/ui.md`.
+- The WebSocket upgrade is bound to the authenticated JWT/CSRF context; the server treats the
+  resulting WS session identity as authoritative for management actions.
 
 ### Testing Expectations
 

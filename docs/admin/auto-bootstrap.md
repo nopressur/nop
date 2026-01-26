@@ -117,7 +117,7 @@ logging:
 
 app:
   name: "NoPressure"
-  description: "A lightweight web content management system"
+  description: "The AI native tiny little website system"
 ```
 
 Notes:

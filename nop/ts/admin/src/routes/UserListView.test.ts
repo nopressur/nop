@@ -35,7 +35,6 @@ vi.mock("../services/users", () => ({
 describe("UserListView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    sessionStorage.clear();
   });
 
   it("navigates when a row is clicked", async () => {

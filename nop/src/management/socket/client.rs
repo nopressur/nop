@@ -77,6 +77,7 @@ impl SocketClient {
             workflow_id,
             connection_id: self.connection_id,
             command,
+            actor_email: None,
         };
 
         let envelope = self.encode_request(&request)?;

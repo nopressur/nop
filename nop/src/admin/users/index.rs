@@ -6,9 +6,7 @@
 use crate::admin::shared;
 use crate::app_state::AppState;
 use crate::config::{ValidatedConfig, ValidatedUsersConfig};
-use crate::iam::AuthRequest;
 use actix_web::{HttpRequest, HttpResponse, Result, web};
-use serde_json::json;
 
 pub async fn users_index(
     req: HttpRequest,
@@ -23,15 +21,5 @@ pub async fn users_index(
             .finish());
     }
 
-    let current_email = req.user_info().map(|user| user.email).unwrap_or_default();
-    let bootstrap = json!({
-        "currentUserEmail": current_email
-    });
-    shared::render_admin_spa_shell_response(
-        &req,
-        config.as_ref(),
-        app_state.as_ref(),
-        Some(bootstrap),
-    )
-    .await
+    shared::render_admin_spa_shell_response(&req, config.as_ref(), app_state.as_ref(), None).await
 }

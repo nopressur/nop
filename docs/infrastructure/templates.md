@@ -23,7 +23,9 @@ Helper functions produce ready-to-render contexts:
 
 - `AdminSpaShellContext` – Provides the admin SPA shell with runtime config and optional bootstrap JSON.
 - `LoginSpaShellContext` – Provides the login/profile SPA shell with runtime config JSON and asset URLs.
-- `UserNavLocalContext`, `UserNavOidcContext` – Supply navigation data for public user menus.
+- Public user menus are no longer server-rendered. The public layout includes a placeholder
+  container only; the client fetches `GET /api/profile` to build the dropdown menu at runtime.
+  The dropdown title uses the `display_name` field from the profile response.
 - Each context sets asset URLs (`/builtin/...`), ensuring dev-mode and release builds use the same paths (served by `builtin.rs`).
 - Login SPA shells should receive the versioned login asset directory name and inject stable
   filenames under that directory (see `docs/iam/modular-login.md`).

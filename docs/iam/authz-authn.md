@@ -74,6 +74,8 @@ OIDC paths are scaffolded (`login/oidc.rs`) but currently return 404; startup al
   - Checks if the user has at least one resolved role.
 - Public handlers rely on `req.user_info()` for gated navigation; admin handlers use it for bootstrap data
   (for example, current user email) and authorization checks.
+- Admin WebSocket management sessions bind the authenticated user to the connection; server-side
+  management handlers treat that session identity as authoritative for actor checks.
 - For exhaustive RBAC examples and edge cases, see `docs/content/public-rbac.md`.
 - Role lifecycle, validation, and CRUD behavior live in `docs/content/role-management.md`.
 

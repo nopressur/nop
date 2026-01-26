@@ -6,6 +6,7 @@
 use crate::admin::ws_auth;
 use crate::app_state::AppState;
 use crate::config::ValidatedConfig;
+use crate::iam::AuthRequest;
 use crate::management::ManagementBus;
 use crate::management::UploadRegistry;
 use crate::management::ws::{
@@ -74,6 +75,7 @@ pub async fn management_ws(
             })));
         }
     };
+    let actor_email = req.user_info().map(|user| user.email);
 
     log::debug!("Admin WS connection starting");
     let (response, session, message_stream) = actix_ws::handle(&req, stream)?;
@@ -96,6 +98,7 @@ pub async fn management_ws(
             csrf_store,
             ticket_store,
             jwt_id,
+            actor_email,
             upload_registry,
         )
         .await
@@ -116,6 +119,7 @@ async fn handle_ws_session(
     csrf_store: Arc<CsrfTokenStore>,
     ticket_store: Arc<WsTicketStore>,
     jwt_id: String,
+    actor_email: Option<String>,
     upload_registry: Arc<UploadRegistry>,
 ) -> Result<(), String> {
     log::debug!("Admin WS session started");
@@ -167,6 +171,7 @@ async fn handle_ws_session(
         registry,
         upload_registry.clone(),
         connection_id,
+        actor_email,
     );
     while let Some(message) = messages.next().await {
         let message = message.map_err(|err| format!("WS error: {}", err))?;
@@ -255,6 +260,7 @@ struct WsCoordinator {
     registry: Arc<crate::management::ManagementRegistry>,
     upload_registry: Arc<UploadRegistry>,
     connection_id: u32,
+    actor_email: Option<String>,
     outbound_streams: StreamTracker,
     workflow_tracker: WorkflowTracker,
 }
@@ -266,6 +272,7 @@ impl WsCoordinator {
         registry: Arc<crate::management::ManagementRegistry>,
         upload_registry: Arc<UploadRegistry>,
         connection_id: u32,
+        actor_email: Option<String>,
     ) -> Self {
         Self {
             session,
@@ -273,6 +280,7 @@ impl WsCoordinator {
             registry,
             upload_registry,
             connection_id,
+            actor_email,
             outbound_streams: StreamTracker::new(),
             workflow_tracker: WorkflowTracker::new(),
         }
@@ -332,7 +340,12 @@ impl WsCoordinator {
             self.send(&WsFrame::Response(error_response)).await?;
             return Ok(());
         }
-        let request = match decode_request(&frame, &self.registry, self.connection_id) {
+        let request = match decode_request(
+            &frame,
+            &self.registry,
+            self.connection_id,
+            self.actor_email.clone(),
+        ) {
             Ok(request) => request,
             Err(err) => {
                 log::warn!(
@@ -417,6 +430,7 @@ fn decode_request(
     frame: &RequestFrame,
     registry: &crate::management::ManagementRegistry,
     connection_id: u32,
+    actor_email: Option<String>,
 ) -> Result<ManagementRequest, String> {
     let key = DomainActionKey::new(frame.domain_id, frame.action_id);
     let codec = registry
@@ -438,6 +452,7 @@ fn decode_request(
         workflow_id: frame.workflow_id,
         connection_id,
         command,
+        actor_email,
     })
 }
 
