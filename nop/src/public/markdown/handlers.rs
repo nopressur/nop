@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use crate::content::flat_storage::blob_path;
+use crate::content::flat_storage::{blob_path, content_id_hex};
 use crate::public::cache::{HtmlCacheEnvelope, finalize_html_response};
 use crate::public::nav::generate_navigation_with_user;
 use crate::public::page_meta_cache::check_file_access;
@@ -14,7 +14,7 @@ use gray_matter::{Matter, engine::YAML};
 use pulldown_cmark::Options;
 use tokio::fs;
 
-use super::parser::generate_html;
+use super::parser::{RenderRequest, generate_html};
 use super::render::generate_html_page_with_user;
 
 pub async fn serve_markdown_alias(
@@ -75,6 +75,7 @@ pub async fn serve_markdown_alias(
         .clone()
         .unwrap_or_else(|| config.app.name.clone());
     let theme = object.theme.clone();
+    let content_id = content_id_hex(object.key.id);
 
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -82,16 +83,16 @@ pub async fn serve_markdown_alias(
     options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_TASKLISTS);
 
-    let rendered_html = match generate_html(
-        &result,
+    let rendered_html = match generate_html(&RenderRequest {
+        result: &result,
         shortcode_registry,
-        &options,
+        options: &options,
         sanitizer,
         cache,
-        alias,
+        md_path: alias,
         user,
-        config.rendering.short_paragraph_length,
-    ) {
+        short_paragraph_length: config.rendering.short_paragraph_length,
+    }) {
         Ok(rendered) => rendered,
         Err(error) => {
             log::error!("Failed to render markdown '{}': {}", alias, error);
@@ -113,6 +114,7 @@ pub async fn serve_markdown_alias(
         &rendered_html.html,
         &navigation,
         rendered_html.use_compact_width,
+        &content_id,
         &render_ctx,
     )
     .await;

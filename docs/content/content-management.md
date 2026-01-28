@@ -48,11 +48,22 @@ The file manager replaces hierarchical browsing with a flat, paginated list.
 - Support title-only search (no full-text search).
 - Markdown-only toggle (default view shows all files).
 - Tags filter supports multi-select and matches all selected tags.
+- Creating a new page from the list seeds the page tags from the currently selected tag filters.
 - Do not display object IDs.
 - Display the canonical alias for each entry.
+- Copy URL actions are available from the list (see **Copy URL actions** below).
 - The list uses the sidecar `title` field; if a title is missing, the entry renders as `Untitled`.
 - The original filename is preserved in sidecar metadata and stored in the in-memory cache for display in edit views.
 - Content list responses must include content IDs for internal references such as navbar parents.
+
+#### Copy URL actions
+
+The admin UI provides copy buttons that place the fully qualified public URL on the clipboard:
+
+- `ID` is always available and copies `origin + /id/<hex>`.
+- `Alias` appears only when an alias exists and copies `origin + /<alias>`; `index` aliases copy `/`.
+- On the editor toolbar only, Ctrl/Cmd-clicking `ID` or `Alias` opens the public URL in a new tab
+  without copying or showing a toast.
 
 #### Content List Sorting
 
@@ -115,10 +126,13 @@ Validation:
 
 - Clicking a Markdown entry opens the editor with the Markdown body.
 - Clicking a non-Markdown entry opens metadata-only details with a download link.
+- Copy URL actions are available next to the editor toolbar buttons (see **Copy URL actions** above).
 - The editor header shows sidecar metadata instead of front matter:
 - Alias (editable).
 - Alias must be URL-safe and cannot start with reserved prefixes (`id/`, `login`, `builtin`, or
   the configured admin path prefix).
+- Alias validation runs on change in the editor and shows inline errors; save still re-validates.
+- When the details panel is open, pressing Enter in a details field saves and collapses the panel.
 - Title.
 - Tags.
 - Navbar title, parent, and order.
@@ -178,10 +192,13 @@ Uploads are available from the Markdown editor and content list.
   - Pressing Enter in a file block saves/uploads that file only.
   - When multiple files are queued, "Save all" actions appear at the top and bottom of the modal.
 - The content list includes a tag selector that filters the list and sets default tags for new uploads.
+- Content editor uploads inherit the page’s current tag selection (including unsaved tag changes).
 - Default alias prefixes:
   - Images -> `images/<original-filename>`
   - Videos -> `videos/<original-filename>`
   - Other files -> `files/<original-filename>`
+- If the page has a valid alias, editor uploads default to `<page-alias>/<original-filename>` instead
+  of the type-based prefixes.
 - Aliases are deduplicated by appending numeric suffixes.
 - MIME type is auto-detected and stored in the sidecar.
 - Original filename is preserved in the sidecar and cache.

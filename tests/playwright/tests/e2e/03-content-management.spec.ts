@@ -109,7 +109,9 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
 
   await expect(page.getByRole("heading", { name: "Edit Content" })).toBeVisible();
   await ensureDetailsOpen();
-  await expect(page.locator("#content-alias")).toHaveValue("docs/ui-test");
+  const pageAlias = "docs/ui-test";
+  const pageAliasRegex = pageAlias.replace("/", "\\/");
+  await expect(page.locator("#content-alias")).toHaveValue(pageAlias);
   await expect(page.locator("#content-title")).toHaveValue("UI Test");
 
   await tagSelect.selectOption("featured");
@@ -121,6 +123,30 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await page.keyboard.press(saveShortcut);
   await expect(page.getByText("Content saved").last()).toBeVisible();
   await dismissNotifications();
+
+  const adminEditUrl = page.url();
+  const publicUrl = new URL(`/${pageAlias}`, harness.baseUrl).toString();
+  await page.goto(publicUrl);
+  await expect(page.getByRole("heading", { name: "UI Test" })).toBeVisible();
+  await expect(page).toHaveTitle("UI Test Updated");
+
+  const editLink = page.getByRole("link", { name: "Edit" });
+  await expect(editLink).toBeVisible();
+  await expect(editLink).toHaveAttribute("target", "_blank");
+  await expect(editLink).toHaveAttribute("rel", "noopener");
+  await expect(editLink).toHaveAttribute("href", /\/admin\/pages\/edit\//);
+
+  const [editorPage] = await Promise.all([
+    page.waitForEvent("popup"),
+    humanClick(editLink, rng),
+  ]);
+  await expect(editorPage).toHaveURL(/\/admin\/pages\/edit\//);
+  await expect(editorPage.getByRole("heading", { name: "Edit Content" })).toBeVisible();
+  const popupEditUrl = editorPage.url();
+  await editorPage.close();
+
+  await page.goto(popupEditUrl || adminEditUrl);
+  await expect(page.getByRole("heading", { name: "Edit Content" })).toBeVisible();
 
   await humanClick(page.getByRole("button", { name: "Upload", exact: true }), rng);
   const editorOverlay = page.getByRole("dialog", { name: "Drop files to upload" });
@@ -134,7 +160,7 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   const editorUploadModal = page.getByRole("dialog", { name: "Upload Asset" });
   await expect(editorUploadModal).toBeVisible();
   await expect(editorUploadModal.locator('input[id^="upload-alias-"]').first()).toHaveValue(
-    /images\/example\.png/
+    new RegExp(`${pageAliasRegex}\\/example\\.png`)
   );
   await expect(editorUploadModal.getByRole("button", { name: "Save all" })).toHaveCount(0);
 
@@ -147,7 +173,7 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
     const editor = ace.edit(document.querySelector(".ace_editor"));
     return editor.getValue();
   });
-  expect(updatedContent).toContain("/images/example.png");
+  expect(updatedContent).toContain(`/${pageAlias}/example.png`);
   expect(updatedContent).toContain("![");
 
   await humanClick(page.getByRole("button", { name: "Upload", exact: true }), rng);
@@ -251,27 +277,29 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await expect(page.getByText("Upload complete").last()).toBeVisible();
   await dismissNotifications();
 
-  await page.waitForFunction(() => {
+  await page.waitForFunction((expectedAlias: string) => {
     const ace = (window as Window & { ace?: any }).ace;
     if (!ace) {
       return false;
     }
     const editor = ace.edit(document.querySelector(".ace_editor"));
     const value = editor.getValue();
-    const hasImage = value.includes("/images/diagram.png");
-    const hasPdf = value.includes("/files/manual.pdf") || /\/id\//.test(value);
-    const hasVideo = value.includes("/videos/clip.mp4");
+    const hasImage = value.includes(`/${expectedAlias}/diagram.png`);
+    const hasPdf = value.includes(`/${expectedAlias}/manual.pdf`) || /\/id\//.test(value);
+    const hasVideo = value.includes(`/${expectedAlias}/clip.mp4`);
     return hasImage && hasPdf && hasVideo;
-  });
+  }, pageAlias);
 
   const updatedContentAfterDrop = await page.evaluate(() => {
     const ace = (window as Window & { ace?: any }).ace;
     const editor = ace.edit(document.querySelector(".ace_editor"));
     return editor.getValue();
   });
-  expect(updatedContentAfterDrop).toMatch(/\/files\/manual\.pdf|\/id\//);
-  expect(updatedContentAfterDrop).toContain("/images/diagram.png");
-  expect(updatedContentAfterDrop).toContain("/videos/clip.mp4");
+  expect(updatedContentAfterDrop).toMatch(
+    new RegExp(`/(?:${pageAliasRegex}\\/manual\\.pdf|id/)`)
+  );
+  expect(updatedContentAfterDrop).toContain(`/${pageAlias}/diagram.png`);
+  expect(updatedContentAfterDrop).toContain(`/${pageAlias}/clip.mp4`);
 
   const insertShortcut = process.platform === "darwin" ? "Meta+Shift+I" : "Control+Shift+I";
   await page.keyboard.press(insertShortcut);
@@ -328,7 +356,7 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
     const editor = ace.edit(document.querySelector(".ace_editor"));
     return editor.getValue();
   });
-  expect(contentAfterImageInsert).toContain("![diagram](/images/diagram.png)");
+  expect(contentAfterImageInsert).toContain(`![diagram](/${pageAlias}/diagram.png)`);
 
   await page.keyboard.press(insertShortcut);
   const videoInsertModal = page.getByRole("dialog", { name: "Insert content" });
@@ -353,7 +381,7 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
     const editor = ace.edit(document.querySelector(".ace_editor"));
     return editor.getValue();
   });
-  expect(contentAfterVideoInsert).toContain('((video src="/videos/clip.mp4"))');
+  expect(contentAfterVideoInsert).toContain(`((video src="/${pageAlias}/clip.mp4"))`);
 
   const menuButton = page.getByRole("button", { name: "Menu" });
   if (await menuButton.isVisible()) {

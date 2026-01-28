@@ -90,6 +90,17 @@ export function reloadWindow(): void {
   win.location.reload();
 }
 
+export function openNewTab(href: string): void {
+  const win = getWindow();
+  if (!win) {
+    return;
+  }
+  const opened = win.open(href, "_blank", "noopener");
+  if (opened) {
+    opened.opener = null;
+  }
+}
+
 export function pushHistoryState(nextPath: string): void {
   const win = getWindow();
   if (!win) {
@@ -119,4 +130,40 @@ export function getLocalStorage(): Storage | null {
 export function getSessionStorage(): Storage | null {
   const win = getWindow();
   return win?.sessionStorage ?? null;
+}
+
+export async function writeClipboardText(text: string): Promise<boolean> {
+  const win = getWindow();
+  if (!win) {
+    return false;
+  }
+  try {
+    if (win.navigator?.clipboard?.writeText) {
+      await win.navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall back to execCommand below.
+  }
+
+  const doc = getDocument();
+  if (!doc?.body) {
+    return false;
+  }
+  try {
+    const textarea = doc.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.left = "-9999px";
+    doc.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    const success = doc.execCommand?.("copy") ?? false;
+    doc.body.removeChild(textarea);
+    return success;
+  } catch {
+    return false;
+  }
 }

@@ -37,6 +37,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 </script>
 
 <button
+  {...$$restProps}
   {type}
   {disabled}
   class={`${base} ${sizeMap[size]} ${variantMap[variant]} ${className}`}

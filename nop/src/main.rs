@@ -4,7 +4,7 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use actix_web::rt::System;
-use actix_web::{App, HttpServer, middleware::Logger, web};
+use actix_web::{App, HttpRequest, HttpResponse, HttpServer, Result, middleware::Logger, web};
 use log::{Level, LevelFilter, info};
 use std::io::Write;
 use std::sync::Arc;
@@ -441,6 +441,7 @@ async fn run_server(
                 .configure(api::configure)
                 .configure(builtin::configure)
                 .configure(public::configure)
+                .default_service(web::route().to(default_not_found))
         }
     };
 
@@ -467,6 +468,7 @@ async fn run_server(
                 ));
 
             app.configure(well_known::configure)
+                .default_service(web::route().to(well_known_not_found))
         }
     };
 
@@ -699,6 +701,24 @@ fn make_runtime_root_absolute(
     let current_dir = std::env::current_dir()
         .map_err(|error| format!("Failed to resolve current directory: {}", error))?;
     Ok(current_dir.join(runtime_root))
+}
+
+async fn default_not_found(
+    req: HttpRequest,
+    app_state: web::Data<AppState>,
+) -> Result<HttpResponse> {
+    public::error::serve_404_for_request(
+        &req,
+        &app_state.error_renderer,
+        Some(app_state.templates.as_ref()),
+    )
+}
+
+async fn well_known_not_found(
+    req: HttpRequest,
+    config: web::Data<ValidatedConfig>,
+) -> Result<HttpResponse> {
+    public::error::serve_404_for_request_with_app_name(&req, &config.app.name, None)
 }
 
 #[cfg(test)]

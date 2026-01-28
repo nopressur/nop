@@ -16,6 +16,7 @@ pub async fn generate_html_page_with_user(
     content: &str,
     navigation: &[NavItem],
     use_compact_width: bool,
+    content_id_hex: &str,
     render_ctx: &PageRenderContext<'_>,
 ) -> String {
     // Load theme content
@@ -64,6 +65,7 @@ pub async fn generate_html_page_with_user(
         "content_compact" => &use_compact_width.to_string(),
         "short_paragraph_length" => &render_ctx.config.rendering.short_paragraph_length.to_string(),
         "content_container_style" => &content_container_style,
+        "content_id" => content_id_hex,
     };
 
     render_template(&template, &vars)

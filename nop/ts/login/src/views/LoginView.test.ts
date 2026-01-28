@@ -83,6 +83,42 @@ describe('LoginView', () => {
     expect(screen.getByText('Email is required.')).toBeInTheDocument();
   });
 
+  it('focuses the email field on load', async () => {
+    apiMocks.postJson.mockResolvedValueOnce({
+      response: buildResponse(true),
+      data: { login_session_id: 'session', return_path: null }
+    });
+
+    render(LoginView, { props: { config } });
+
+    await waitFor(() => expect(apiMocks.postJson).toHaveBeenCalledOnce());
+
+    const emailInput = screen.getByLabelText('Email');
+    await waitFor(() => expect(document.activeElement).toBe(emailInput));
+  });
+
+  it('focuses the password field after submitting email', async () => {
+    apiMocks.postJson
+      .mockResolvedValueOnce({
+        response: buildResponse(true),
+        data: { login_session_id: 'session', return_path: null }
+      })
+      .mockResolvedValueOnce({
+        response: buildResponse(true),
+        data: { front_end_salt: 'salt' }
+      });
+
+    render(LoginView, { props: { config } });
+
+    await waitFor(() => expect(apiMocks.postJson).toHaveBeenCalledOnce());
+
+    await userEvent.type(screen.getByLabelText('Email'), 'user@example.com');
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    const passwordInput = await screen.findByLabelText('Password');
+    await waitFor(() => expect(document.activeElement).toBe(passwordInput));
+  });
+
   it('submits email and password then redirects', async () => {
     apiMocks.postJson
       .mockResolvedValueOnce({

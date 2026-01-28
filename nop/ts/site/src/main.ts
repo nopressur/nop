@@ -11,10 +11,9 @@ const stateKey = '__nopSiteNavigationInit' as const;
 const controllerKey = '__nopSiteNavigationController' as const;
 
 function start() {
-  const win = window as typeof window & {
-    [key in typeof stateKey]?: boolean;
-    [key in typeof controllerKey]?: SiteNavigationController;
-  };
+  const win = window as typeof window &
+    Partial<Record<typeof stateKey, boolean>> &
+    Partial<Record<typeof controllerKey, SiteNavigationController>>;
   if (win[stateKey]) {
     return;
   }

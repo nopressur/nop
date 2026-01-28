@@ -24,14 +24,14 @@ impl ReservedPaths {
     }
 
     pub fn new(admin_path: Option<&str>) -> Self {
-        let mut entries = Vec::new();
-
-        entries.push(ReservedPathEntry::exact("robots.txt", true, false));
-        entries.push(ReservedPathEntry::exact("sitemap.xml", true, false));
-        entries.push(ReservedPathEntry::prefix("id", true, false));
-        entries.push(ReservedPathEntry::prefix("login", true, true));
-        entries.push(ReservedPathEntry::prefix("builtin", true, true));
-        entries.push(ReservedPathEntry::prefix("api", true, true));
+        let mut entries = vec![
+            ReservedPathEntry::exact("robots.txt", true, false),
+            ReservedPathEntry::exact("sitemap.xml", true, false),
+            ReservedPathEntry::prefix("id", true, false),
+            ReservedPathEntry::prefix("login", true, true),
+            ReservedPathEntry::prefix("builtin", true, true),
+            ReservedPathEntry::prefix("api", true, true),
+        ];
 
         if let Some(admin_path) = normalize_path(admin_path) {
             entries.push(ReservedPathEntry::prefix(&admin_path, true, false));

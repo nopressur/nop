@@ -15,10 +15,12 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import UploadQueueModal from "../components/UploadQueueModal.svelte";
   import { get } from "svelte/store";
   import { contentListState, setContentListState } from "../stores/contentListState";
+  import { pushNotification } from "../stores/notifications";
   import { useListViewLogic } from "./useListViewLogic";
-  import { clearBrowserTimeout, setBrowserTimeout } from "../services/browser";
+  import { clearBrowserTimeout, setBrowserTimeout, writeClipboardText } from "../services/browser";
   import type { ContentSortField } from "../protocol/content";
   import {
+    buildContentPublicUrl,
     defaultAliasForFile,
     deleteContent,
     listContent,
@@ -283,6 +285,26 @@ The code and documentation in this repository is licensed under the GNU Affero G
     navigate(`/pages/edit/${encodeURIComponent(item.id)}`);
   }
 
+  function hasAlias(item: { alias: string }): boolean {
+    return Boolean(item.alias?.trim());
+  }
+
+  async function copyItemUrl(item: { id: string; alias: string }, useAlias: boolean): Promise<void> {
+    const url = buildContentPublicUrl({
+      id: item.id,
+      alias: useAlias ? item.alias : null,
+    });
+    try {
+      const success = await writeClipboardText(url);
+      if (!success) {
+        throw new Error("copy failed");
+      }
+      pushNotification(useAlias ? "Alias URL copied" : "ID URL copied", "success");
+    } catch {
+      pushNotification(useAlias ? "Failed to copy alias URL" : "Failed to copy ID URL", "error");
+    }
+  }
+
   function handleSort(field: ContentSortField): void {
     if (sortField === field) {
       sortDirection = sortDirection === "asc" ? "desc" : "asc";
@@ -400,6 +422,26 @@ The code and documentation in this repository is licensed under the GNU Affero G
                 {/if}
               </div>
               <div class="flex items-center gap-2 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[10px] tracking-[0.12em]"
+                  aria-label="Copy ID URL"
+                  on:click={() => copyItemUrl(item, false)}
+                >
+                  ID
+                </Button>
+                {#if hasAlias(item)}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-[10px] tracking-[0.12em]"
+                    aria-label="Copy alias URL"
+                    on:click={() => copyItemUrl(item, true)}
+                  >
+                    Alias
+                  </Button>
+                {/if}
                 <Button
                   variant="outline"
                   size="sm"
@@ -569,6 +611,24 @@ The code and documentation in this repository is licensed under the GNU Affero G
                   on:click|stopPropagation
                   on:keydown|stopPropagation
                 >
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Copy ID URL"
+                    on:click={() => copyItemUrl(item, false)}
+                  >
+                    ID
+                  </Button>
+                  {#if hasAlias(item)}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label="Copy alias URL"
+                      on:click={() => copyItemUrl(item, true)}
+                    >
+                      Alias
+                    </Button>
+                  {/if}
                   <Button
                     variant="ghost"
                     size="sm"

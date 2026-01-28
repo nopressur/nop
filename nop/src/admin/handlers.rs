@@ -3,9 +3,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use crate::admin::{middleware, pages, roles, system, tags, themes, users, ws};
+use crate::admin::{middleware, pages, roles, shared, system, tags, themes, users, ws};
+use crate::app_state::AppState;
 use crate::config::ValidatedConfig;
 use crate::management::ws::WS_MAX_MESSAGE_BYTES;
+use crate::public::error;
 use crate::util::{CsrfTokenOutcome, CsrfTokenStore, issue_csrf_token};
 use actix_web::{HttpRequest, HttpResponse, Result, web};
 use serde_json::json;
@@ -36,7 +38,8 @@ pub fn configure(cfg: &mut web::ServiceConfig, admin_path: &str, config: &Arc<Va
                 tags::configure(cfg, "/tags");
                 themes::configure(cfg, "/themes");
                 users::configure(cfg, "/users");
-            }),
+            })
+            .default_service(web::route().to(admin_spa_fallback)),
     );
 }
 
@@ -44,6 +47,30 @@ async fn admin_redirect_to_pages(admin_path: String) -> Result<HttpResponse> {
     Ok(HttpResponse::Found()
         .insert_header(("Location", format!("{}/pages", admin_path)))
         .finish())
+}
+
+async fn admin_spa_fallback(
+    req: HttpRequest,
+    config: web::Data<ValidatedConfig>,
+    app_state: web::Data<AppState>,
+) -> Result<HttpResponse> {
+    if req.method() == actix_web::http::Method::GET || req.method() == actix_web::http::Method::HEAD
+    {
+        log::info!("Admin SPA fallback requested: {}", req.path());
+        return shared::render_admin_spa_shell_response(
+            &req,
+            config.as_ref(),
+            app_state.as_ref(),
+            None,
+        )
+        .await;
+    }
+
+    error::serve_404_for_request(
+        &req,
+        &app_state.error_renderer,
+        Some(app_state.templates.as_ref()),
+    )
 }
 
 /// Get or refresh a CSRF token for the authenticated user

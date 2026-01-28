@@ -9,26 +9,28 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import { notifications, removeNotification } from "../stores/notifications";
 
   const toneStyles: Record<string, string> = {
-    info: "border-accent text-text",
-    success: "border-success text-text",
-    error: "border-danger text-text"
+    info: "bg-[var(--toast-info-bg)] text-[var(--toast-text)]",
+    success: "bg-[var(--toast-success-bg)] text-[var(--toast-text)]",
+    error: "bg-[var(--toast-error-bg)] text-[var(--toast-text)]"
   };
 </script>
 
-<div class="pointer-events-none fixed right-4 top-4 z-50 flex w-[320px] flex-col gap-2">
+<div
+  class="pointer-events-none fixed left-1/2 top-4 z-50 flex w-[90vw] max-w-[400px] -translate-x-1/2 flex-col gap-2"
+>
   {#each $notifications as note (note.id)}
     <div
-      class={`pointer-events-auto flex items-start gap-2 rounded-md border border-border bg-surface px-4 py-3 shadow-soft ${
+      class={`pointer-events-auto flex items-center gap-2 rounded-sm px-3 py-1 shadow-soft ${
         toneStyles[note.tone] || toneStyles.info
       }`}
     >
-      <div class="text-sm leading-snug">{note.message}</div>
+      <div class="min-w-0 flex-1 truncate text-xs leading-tight">{note.message}</div>
       <button
-        class="ml-auto text-xs uppercase tracking-[0.2em] text-muted"
+        class="ml-auto flex-none text-xs text-[var(--toast-text)]"
         on:click={() => removeNotification(note.id)}
         aria-label="Dismiss notification"
       >
-        Close
+        X
       </button>
     </div>
   {/each}

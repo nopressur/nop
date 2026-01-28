@@ -25,6 +25,10 @@
   --danger: #b9382e;
   --success: #2f855a;
   --focus: #0f766e;
+  --toast-info-bg: #cfe9e7;
+  --toast-success-bg: #d7f1de;
+  --toast-error-bg: #f4d6d2;
+  --toast-text: #1c1b1a;
 
   --radius-sm: 4px;
   --radius-md: 6px;

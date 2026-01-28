@@ -67,6 +67,7 @@ import {
   encodeContentUploadStreamInitRequest,
   encodeContentUploadRequest,
 } from "../protocol/content";
+import { getLocationOrigin } from "./browser";
 import { getAdminWsClient } from "../transport/wsClient";
 import { MAX_TAG_ID_CHARS, TAG_ID_PATTERN } from "../validation/tags";
 import { handleResponse } from "./response";
@@ -90,6 +91,33 @@ export type ContentListResponse = {
   pageSize: number;
   items: ContentListItem[];
 };
+
+export function buildContentPublicPath(params: {
+  id: string;
+  alias?: string | null;
+}): string {
+  const aliasValue = params.alias?.trim();
+  if (aliasValue) {
+    const normalized = aliasValue.replace(/^\/+|\/+$/g, "");
+    if (!normalized || normalized.toLowerCase() === "index") {
+      return "/";
+    }
+    return `/${normalized}`;
+  }
+  return `/id/${params.id}`;
+}
+
+export function buildContentPublicUrl(params: {
+  id: string;
+  alias?: string | null;
+}): string {
+  const origin = getLocationOrigin();
+  const path = buildContentPublicPath(params);
+  if (!origin) {
+    return path;
+  }
+  return `${origin}${path}`;
+}
 
 export type UploadStreamInitResponse = {
   uploadId: number;
@@ -514,7 +542,12 @@ function slugifyFilename(name: string): string {
   return replaced.replace(/[^a-z0-9._-]/g, "-");
 }
 
-export function defaultAliasForFile(file: File): string {
+export function defaultAliasForFile(file: File, basePrefix?: string | null): string {
+  const filename = slugifyFilename(file.name);
+  const normalizedPrefix = basePrefix?.trim().replace(/^\/+|\/+$/g, "");
+  if (normalizedPrefix) {
+    return `${normalizedPrefix}/${filename}`;
+  }
   const type = (file.type || "").toLowerCase();
   let prefix = "files";
   if (type.startsWith("image/")) {
@@ -522,7 +555,7 @@ export function defaultAliasForFile(file: File): string {
   } else if (type.startsWith("video/")) {
     prefix = "videos";
   }
-  return `${prefix}/${slugifyFilename(file.name)}`;
+  return `${prefix}/${filename}`;
 }
 
 async function streamFileUpload(params: {

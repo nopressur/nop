@@ -4,9 +4,10 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 import { render, waitFor } from "@testing-library/svelte";
+import { within } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { routerMocks } from "./listViewTestMocks";
+import { notificationMocks, routerMocks } from "./listViewTestMocks";
 import ContentListView from "./ContentListView.svelte";
 
 const contentMocks = vi.hoisted(() => ({
@@ -30,12 +31,34 @@ const contentMocks = vi.hoisted(() => ({
   prevalidateBinaryUpload: vi.fn(),
 }));
 
-vi.mock("../services/content", () => ({
-  defaultAliasForFile: contentMocks.defaultAliasForFile,
-  deleteContent: contentMocks.deleteContent,
-  listContent: contentMocks.listContent,
-  prevalidateBinaryUpload: contentMocks.prevalidateBinaryUpload,
+const browserMocks = vi.hoisted(() => ({
+  getLocationOrigin: vi.fn().mockReturnValue("https://example.test"),
+  writeClipboardText: vi.fn().mockResolvedValue(true),
 }));
+
+vi.mock("../services/browser", async () => {
+  const actual = await vi.importActual<typeof import("../services/browser")>(
+    "../services/browser",
+  );
+  return {
+    ...actual,
+    getLocationOrigin: browserMocks.getLocationOrigin,
+    writeClipboardText: browserMocks.writeClipboardText,
+  };
+});
+
+vi.mock("../services/content", async () => {
+  const actual = await vi.importActual<typeof import("../services/content")>(
+    "../services/content",
+  );
+  return {
+    ...actual,
+    defaultAliasForFile: contentMocks.defaultAliasForFile,
+    deleteContent: contentMocks.deleteContent,
+    listContent: contentMocks.listContent,
+    prevalidateBinaryUpload: contentMocks.prevalidateBinaryUpload,
+  };
+});
 
 vi.mock("../services/tags", () => ({
   listTags: vi.fn().mockResolvedValue([]),
@@ -107,6 +130,144 @@ describe("ContentListView", () => {
         sortField: "title",
         sortDirection: "desc",
       }),
+    );
+  });
+
+  it("copies the ID URL from the actions", async () => {
+    const { container } = render(ContentListView);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(container.querySelector('tr[data-row-index="0"]')).not.toBeNull();
+    });
+    const row = container.querySelector('tr[data-row-index="0"]');
+    expect(row).not.toBeNull();
+
+    const idButton = within(row as HTMLElement).getByRole("button", {
+      name: "Copy ID URL",
+    });
+    await userEvent.click(idButton);
+
+    expect(browserMocks.writeClipboardText).toHaveBeenCalledWith(
+      "https://example.test/id/first-id",
+    );
+    expect(notificationMocks.pushNotification).toHaveBeenCalledWith(
+      "ID URL copied",
+      "success",
+    );
+  });
+
+  it("copies the alias URL when present", async () => {
+    const { container } = render(ContentListView);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(container.querySelector('tr[data-row-index="0"]')).not.toBeNull();
+    });
+    const row = container.querySelector('tr[data-row-index="0"]');
+    expect(row).not.toBeNull();
+
+    const aliasButton = within(row as HTMLElement).getByRole("button", {
+      name: "Copy alias URL",
+    });
+    await userEvent.click(aliasButton);
+
+    expect(browserMocks.writeClipboardText).toHaveBeenCalledWith(
+      "https://example.test/first-item",
+    );
+    expect(notificationMocks.pushNotification).toHaveBeenCalledWith(
+      "Alias URL copied",
+      "success",
+    );
+  });
+
+  it("copies the root URL for index aliases", async () => {
+    contentMocks.listContent.mockResolvedValueOnce({
+      items: [
+        {
+          id: "index-id",
+          title: "Home",
+          alias: "index",
+          tags: [],
+          mime: "text/markdown",
+          navTitle: "",
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    });
+
+    const { container } = render(ContentListView);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(container.querySelector('tr[data-row-index="0"]')).not.toBeNull();
+    });
+    const row = container.querySelector('tr[data-row-index="0"]');
+    expect(row).not.toBeNull();
+
+    const aliasButton = within(row as HTMLElement).getByRole("button", {
+      name: "Copy alias URL",
+    });
+    await userEvent.click(aliasButton);
+
+    expect(browserMocks.writeClipboardText).toHaveBeenCalledWith(
+      "https://example.test/",
+    );
+  });
+
+  it("hides the alias button when no alias exists", async () => {
+    contentMocks.listContent.mockResolvedValueOnce({
+      items: [
+        {
+          id: "no-alias-id",
+          title: "No Alias",
+          alias: "",
+          tags: [],
+          mime: "text/markdown",
+          navTitle: "",
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    });
+
+    const { container } = render(ContentListView);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(container.querySelector('tr[data-row-index="0"]')).not.toBeNull();
+    });
+    const row = container.querySelector('tr[data-row-index="0"]');
+    expect(row).not.toBeNull();
+
+    const aliasButton = within(row as HTMLElement).queryByRole("button", {
+      name: "Copy alias URL",
+    });
+    expect(aliasButton).toBeNull();
+  });
+
+  it("reports clipboard failures", async () => {
+    browserMocks.writeClipboardText.mockResolvedValueOnce(false);
+    const { container } = render(ContentListView);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(container.querySelector('tr[data-row-index="0"]')).not.toBeNull();
+    });
+    const row = container.querySelector('tr[data-row-index="0"]');
+    expect(row).not.toBeNull();
+
+    const idButton = within(row as HTMLElement).getByRole("button", {
+      name: "Copy ID URL",
+    });
+    await userEvent.click(idButton);
+
+    expect(notificationMocks.pushNotification).toHaveBeenCalledWith(
+      "Failed to copy ID URL",
+      "error",
     );
   });
 });

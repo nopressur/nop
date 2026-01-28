@@ -7,6 +7,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { get } from "svelte/store";
   import AceEditor from "../components/AceEditor.svelte";
   import Button from "../components/Button.svelte";
   import ChipSelect from "../components/ChipSelect.svelte";
@@ -19,13 +20,17 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import UploadQueueModal from "../components/UploadQueueModal.svelte";
   import {
     addWindowListener,
+    openNewTab,
     removeWindowListener,
+    writeClipboardText,
   } from "../services/browser";
   import { confirmDialog } from "../stores/confirmDialog";
   import { getAdminRuntimeConfig } from "../config/runtime";
   import { pushNotification } from "../stores/notifications";
   import { route, navigate } from "../stores/router";
+  import { contentListState } from "../stores/contentListState";
   import {
+    buildContentPublicUrl,
     buildInsertSnippet,
     createMarkdownStream,
     defaultAliasForFile,
@@ -68,6 +73,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let tagsLoading = false;
   let themesLoading = false;
   let detailsOpen = false;
+  let detailsRef: HTMLDivElement | null = null;
   let navIndexLoading = false;
   let navIndexItems: ContentNavIndexItem[] = [];
   let navParentOptions: { value: string; label: string }[] = [];
@@ -98,6 +104,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let unsavedModalOpen = false;
   let unsavedModalSaving = false;
   let editorFocused = false;
+  let aliasError = "";
 
   $: currentPath = $route.path;
   $: isNew = currentPath.startsWith("/pages/new");
@@ -155,6 +162,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     contentValue,
     isMarkdown,
   });
+  $: aliasError = aliasLocked ? "" : getAliasValidation(alias).error;
   $: isDirty = !loading && isEditorDirty(initialState, currentState);
 
   function setInitialState(): void {
@@ -169,6 +177,47 @@ The code and documentation in this repository is licensed under the GNU Affero G
       contentValue,
       isMarkdown,
     });
+  }
+
+  function hasAliasValue(value: string): boolean {
+    return Boolean(value?.trim());
+  }
+
+  function hasModifierClick(event?: MouseEvent | CustomEvent<MouseEvent>): boolean {
+    if (!event) {
+      return false;
+    }
+    const source = "detail" in event ? event.detail : event;
+    return Boolean(source?.metaKey || source?.ctrlKey);
+  }
+
+  async function copyEditorUrl(
+    useAlias: boolean,
+    event?: MouseEvent | CustomEvent<MouseEvent>,
+  ): Promise<void> {
+    if (useAlias && !hasAliasValue(currentAlias)) {
+      return;
+    }
+    if (!useAlias && !contentId) {
+      return;
+    }
+    const url = buildContentPublicUrl({
+      id: contentId,
+      alias: useAlias ? currentAlias : null,
+    });
+    if (hasModifierClick(event)) {
+      openNewTab(url);
+      return;
+    }
+    try {
+      const success = await writeClipboardText(url);
+      if (!success) {
+        throw new Error("copy failed");
+      }
+      pushNotification(useAlias ? "Alias URL copied" : "ID URL copied", "success");
+    } catch {
+      pushNotification(useAlias ? "Failed to copy alias URL" : "Failed to copy ID URL", "error");
+    }
   }
 
   function syncTagsWithAvailable(): void {
@@ -316,6 +365,27 @@ The code and documentation in this repository is licensed under the GNU Affero G
       }
       return;
     }
+    if (
+      event.key === "Enter" &&
+      detailsOpen &&
+      detailsRef &&
+      !event.isComposing
+    ) {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        detailsRef.contains(target) &&
+        (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")
+      ) {
+        event.preventDefault();
+        void saveContent().then((saved) => {
+          if (saved) {
+            detailsOpen = false;
+          }
+        });
+        return;
+      }
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       if (insertModalOpen) {
@@ -331,9 +401,10 @@ The code and documentation in this repository is licensed under the GNU Affero G
   }
 
   function resetForm(): void {
+    const listState = get(contentListState);
     alias = "";
     title = "";
-    selectedTags = [];
+    selectedTags = listState.tags?.length ? [...listState.tags] : [];
     navTitle = "";
     navParentId = "";
     navOrder = "";
@@ -347,6 +418,24 @@ The code and documentation in this repository is licensed under the GNU Affero G
     detailsOpen = false;
     editorFocused = false;
     setInitialState();
+  }
+
+  function getAliasValidation(value: string): { value: string | null; error: string } {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return { value: null, error: "" };
+    }
+    const result = normalizeAlias(trimmed, {
+      adminPath: getAdminRuntimeConfig().adminPath,
+    });
+    if (!result.valid) {
+      return { value: null, error: result.error };
+    }
+    return { value: result.value, error: "" };
+  }
+
+  function getAliasPrefix(): string | null {
+    return getAliasValidation(alias).value;
   }
 
   async function loadContent(requestedId: string): Promise<void> {
@@ -384,6 +473,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   ): Promise<boolean> {
     const closeAfterSave = options.closeAfterSave ?? false;
     const trimmedAlias = alias.trim();
+    const trimmedTheme = theme.trim();
     let canonicalAlias: string | null = null;
     if (trimmedAlias) {
       const aliasResult = normalizeAlias(trimmedAlias, {
@@ -444,7 +534,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           navTitle: navTitleValue || null,
           navParentId: navTitleValue ? navParentValue || null : null,
           navOrder: navTitleValue ? navOrderValue : null,
-          theme: theme.trim() || null,
+          theme: trimmedTheme || null,
           content: contentValue || ""
         });
         pushNotification("Content created", "success");
@@ -476,7 +566,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           navTitle: navTitleValue,
           navParentId: navTitleValue ? navParentValue : "",
           navOrder: navTitleValue ? navOrderValue : null,
-          theme: theme.trim() || null,
+          theme: trimmedTheme,
           content: contentValue || ""
         });
       } else {
@@ -488,7 +578,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           navTitle: navTitleValue,
           navParentId: navTitleValue ? navParentValue : "",
           navOrder: navTitleValue ? navOrderValue : null,
-          theme: theme.trim() || null,
+          theme: trimmedTheme,
           content: null
         });
       }
@@ -551,12 +641,13 @@ The code and documentation in this repository is licensed under the GNU Affero G
   }
 
   function buildUploadItem(file: File): UploadItem {
+    const aliasPrefix = getAliasPrefix();
     return {
       id: createUploadId(),
       file,
-      alias: defaultAliasForFile(file),
+      alias: defaultAliasForFile(file, aliasPrefix),
       title: file.name.replace(/\.[^/.]+$/, ""),
-      tags: [],
+      tags: selectedTags.length > 0 ? [...selectedTags] : [],
       status: "prechecking",
       error: null,
       progress: null
@@ -757,7 +848,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
       </div>
 
       {#if detailsOpen}
-        <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <div class="mt-4 grid gap-4 md:grid-cols-2" bind:this={detailsRef}>
           <div>
             <label for="content-alias" class="text-[11px] uppercase tracking-[0.3em] text-muted">Alias</label>
             {#if aliasLocked}
@@ -767,7 +858,12 @@ The code and documentation in this repository is licensed under the GNU Affero G
                 </span>
               </div>
             {:else}
-              <Input id="content-alias" bind:value={alias} className="mt-2" />
+              <Input
+                id="content-alias"
+                bind:value={alias}
+                className="mt-2"
+                error={aliasError}
+              />
             {/if}
           </div>
           <div>
@@ -849,6 +945,23 @@ The code and documentation in this repository is licensed under the GNU Affero G
         <span class="text-[9px] uppercase tracking-[0.28em] text-muted">
           or drop file(s) on the editor
         </span>
+        <CompactButton
+          variant="outline"
+          aria-label="Copy ID URL"
+          disabled={!contentId}
+          on:click={(event) => copyEditorUrl(false, event)}
+        >
+          ID
+        </CompactButton>
+        {#if hasAliasValue(currentAlias)}
+          <CompactButton
+            variant="outline"
+            aria-label="Copy alias URL"
+            on:click={(event) => copyEditorUrl(true, event)}
+          >
+            Alias
+          </CompactButton>
+        {/if}
       </div>
 
       {#if isMarkdown}

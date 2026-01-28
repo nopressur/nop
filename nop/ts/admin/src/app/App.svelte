@@ -21,6 +21,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import UserEditorView from "../routes/UserEditorView.svelte";
   import UserListView from "../routes/UserListView.svelte";
   import SystemSettingsView from "../routes/SystemSettingsView.svelte";
+  import { enforceAdminRoute } from "../routes/routeValidation";
   import { addWindowListener, removeWindowListener } from "../services/browser";
   import { route, isActiveRoute, navigate } from "../stores/router";
 
@@ -61,9 +62,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     };
   });
 
-  $: if (!config.userManagementEnabled && currentPath.startsWith("/users")) {
-    navigate("/pages", true);
-  }
+  $: enforceAdminRoute(currentPath, config.userManagementEnabled);
 
   function href(path: string): string {
     return `${basePath}${path}`;

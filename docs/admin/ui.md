@@ -24,9 +24,11 @@ Status: Developed
   - Support Cmd/Ctrl+S to save in place (prevent default browser behavior).
   - Cancel/Escape return to the last list/filter state stored in memory (not query params or session).
   - Keep the title input always visible and editable.
+  - Alias inputs validate on change and surface inline error states (red border + helper text).
   - Collapse sidecar fields behind a right-aligned chevron toggle that expands downward.
 - Form controls:
   - Theme selection uses a dropdown populated from a lightweight REST endpoint that returns theme names.
+  - Selecting the default theme clears the theme field by sending an empty string; omitted fields are treated as unchanged.
   - Navbar fields include title, parent selection, and numeric order.
   - Tags use a chip-style multi-select from existing tags; missing tags are removed and not shown.
   - Tag roles use a chip-style multi-select from existing roles (`roles.yaml`).
@@ -43,11 +45,14 @@ Status: Developed
     more than one file is queued.
 - The content list includes a multi-select tag filter that matches all selected tags and seeds
   default tags for new uploads.
+  - Content editor uploads inherit the page’s current tag selection, including unsaved edits.
   - Binary uploads run a two-step validation:
     - Pre-validation (filename, mime, size) builds placeholder blocks for rejected files.
     - Upload validation (alias, tags, filename, mime, size) runs on Save/Enter before streaming.
   - Upload progress replaces only the active item; errors restore the editor block with a message.
   - Enter uploads a single item; "Save all" uploads sequentially; the modal closes when all succeed.
+  - When the page alias is valid, editor uploads default to `<page-alias>/<filename>` instead of the
+    type-based alias prefixes.
 
 ### Navbar Fields
 
@@ -64,6 +69,8 @@ Status: Developed
 - Serve a single SPA shell HTML for all admin routes (except login). The shell is a MiniJinja template
   (`nop/src/admin/templates/spa_shell.html`) and mounts the app into a single root element (for example
   `<div id="admin-app"></div>`).
+- The backend must never return Actix's default 404 for admin deep links. Any authenticated admin GET
+  under `adminPath` that is not an API endpoint still serves the SPA shell so the client can handle it.
 - Inline a runtime config object so the SPA never hardcodes `/admin`:
   - `adminPath`, `appName`, `csrfTokenPath`, `wsPath`, `wsTicketPath`.
   - `userManagementEnabled` derived from server-side OIDC config.
@@ -84,6 +91,8 @@ Status: Developed
 - Client-side guards:
   - Hide Users navigation when `userManagementEnabled` is false.
   - Redirect `/users*` to `/pages` when users are disabled.
+- Invalid admin routes redirect to `/pages` and show a toast indicating the URL was invalid (no 404
+  view inside the SPA).
 - Keep existing query params for compatibility where they remain in use (for example,
   `/tags/edit?id=...`).
 
@@ -189,6 +198,10 @@ Status: Developed
 - Shared components replace current duplicated JS helpers:
   - `NotificationToaster`, `Pagination`, `Button`, `Input`, `Select`, `AceEditor`.
 - Toast notifications must emit a console log with the same message and a tone-based severity.
+- Toast notifications are centered horizontally at the top of the viewport, can overlap the navbar, and use
+  a compact single-line layout with `max-width: 400px` and `width: 90vw` (truncate overflow if needed).
+- Toast backgrounds use light tone colors (consistent in light and dark modes) with black text and an "X"
+  dismiss affordance (button retains `aria-label="Dismiss notification"`).
 - Legacy global utilities are removed after the SPA cutover.
 
 ### Build Pipeline and Embedding

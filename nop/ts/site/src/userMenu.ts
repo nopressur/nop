@@ -8,6 +8,8 @@ import type { SiteNavigationController } from './navigation';
 
 const PROFILE_ENDPOINT = '/api/profile';
 const MENU_ROOT_SELECTOR = '[data-site-user-menu]';
+const CONTENT_ID_SELECTOR = '[data-site-content-id]';
+const EDIT_BUTTON_SELECTOR = '[data-site-edit-button]';
 
 type ProfileMenuItem = {
   key: string;
@@ -41,6 +43,7 @@ function buildMenu(displayName: string, menuItems: ProfileMenuItem[]): HTMLEleme
   const wrapper = document.createElement('div');
   wrapper.className = 'navbar-item has-dropdown';
   wrapper.dataset.siteDropdown = '';
+  wrapper.dataset.siteUserMenu = '';
 
   const toggle = document.createElement('a');
   toggle.className = 'navbar-link';
@@ -74,6 +77,46 @@ function buildMenu(displayName: string, menuItems: ProfileMenuItem[]): HTMLEleme
   return wrapper;
 }
 
+function buildEditButton(adminPath: string, contentId: string): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'navbar-item';
+  wrapper.dataset.siteEditButton = '';
+
+  const link = document.createElement('a');
+  link.className = 'button is-small';
+  link.textContent = 'Edit';
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.href = `${adminPath.replace(/\/$/, '')}/pages/edit/${encodeURIComponent(contentId)}`;
+
+  wrapper.appendChild(link);
+  return wrapper;
+}
+
+function getContentId(): string | null {
+  const container = document.querySelector<HTMLElement>(CONTENT_ID_SELECTOR);
+  const contentId = container?.dataset.siteContentId?.trim();
+  if (!contentId) {
+    return null;
+  }
+  return contentId;
+}
+
+function clearEditButton(root: HTMLElement) {
+  const parent = root.parentElement;
+  if (!parent) {
+    return;
+  }
+  parent.querySelectorAll(EDIT_BUTTON_SELECTOR).forEach((button) => button.remove());
+}
+
+function resetMenuRoot(root: HTMLElement) {
+  root.className = '';
+  root.textContent = '';
+  delete root.dataset.siteDropdown;
+  delete root.dataset.siteDropdownHover;
+}
+
 async function performAction(href: string, method: string) {
   try {
     const response = await fetch(href, {
@@ -95,6 +138,7 @@ async function refreshUserMenu() {
   if (!root) {
     return;
   }
+  clearEditButton(root);
 
   try {
     const response = await fetch(PROFILE_ENDPOINT, {
@@ -108,18 +152,25 @@ async function refreshUserMenu() {
 
     const payload = (await response.json()) as ProfileResponse;
     if (!payload.authenticated || !payload.menu_items?.length) {
-      root.innerHTML = '';
+      resetMenuRoot(root);
       return;
     }
 
     const displayName = payload.display_name?.trim() || 'Account';
     const menu = buildMenu(displayName, payload.menu_items);
-    root.innerHTML = '';
-    root.appendChild(menu);
+    root.replaceWith(menu);
     resolveSiteNavigation().registerDropdowns(menu);
+
+    const adminItem = payload.menu_items.find((item) => item.key === 'admin');
+    const contentId = getContentId();
+    const parent = menu.parentElement;
+    if (adminItem && adminItem.href && contentId && parent) {
+      const editButton = buildEditButton(adminItem.href, contentId);
+      parent.insertBefore(editButton, menu);
+    }
   } catch (error) {
     console.error('Failed to load profile menu:', error);
-    root.innerHTML = '';
+    resetMenuRoot(root);
   }
 }
 

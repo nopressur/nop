@@ -293,10 +293,10 @@ async fn lookup_zone_for_name(resolver: &TokioAsyncResolver, name: &str) -> io::
     let mut current = name.trim_end_matches('.').to_string();
     loop {
         let query = format!("{current}.");
-        if let Ok(lookup) = resolver.lookup(query.as_str(), RecordType::SOA).await {
-            if let Some(record) = lookup.record_iter().next() {
-                return Ok(record.name().to_utf8());
-            }
+        if let Ok(lookup) = resolver.lookup(query.as_str(), RecordType::SOA).await
+            && let Some(record) = lookup.record_iter().next()
+        {
+            return Ok(record.name().to_utf8());
         }
         if let Some((_, parent)) = current.split_once('.') {
             current = parent.to_string();
@@ -617,19 +617,18 @@ impl Solver for Dns01PropagationSolver {
             );
             tokio::time::sleep(self.propagation_delay).await;
         }
-        if self.propagation_check {
-            if let Err(err) = self
+        if self.propagation_check
+            && let Err(err) = self
                 .wait_for_propagation(&name, &key_authorization, attempts, interval)
                 .await
-            {
-                if let Err(clean_err) = self.inner.cleanup(&cleanup_token).await {
-                    warn!(
-                        "ACME DNS-01 cleanup failed after propagation error (domain={}, error={})",
-                        domain, clean_err
-                    );
-                }
-                return Err(Box::new(err));
+        {
+            if let Err(clean_err) = self.inner.cleanup(&cleanup_token).await {
+                warn!(
+                    "ACME DNS-01 cleanup failed after propagation error (domain={}, error={})",
+                    domain, clean_err
+                );
             }
+            return Err(Box::new(err));
         }
         Ok(())
     }
@@ -1022,16 +1021,15 @@ fn build_dns_solver(acme: &AcmeConfig) -> io::Result<Box<dyn Solver + Send + Syn
         Arc::new(ExplicitDnsResolver::new(dns)?)
     };
     let propagation_delay = StdDuration::from_secs(dns.propagation_delay_seconds);
+    let solver_label = format!("dns-01:{provider}");
     info!(
         "ACME DNS-01 propagation configured (check_enabled={}, delay={:?}, solver={})",
-        dns.propagation_check,
-        propagation_delay,
-        format!("dns-01:{}", provider)
+        dns.propagation_check, propagation_delay, solver_label
     );
     Ok(Box::new(Dns01PropagationSolver::new(
         solver,
         resolver,
-        format!("dns-01:{}", provider),
+        solver_label,
         dns.propagation_check,
         propagation_delay,
     )))

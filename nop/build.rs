@@ -265,10 +265,10 @@ fn ensure_ace_assets(
         if !path.is_file() {
             panic!("Ace asset still missing after update: {}", path.display());
         }
-        if let Ok(metadata) = fs::metadata(&path) {
-            if metadata.len() == 0 {
-                panic!("Ace asset is empty after update: {}", path.display());
-            }
+        if let Ok(metadata) = fs::metadata(&path)
+            && metadata.len() == 0
+        {
+            panic!("Ace asset is empty after update: {}", path.display());
         }
     }
 }

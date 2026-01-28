@@ -1898,7 +1898,7 @@ dependencies = [
 
 [[package]]
 name = "nop"
-version = "0.1.23"
+version = "0.1.25"
 dependencies = [
  "actix-files",
  "actix-http",

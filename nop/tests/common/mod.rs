@@ -8,7 +8,7 @@
 pub mod ws;
 
 use actix_web::dev::{ServiceFactory, ServiceRequest, ServiceResponse};
-use actix_web::{App, web};
+use actix_web::{App, HttpRequest, HttpResponse, Result, web};
 use nop::admin;
 use nop::api;
 use nop::app_state::AppState;
@@ -254,6 +254,18 @@ pub fn build_test_app(
         .configure(api::configure)
         .configure(builtin::configure)
         .configure(public::configure)
+        .default_service(web::route().to(test_default_not_found))
+}
+
+async fn test_default_not_found(
+    req: HttpRequest,
+    app_state: web::Data<AppState>,
+) -> Result<HttpResponse> {
+    nop::public::error::serve_404_for_request(
+        &req,
+        &app_state.error_renderer,
+        Some(app_state.templates.as_ref()),
+    )
 }
 
 pub fn add_auth_headers(

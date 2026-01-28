@@ -6,7 +6,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 -->
 
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { deriveFrontEndHash } from '../argon';
   import { postJson } from '../api';
   import type {
@@ -24,10 +24,23 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let loginSessionId = '';
   let returnPath: string | null = config.returnPath ?? null;
   let step: 'email' | 'password' = 'email';
+  let emailInput: HTMLInputElement | null = null;
+  let passwordInput: HTMLInputElement | null = null;
+  let lastFocusedStep: 'email' | 'password' | null = null;
   let error = '';
   let info = '';
   let busy = false;
   let hashing = false;
+
+  async function focusStep(target: 'email' | 'password') {
+    await tick();
+    if (target === 'email') {
+      emailInput?.focus();
+    } else {
+      passwordInput?.focus();
+    }
+    lastFocusedStep = target;
+  }
 
   function resetToEmail(message: string) {
     error = message;
@@ -178,6 +191,10 @@ The code and documentation in this repository is licensed under the GNU Affero G
     error = '';
   }
 
+  $: if (step !== lastFocusedStep) {
+    void focusStep(step);
+  }
+
   onMount(() => {
     void bootstrapSession();
   });
@@ -212,6 +229,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           type="email"
           class="input"
           bind:value={email}
+          bind:this={emailInput}
           autocomplete="email"
           placeholder="name@example.com"
         />
@@ -228,6 +246,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           type="password"
           class="input"
           bind:value={password}
+          bind:this={passwordInput}
           autocomplete="current-password"
           placeholder="••••••••"
         />

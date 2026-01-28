@@ -43,41 +43,51 @@ pub(super) struct RenderedMarkdown {
     pub(super) use_compact_width: bool,
 }
 
+pub(super) struct RenderRequest<'a> {
+    pub(super) result: &'a gray_matter::ParsedEntity,
+    pub(super) shortcode_registry: &'a ShortcodeRegistry,
+    pub(super) options: &'a Options,
+    pub(super) sanitizer: &'a HtmlSanitizer,
+    pub(super) cache: &'a PageMetaCache,
+    pub(super) md_path: &'a str,
+    pub(super) user: Option<&'a User>,
+    pub(super) short_paragraph_length: usize,
+}
+
 pub(super) fn generate_html(
-    result: &gray_matter::ParsedEntity,
-    shortcode_registry: &ShortcodeRegistry,
-    options: &Options,
-    sanitizer: &HtmlSanitizer,
-    cache: &PageMetaCache,
-    md_path: &str,
-    user: Option<&User>,
-    short_paragraph_length: usize,
+    request: &RenderRequest<'_>,
 ) -> Result<RenderedMarkdown, MarkdownRenderError> {
     // Process shortcodes to build mapping (original text unchanged)
-    let shortcode_ctx = ShortcodeContext { cache, user };
-    let shortcode_result =
-        process_text_with_shortcodes(&result.content, shortcode_registry, &shortcode_ctx);
+    let shortcode_ctx = ShortcodeContext {
+        cache: request.cache,
+        user: request.user,
+    };
+    let shortcode_result = process_text_with_shortcodes(
+        &request.result.content,
+        request.shortcode_registry,
+        &shortcode_ctx,
+    );
 
     let use_compact_width = should_use_compact_width(
         &shortcode_result.processed_text,
-        options,
-        short_paragraph_length,
+        request.options,
+        request.short_paragraph_length,
     );
 
     // Parse the markdown content (shortcode strings will be treated as regular text)
-    let parser = Parser::new_ext(&shortcode_result.processed_text, *options);
+    let parser = Parser::new_ext(&shortcode_result.processed_text, *request.options);
 
     // Process events with custom logic for images and links
-    let events = parser.map(|event| process_event(event, md_path, cache));
+    let events = parser.map(|event| process_event(event, request.md_path, request.cache));
 
     let mut html_output = String::new();
     html::push_html(&mut html_output, events);
 
     // Sanitize HTML output from Markdown conversion (shortcode strings are just text so they're safe)
-    let sanitized_html = sanitizer.clean(&html_output);
+    let sanitized_html = request.sanitizer.clean(&html_output);
 
     // Post-process HTML to add target="_blank" to external links (before shortcode replacement)
-    let processed_html = post_process_html(sanitized_html, md_path, cache)?;
+    let processed_html = post_process_html(sanitized_html, request.md_path, request.cache)?;
 
     // Replace shortcode strings with their rendered HTML as the final step
 
@@ -543,7 +553,8 @@ mod tests {
         UploadConfig, ValidatedConfig, test_local_users_config,
     };
     use crate::content::flat_storage::{
-        ContentId, ContentSidecar, ContentVersion, blob_path, sidecar_path, write_sidecar_atomic,
+        ContentId, ContentSidecar, ContentVersion, blob_path, content_id_hex, sidecar_path,
+        write_sidecar_atomic,
     };
     use crate::public::PageRenderContext;
     use crate::public::nav::generate_navigation_with_user;
@@ -657,6 +668,28 @@ mod tests {
         HtmlSanitizer::new()
     }
 
+    fn render_markdown(
+        parsed_entity: &gray_matter::ParsedEntity,
+        registry: &ShortcodeRegistry,
+        options: &Options,
+        sanitizer: &HtmlSanitizer,
+        cache: &PageMetaCache,
+        md_path: &str,
+        short_paragraph_length: usize,
+    ) -> RenderedMarkdown {
+        generate_html(&RenderRequest {
+            result: parsed_entity,
+            shortcode_registry: registry,
+            options,
+            sanitizer,
+            cache,
+            md_path,
+            user: None,
+            short_paragraph_length,
+        })
+        .expect("render markdown")
+    }
+
     #[test]
     fn test_generate_html_pure_markdown() {
         // Test pure markdown rendering without any shortcodes
@@ -697,17 +730,15 @@ Here's a [link to example](https://example.com).
         let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
-        let rendered = generate_html(
+        let rendered = render_markdown(
             &parsed_entity,
             &registry,
             &options,
             &sanitizer,
             &cache,
             "test.md",
-            None,
             256,
-        )
-        .expect("render markdown");
+        );
         let html = rendered.html;
 
         // Check basic markdown elements are rendered
@@ -761,17 +792,15 @@ Some text after the videos."#;
         let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
-        let rendered = generate_html(
+        let rendered = render_markdown(
             &parsed_entity,
             &registry,
             &options,
             &sanitizer,
             &cache,
             "test.md",
-            None,
             256,
-        )
-        .expect("render markdown");
+        );
         let html = rendered.html;
 
         // Check that shortcode placeholders are not present in final output
@@ -821,17 +850,15 @@ Some text after."#;
         let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
-        let rendered = generate_html(
+        let rendered = render_markdown(
             &parsed_entity,
             &registry,
             &options,
             &sanitizer,
             &cache,
             "test.md",
-            None,
             256,
-        )
-        .expect("render markdown");
+        );
         let html = rendered.html;
 
         // Check that original shortcode is left in place when there's an error
@@ -864,17 +891,15 @@ Some text after the cards."#;
         let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
-        let rendered = generate_html(
+        let rendered = render_markdown(
             &parsed_entity,
             &registry,
             &options,
             &sanitizer,
             &cache,
             "test.md",
-            None,
             256,
-        )
-        .expect("render markdown");
+        );
         let html = rendered.html;
 
         // Check that shortcode strings are not present in final output (they should be replaced)
@@ -928,17 +953,15 @@ Some text after."#;
         let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
-        let rendered = generate_html(
+        let rendered = render_markdown(
             &parsed_entity,
             &registry,
             &options,
             &sanitizer,
             &cache,
             "test.md",
-            None,
             256,
-        )
-        .expect("render markdown");
+        );
         let html = rendered.html;
 
         // Check that original shortcodes are left in place when there are errors
@@ -991,17 +1014,15 @@ End of content with ~~strikethrough~~."#;
         let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
-        let rendered = generate_html(
+        let rendered = render_markdown(
             &parsed_entity,
             &registry,
             &options,
             &sanitizer,
             &cache,
             "test.md",
-            None,
             256,
-        )
-        .expect("render markdown");
+        );
         let html = rendered.html;
 
         // Check that all shortcodes were processed
@@ -1070,17 +1091,15 @@ JavaScript in user content: <a href="javascript:alert('bad')">bad link</a>"#;
         let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
-        let rendered = generate_html(
+        let rendered = render_markdown(
             &parsed_entity,
             &registry,
             &options,
             &sanitizer,
             &cache,
             "test.md",
-            None,
             256,
-        )
-        .expect("render markdown");
+        );
         let html = rendered.html;
 
         // Check that dangerous HTML from user content is removed
@@ -1126,17 +1145,15 @@ Just regular **markdown** content.
         let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
-        let rendered = generate_html(
+        let rendered = render_markdown(
             &parsed_entity,
             &registry,
             &options,
             &sanitizer,
             &cache,
             "test.md",
-            None,
             256,
-        )
-        .expect("render markdown");
+        );
         let html = rendered.html;
 
         // Check that regular markdown is processed
@@ -1218,14 +1235,14 @@ Just regular **markdown** content.
         let theme = sidecar.theme.as_deref();
 
         let sanitizer = create_test_sanitizer();
-        let rendered = generate_html(
-            &parsed, &registry, &options, &sanitizer, &cache, "about", None, 256,
-        )
-        .expect("render markdown");
+        let rendered = render_markdown(
+            &parsed, &registry, &options, &sanitizer, &cache, "about", 256,
+        );
         let navigation = generate_navigation_with_user(&cache, None);
         let release_tracker = ReleaseTracker::new();
         let templates = MiniJinjaEngine::new();
 
+        let content_id_hex_value = content_id_hex(content_id);
         let render_ctx = PageRenderContext {
             config: &config,
             runtime_paths: &runtime_paths,
@@ -1238,6 +1255,7 @@ Just regular **markdown** content.
             &rendered.html,
             &navigation,
             rendered.use_compact_width,
+            &content_id_hex_value,
             &render_ctx,
         ));
 
@@ -1246,6 +1264,10 @@ Just regular **markdown** content.
         assert!(html_page.contains("Blue Theme - Cool and professional"));
         assert!(html_page.contains("Test App"));
         assert!(html_page.contains("/builtin/bulma.min.css?v="));
+        assert!(html_page.contains(&format!(
+            "data-site-content-id=\"{}\"",
+            content_id_hex_value
+        )));
         assert!(!html_page.contains("{title}"));
         assert!(!html_page.contains("{content}"));
         assert!(!html_page.contains("{nav_html}"));

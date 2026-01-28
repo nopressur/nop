@@ -115,6 +115,15 @@ The public pipeline reads metadata from RON sidecar files, not front matter.
 - Admin code never reads `themes/`; only the public renderer loads themes.
 - Public markdown pages apply a content-width cap in the main layout: 1152px when any paragraph (including tight list items) exceeds `rendering.short_paragraph_length` (default 256), otherwise 960px. Set `rendering.short_paragraph_length` to `0` to disable compact width entirely. The navbar container is not affected.
 
+### Admin Edit Button (Public Navbar)
+
+- Markdown pages render `data-site-content-id` (hex) in `public/templates/main_layout.html` for frontend use.
+- The site menu script (`nop/ts/site/src/userMenu.ts`) calls `/api/profile`; when the response includes the
+  admin menu item and a content ID is present, it inserts an `Edit` button immediately to the left of the
+  profile dropdown.
+- The edit button opens a new tab to `<admin_path>/pages/edit/<content_id>`. Admin access is treated as
+  all-or-nothing; if the profile payload reports the admin menu item, the button is shown.
+
 ### Navigation
 
 - The top navigation bar is explicit; no hierarchy is derived from paths.
