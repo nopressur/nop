@@ -486,6 +486,17 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await expect(page.locator("tr", { hasText: "UI Test" })).toBeVisible();
   await humanClick(page.locator("tr", { hasText: "UI Test" }).getByText("docs/ui-test"), rng);
   await expect(page.getByRole("heading", { name: "Edit Content" })).toBeVisible();
+
+  const navMenuButtonAfterEdit = page.getByRole("button", { name: "Menu" });
+  if (await navMenuButtonAfterEdit.isVisible()) {
+    await humanClick(navMenuButtonAfterEdit, rng);
+  }
+  await humanClick(page.getByRole("link", { name: "Content" }), rng);
+  await expect(page.getByRole("heading", { name: "Content Library" })).toBeVisible();
+  await expect(page.locator("#content-tags-filter")).toContainText("featured");
+
+  await humanClick(page.locator("tr", { hasText: "UI Test" }).getByText("docs/ui-test"), rng);
+  await expect(page.getByRole("heading", { name: "Edit Content" })).toBeVisible();
   await humanClearAndType(page.locator("#content-title"), "UI Test Draft", rng);
 
   await page.keyboard.press("Escape");

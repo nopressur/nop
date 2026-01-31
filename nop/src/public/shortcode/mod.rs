@@ -7,13 +7,13 @@ use crate::iam::User;
 use crate::public::page_meta_cache::PageMetaCache;
 use crate::util::ReleaseTracker;
 use nom::{
-    IResult,
+    IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take_until, take_while1},
     character::complete::{alpha1, alphanumeric1, char, multispace0, multispace1},
     combinator::{map, recognize},
     multi::many0,
-    sequence::{delimited, pair, preceded, separated_pair, tuple},
+    sequence::{delimited, pair, preceded, separated_pair},
 };
 use sha2::{Digest, Sha512};
 use std::collections::HashMap;
@@ -279,22 +279,23 @@ fn shortcode_name(input: &str) -> IResult<&str, &str> {
     recognize(pair(
         alt((alpha1, tag("_"), tag("-"))),
         many0(alt((alphanumeric1, tag("-"), tag("_")))),
-    ))(input)
+    ))
+    .parse(input)
 }
 
 // Parse quoted string value
 fn quoted_value(input: &str) -> IResult<&str, &str> {
-    delimited(char('"'), take_until("\""), char('"'))(input)
+    delimited(char('"'), take_until("\""), char('"')).parse(input)
 }
 
 // Parse unquoted value (numbers, booleans, or simple strings without spaces)
 fn unquoted_value(input: &str) -> IResult<&str, &str> {
-    take_while1(|c: char| !c.is_whitespace() && c != ')')(input)
+    take_while1(|c: char| !c.is_whitespace() && c != ')').parse(input)
 }
 
 // Parse attribute value (quoted or unquoted)
 fn attribute_value(input: &str) -> IResult<&str, &str> {
-    alt((quoted_value, unquoted_value))(input)
+    alt((quoted_value, unquoted_value)).parse(input)
 }
 
 // Parse single attribute
@@ -311,27 +312,29 @@ fn attribute(input: &str) -> IResult<&str, (String, String)> {
         ),
         // standalone flag (e.g., "controls", "noblank")
         map(shortcode_name, |k| (k.to_string(), String::new())),
-    ))(input)
+    ))
+    .parse(input)
 }
 
 // Parse shortcode content inside ((  ))
 fn shortcode_content(input: &str) -> IResult<&str, Shortcode> {
     map(
-        tuple((
+        (
             preceded(multispace0, shortcode_name),
             many0(preceded(multispace1, attribute)),
             multispace0,
-        )),
+        ),
         |(name, attrs, _)| Shortcode {
             name: name.to_string(),
             attributes: attrs.into_iter().collect(),
         },
-    )(input)
+    )
+    .parse(input)
 }
 
 // Parse complete shortcode with (( )) delimiters
 fn nom_parse_shortcode(input: &str) -> IResult<&str, Shortcode> {
-    delimited(tag("(("), shortcode_content, tag("))"))(input)
+    delimited(tag("(("), shortcode_content, tag("))")).parse(input)
 }
 
 /// Parse a shortcode from text starting at the beginning using nom

@@ -90,8 +90,8 @@ pub fn scan_themes_directory(themes_dir: &Path) -> Vec<ThemeFile> {
                 continue;
             }
 
-            // Only include .html files
-            if path.is_file() && name_str.ends_with(".html") {
+            // Only include .theme files
+            if path.is_file() && name_str.ends_with(".theme") {
                 let file_stem = match path.file_stem() {
                     Some(stem) => stem.to_string_lossy(),
                     None => {

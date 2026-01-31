@@ -50,11 +50,6 @@ fn embedded_template_loader(name: &str) -> Result<Option<String>, minijinja::Err
         // Admin SPA shell
         "admin/spa_shell.html" => Some(include_str!("../admin/templates/spa_shell.html")),
 
-        // Public user navigation templates
-        "public/user_nav_local.html" => {
-            Some(include_str!("../public/templates/user_nav_local.html"))
-        }
-        "public/user_nav_oidc.html" => Some(include_str!("../public/templates/user_nav_oidc.html")),
         "public/nav.html" => Some(include_str!("../public/templates/nav.html")),
 
         // Public shortcode templates

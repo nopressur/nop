@@ -12,6 +12,7 @@ export { default as Input } from "./Input.svelte";
 export { default as InsertContentModal } from "./InsertContentModal.svelte";
 export { default as NotificationToaster } from "./NotificationToaster.svelte";
 export { default as Pagination } from "./Pagination.svelte";
+export { default as SearchInput } from "./SearchInput.svelte";
 export { default as Select } from "./Select.svelte";
 export { default as UnsavedChangesModal } from "./UnsavedChangesModal.svelte";
 export { default as UploadOverlay } from "./UploadOverlay.svelte";

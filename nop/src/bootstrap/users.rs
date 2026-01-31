@@ -6,7 +6,7 @@
 use super::{BootstrapError, log_action, log_warning};
 use crate::config::ValidatedConfig;
 use crate::iam::build_password_provider_block;
-use openssl::rand::rand_bytes;
+use getrandom::fill;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -79,7 +79,7 @@ fn users_path(root: &Path) -> Result<PathBuf, BootstrapError> {
 
 fn generate_password() -> Result<String, BootstrapError> {
     let mut bytes = [0u8; ADMIN_PASSWORD_LENGTH];
-    rand_bytes(&mut bytes).map_err(|err| {
+    fill(&mut bytes).map_err(|err| {
         BootstrapError::Io(io::Error::other(format!(
             "Failed to generate admin password: {}",
             err

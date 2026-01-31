@@ -46,7 +46,8 @@ Helper functions produce ready-to-render contexts:
 ## Fallbacks
 
 - `load_template(name)` exposes a direct string loader for select templates (`public/main_layout`). It returns `std::io::Error` if the template name is unknown.
-- Public theme failures fall back to `get_fallback_theme()` (defined in `public::markdown`), not the template layer.
+- Public theme failures fall back to `get_fallback_theme()` (defined in `public::markdown`), not the
+  template layer (see `docs/content/themes.md` for theme loading details).
 
 ## Adding Templates
 

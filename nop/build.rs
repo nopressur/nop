@@ -32,6 +32,8 @@ fn main() {
     let bulma_script = scripts_root.join("update-bulma.sh");
     let bulma_version = scripts_root.join("bulma-version.txt");
     let bulma_css = builtin_root.join("bulma.min.css");
+    let theme_preset_source = site_root.join("theme-preset.css");
+    let theme_preset_css = builtin_root.join("theme-preset.css");
     let ace_script = scripts_root.join("update-ace.sh");
     let ace_version = scripts_root.join("ace-version.txt");
     let ace_assets = vec![
@@ -169,6 +171,10 @@ fn main() {
             }
         }
     }
+    println!(
+        "cargo:rerun-if-changed={}",
+        theme_preset_source.display()
+    );
 
     ensure_bulma_css(&bulma_script, &bulma_version, &bulma_css, &manifest_dir);
     ensure_ace_assets(
@@ -181,6 +187,7 @@ fn main() {
     ensure_admin_spa(&admin_root, &admin_output);
     let login_version = ensure_login_spa(&login_root, &builtin_root, &login_version_file);
     ensure_site_bundle(&site_root, &site_output);
+    ensure_theme_preset(&theme_preset_source, &theme_preset_css);
 
     let out_dir = env::var("OUT_DIR").unwrap();
     write_login_spa_version(&out_dir, &login_version);
@@ -271,6 +278,31 @@ fn ensure_ace_assets(
             panic!("Ace asset is empty after update: {}", path.display());
         }
     }
+}
+
+fn ensure_theme_preset(theme_preset_source: &Path, theme_preset_css: &Path) {
+    if !theme_preset_source.is_file() {
+        panic!(
+            "Theme preset source missing: {}",
+            theme_preset_source.display()
+        );
+    }
+
+    if let Some(parent) = theme_preset_css.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).unwrap();
+        }
+    }
+
+    if theme_preset_css.is_file() {
+        let source_bytes = fs::read(theme_preset_source).unwrap();
+        let dest_bytes = fs::read(theme_preset_css).unwrap();
+        if source_bytes == dest_bytes {
+            return;
+        }
+    }
+
+    fs::copy(theme_preset_source, theme_preset_css).unwrap();
 }
 
 fn ensure_admin_spa(admin_root: &Path, admin_output: &Path) {

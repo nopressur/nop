@@ -32,10 +32,10 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 ### Content Storage and Public Model
 - `docs/infrastructure/storage.md` - On-disk content contract, sidecar metadata, and write expectations.
 - `docs/content/content-model.md` - Routing, rendering, navigation, and public access control rules.
+- `docs/content/themes.md` - Theme file format, palettes, and public theme rendering pipeline.
 - `docs/modules/shortcodes.md` - Parser syntax, built-in handlers, extension workflow.
 - `docs/content/public-rbac.md` - Public RBAC rules and access outcomes.
 - `docs/content/role-management.md` - Role storage, validation, CRUD, and cascades.
-- `docs/content/file-migration.md` - Legacy migration into flat storage.
 
 ### Admin Experience
 - `docs/content/content-management.md` - Admin content operations, uploads, metadata edits, and cache updates.
@@ -83,6 +83,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 - `docs/devops/playwright-ui-tests.md` - UI test harness and workflows.
 - `docs/content/tags.md` - Tag model, access rules, and listing behavior.
 - `docs/infrastructure/tls.md` - TLS feature behavior and validation rules.
+- `docs/infrastructure/acme.md` - ACME issuance, challenges, and provider requirements.
 - `docs/infrastructure/tantivy.md` - Tantivy in-memory directory example and notes.
 
 ### Core Runtime
@@ -115,7 +116,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
   `docs/infrastructure/filesystem-security.md`, `docs/infrastructure/csrf-protection.md`, `docs/standards/coding.md`.
 - **Changing Build/Deployment** -> `docs/devops/build-and-release.md`, `docs/devops/configuration.md`.
 - **Introducing Templates/Assets** -> `docs/infrastructure/templates.md`, `docs/content/content-model.md`.
-- **Changing Storage Layout** -> `docs/infrastructure/storage.md`, `docs/content/file-migration.md`, `docs/content/content-model.md`.
+- **Changing Storage Layout** -> `docs/infrastructure/storage.md`, `docs/content/content-model.md`.
 
 <!--
 This file is part of the product NoPressure.

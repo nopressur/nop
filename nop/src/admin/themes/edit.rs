@@ -4,6 +4,7 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use crate::admin::shared;
+use crate::bootstrap::paths::RED_THEME_THEME;
 use crate::app_state::AppState;
 use crate::config::ValidatedConfig;
 use crate::headers::{generate_csp_nonce, set_strict_csp};
@@ -16,7 +17,7 @@ use tokio::fs;
 
 fn build_theme_path(theme_name: &str, themes_dir: &Path) -> std::result::Result<PathBuf, String> {
     security::validate_new_file_name(theme_name)?;
-    let filename = format!("{}.html", theme_name);
+    let filename = format!("{}.theme", theme_name);
     security::validate_new_file_path(&filename, themes_dir)
 }
 
@@ -53,7 +54,7 @@ pub async fn themes_new(
     app_state: web::Data<AppState>,
 ) -> Result<HttpResponse> {
     // Read the default theme content to use as template
-    let default_theme_path = app_state.runtime_paths.themes_dir.join("default.html");
+    let default_theme_path = app_state.runtime_paths.themes_dir.join("default.theme");
     let default_theme_content = match fs::read_to_string(&default_theme_path).await {
         Ok(content) => content,
         Err(e) => {
@@ -65,26 +66,7 @@ pub async fn themes_new(
             );
 
             // Fallback to a basic template - completely static, no error details
-            r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{title}}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-</head>
-<body>
-    <section class="section">
-        <div class="container">
-            <h1 class="title">{{title}}</h1>
-            <div class="content">
-                {{content}}
-            </div>
-        </div>
-    </section>
-</body>
-</html>"#
-                .to_string()
+            RED_THEME_THEME.to_string()
         }
     };
 

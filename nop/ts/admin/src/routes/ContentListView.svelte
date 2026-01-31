@@ -9,8 +9,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import { onMount } from "svelte";
   import Button from "../components/Button.svelte";
   import CompactMultiSelect from "../components/CompactMultiSelect.svelte";
-  import Input from "../components/Input.svelte";
   import Pagination from "../components/Pagination.svelte";
+  import SearchInput from "../components/SearchInput.svelte";
   import UploadOverlay from "../components/UploadOverlay.svelte";
   import UploadQueueModal from "../components/UploadQueueModal.svelte";
   import { get } from "svelte/store";
@@ -52,6 +52,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let uploadModalOpen = false;
   let uploadItems: UploadItem[] = [];
   let tagsLoading = false;
+  let tagsLoaded = false;
   let availableTags: string[] = [];
   let listRef: HTMLTableSectionElement | null = null;
 
@@ -256,6 +257,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
       notifyError(error, "Failed to load tags");
     } finally {
       tagsLoading = false;
+      tagsLoaded = true;
     }
   }
 
@@ -351,7 +353,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   <div class="-mx-6 bg-surface px-4 py-4 md:mx-0 md:rounded-lg md:border md:border-border md:shadow-soft">
     <div class="flex flex-wrap items-end gap-3">
       <div class="flex-1 min-w-[220px]">
-        <Input bind:value={query} placeholder="Search titles" />
+        <SearchInput bind:value={query} placeholder="Search titles" />
       </div>
       <div class="min-w-[200px]">
         <label
@@ -365,6 +367,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
             id="content-tags-filter"
             bind:selected={selectedTags}
             options={availableTags}
+            optionsReady={tagsLoaded}
             placeholder="All tags"
             disabled={tagsLoading || availableTags.length === 0}
           />

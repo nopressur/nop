@@ -48,6 +48,8 @@ The file manager replaces hierarchical browsing with a flat, paginated list.
 - Support title-only search (no full-text search).
 - Markdown-only toggle (default view shows all files).
 - Tags filter supports multi-select and matches all selected tags.
+- Tag filter selections persist in-memory across list/editor navigation and must not be cleared while
+  tag options are still loading.
 - Creating a new page from the list seeds the page tags from the currently selected tag filters.
 - Do not display object IDs.
 - Display the canonical alias for each entry.
@@ -127,7 +129,7 @@ Validation:
 - Clicking a Markdown entry opens the editor with the Markdown body.
 - Clicking a non-Markdown entry opens metadata-only details with a download link.
 - Copy URL actions are available next to the editor toolbar buttons (see **Copy URL actions** above).
-- The editor header shows sidecar metadata instead of front matter:
+- The editor header shows sidecar metadata:
 - Alias (editable).
 - Alias must be URL-safe and cannot start with reserved prefixes (`id/`, `login`, `builtin`, or
   the configured admin path prefix).
@@ -136,7 +138,7 @@ Validation:
 - Title.
 - Tags.
 - Navbar title, parent, and order.
-- Theme (if enabled per object).
+- Theme (if enabled per object; see `docs/content/themes.md` for file format and selection).
 - Original filename (read-only).
 - Saving metadata updates the sidecar without altering blob versions.
 
@@ -176,7 +178,8 @@ Validation:
   - "Removing the navbar title from this page will also remove the navbar titles of its children."
   - Actions: Remove / Cancel.
 - If a navbar title is cleared, its children lose their navbar titles.
-- Navbar edits bump the release tracker (`X-Release`) so cached HTML navigation refreshes.
+- Navbar edits bump the release tracker (`X-Release`) so cached HTML navigation refreshes, including
+  alias changes for navbar items and cascaded child title removals.
 
 #### Drag-and-Drop Uploads
 

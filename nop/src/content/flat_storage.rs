@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -98,7 +99,10 @@ impl From<ron::error::Error> for SidecarError {
     fn from(err: ron::error::Error) -> Self {
         SidecarError::Ron(ron::error::SpannedError {
             code: err,
-            position: ron::error::Position { line: 0, col: 0 },
+            span: ron::error::Span {
+                start: ron::error::Position { line: 0, col: 0 },
+                end: ron::error::Position { line: 0, col: 0 },
+            },
         })
     }
 }
@@ -270,9 +274,9 @@ pub fn validate_sidecar(sidecar: &ContentSidecar) -> Result<(), SidecarError> {
     Ok(())
 }
 
-pub fn generate_content_id() -> Result<ContentId, openssl::error::ErrorStack> {
+pub fn generate_content_id() -> io::Result<ContentId> {
     let mut bytes = [0u8; 8];
-    openssl::rand::rand_bytes(&mut bytes)?;
+    getrandom::fill(&mut bytes).map_err(|err| io::Error::other(err.to_string()))?;
     Ok(ContentId(u64::from_le_bytes(bytes)))
 }
 

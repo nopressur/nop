@@ -12,6 +12,7 @@ use tokio::fs;
 pub(super) async fn load_theme_content(
     runtime_paths: &RuntimePaths,
     theme: Option<&str>,
+    release_hex: &str,
 ) -> String {
     let now = SystemTime::now();
     log::debug!("Loading theme content at {:?}", now);
@@ -32,12 +33,14 @@ pub(super) async fn load_theme_content(
 
     // Attempt to load the requested theme
     let mut theme_path = runtime_paths.themes_dir.clone();
-    theme_path.push(format!("{}.html", theme_name_str));
+    theme_path.push(format!("{}.theme", theme_name_str));
 
     match security::canonical_path_checks(&theme_path, &themes_dir_str, None) {
         Ok(canonical_theme_path) => {
             match fs::read_to_string(&canonical_theme_path).await {
                 Ok(content) => {
+                    let theme_content =
+                        build_theme_content(&content, theme_name_str, release_hex);
                     debug!(
                         "Successfully loaded theme '{}': {} ({} bytes) at {:?}",
                         theme_name_str,
@@ -45,7 +48,7 @@ pub(super) async fn load_theme_content(
                         content.len(),
                         now
                     );
-                    return content;
+                    return theme_content;
                 }
                 Err(e) => {
                     if theme_name_str != "default" {
@@ -92,18 +95,20 @@ pub(super) async fn load_theme_content(
     // or if canonical_path_checks failed for the requested theme
     debug!("Attempting to load default theme as fallback.");
     let mut default_theme_path = runtime_paths.themes_dir.clone();
-    default_theme_path.push("default.html");
+    default_theme_path.push("default.theme");
 
     match security::canonical_path_checks(&default_theme_path, &themes_dir_str, None) {
         Ok(canonical_default_path) => match fs::read_to_string(&canonical_default_path).await {
             Ok(content) => {
+                let theme_content =
+                    build_theme_content(&content, "default", release_hex);
                 debug!(
                     "Successfully loaded default theme: {} ({} bytes) at {:?}",
                     canonical_default_path.display(),
                     content.len(),
                     now
                 );
-                content
+                theme_content
             }
             Err(e) => {
                 error!(
@@ -153,4 +158,66 @@ fn get_fallback_theme() -> String {
         }\
     </style>"
         .to_string()
+}
+
+fn build_theme_content(theme_file: &str, theme_name: &str, release_hex: &str) -> String {
+    let variables = parse_theme_variables(theme_file, theme_name);
+    let preset_href = format!("/builtin/theme-preset.css?v={}", release_hex);
+    let mut content = String::new();
+    content.push_str(&format!(
+        "<link rel=\"stylesheet\" href=\"{}\">",
+        preset_href
+    ));
+    content.push_str("\n<style>\n:root {\n");
+    for (key, value) in variables {
+        content.push_str("    --");
+        content.push_str(&key);
+        content.push_str(": ");
+        content.push_str(&value);
+        content.push_str(";\n");
+    }
+    content.push_str("}\n</style>\n");
+    content
+}
+
+fn parse_theme_variables(theme_file: &str, theme_name: &str) -> Vec<(String, String)> {
+    let mut variables = Vec::new();
+    for (line_number, raw_line) in theme_file.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.splitn(2, |c: char| c.is_whitespace());
+        let key = parts.next().unwrap_or("").trim();
+        let value = parts.next().unwrap_or("").trim();
+        if key.is_empty() || value.is_empty() {
+            warn!(
+                "Skipping invalid theme line {} for '{}': {}",
+                line_number + 1,
+                theme_name,
+                raw_line
+            );
+            continue;
+        }
+        if !key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            warn!(
+                "Skipping invalid theme key on line {} for '{}': {}",
+                line_number + 1,
+                theme_name,
+                key
+            );
+            continue;
+        }
+        variables.push((key.to_string(), value.to_string()));
+    }
+    if variables.is_empty() {
+        warn!("Theme '{}' contained no usable variables", theme_name);
+    }
+    variables
 }

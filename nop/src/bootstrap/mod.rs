@@ -150,10 +150,10 @@ mod tests {
         let index_content = fs::read_to_string(blob_path).unwrap();
         assert_eq!(index_content, paths::DEFAULT_HOME_MD);
 
-        let theme_path = fixture.path().join("themes").join("default.html");
+        let theme_path = fixture.path().join("themes").join("default.theme");
         assert!(theme_path.exists());
         let theme_content = fs::read_to_string(theme_path).unwrap();
-        assert_eq!(theme_content, paths::RED_THEME_HTML);
+        assert_eq!(theme_content, paths::RED_THEME_THEME);
 
         let tls_dir = fixture.path().join("state").join("sys").join("tls");
         assert!(tls_dir.exists());
@@ -170,7 +170,7 @@ mod tests {
         let users_path = fixture.path().join("users.yaml");
         let roles_path = fixture.path().join("state").join("sys").join("roles.yaml");
         let (sidecar_path, blob_path) = find_default_content_paths(fixture.path().join("content"));
-        let theme_path = fixture.path().join("themes").join("default.html");
+        let theme_path = fixture.path().join("themes").join("default.theme");
 
         let config_before = fs::read_to_string(&config_path).unwrap();
         let users_before = fs::read_to_string(&users_path).unwrap();
@@ -280,6 +280,19 @@ upload:
     }
 
     #[test]
+    fn bootstrap_rejects_non_shard_content_entries() {
+        let fixture = TestFixtureRoot::new_unique("bootstrap-content-legacy").unwrap();
+        let legacy_dir = fixture.path().join("content").join("docs");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        fs::write(legacy_dir.join("index.md"), "# Legacy").unwrap();
+
+        let error = bootstrap_runtime(fixture.path()).expect_err("bootstrap should fail");
+        let message = error.to_string();
+        assert!(message.contains("Content directory"));
+        assert!(message.contains("docs"));
+    }
+
+    #[test]
     fn bootstrap_skips_well_known_directory() {
         let fixture = TestFixtureRoot::new_unique("bootstrap-well-known").unwrap();
         bootstrap_runtime(fixture.path()).expect("bootstrap should succeed");
@@ -296,9 +309,6 @@ upload:
                 let path = entry.path();
                 let file_type = entry.file_type().unwrap();
                 if file_type.is_dir() {
-                    if path.file_name().and_then(|name| name.to_str()) == Some("legacy") {
-                        continue;
-                    }
                     stack.push(path);
                     continue;
                 }

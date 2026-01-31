@@ -147,7 +147,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     </div>
   {:else if theme}
     <div class="flex flex-1 flex-col rounded-lg border border-border bg-surface px-4 py-4 shadow-soft min-h-0">
-      <p class="text-[11px] uppercase tracking-[0.3em] text-muted">HTML</p>
+      <p class="text-[11px] uppercase tracking-[0.3em] text-muted">Theme Variables</p>
       {#if theme.mode === "new"}
         <div class="mt-3 max-w-sm">
           <label for="theme-name" class="text-[11px] uppercase tracking-[0.3em] text-muted">Theme Name</label>
@@ -155,7 +155,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
         </div>
       {/if}
       <div class="mt-4 flex-1 min-h-[280px] rounded-lg border border-border bg-surface-2">
-        <AceEditor bind:value={content} mode="html" />
+        <AceEditor bind:value={content} mode="markdown" />
       </div>
     </div>
   {:else}

@@ -1,5 +1,4 @@
-# ACME DNS-01 (Pebble + exec) TLS
-# Start the local Pebble stack first: scripts/acme-pebble.sh start
+# ACME DNS-01 (Cloudflare) TLS
 server:
   host: "127.0.0.1"
   port: 8443
@@ -9,20 +8,17 @@ server:
 tls:
   mode: "acme"
   domains:
-    - "localhost"
-  redirect_base_url: "https://localhost:8443"
+    - "example.com"
+  redirect_base_url: "https://example.com"
   acme:
-    provider: "lers"
-    environment: "staging"
-    directory_url: "https://localhost:14000/dir"
-    insecure_skip_verify: true
+    environment: "production"
+    # directory_url: "https://acme-v02.api.letsencrypt.org/directory"
+    # insecure_skip_verify: false
     contact_email: "admin@example.com"
     challenge: "dns-01"
     dns:
-      provider: "exec"
-      exec:
-        present_command: 'printf "{\"host\":\"_acme-challenge.%s.\",\"value\":\"%s\"}" "$ACME_DOMAIN" "$ACME_KEY_AUTHORIZATION" | curl -s -X POST http://127.0.0.1:8055/set-txt -H "Content-Type: application/json" -d @-'
-        cleanup_command: 'printf "{\"host\":\"_acme-challenge.%s.\"}" "$ACME_DOMAIN" | curl -s -X POST http://127.0.0.1:8055/clear-txt -H "Content-Type: application/json" -d @-'
+      provider: "cloudflare"
+      api_token: "env:CF_API_TOKEN"
 
 admin:
   path: "/admin"

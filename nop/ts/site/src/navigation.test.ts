@@ -41,11 +41,13 @@ describe('site navigation', () => {
     document.body.innerHTML = `
       <div data-site-root>
         <div data-site-dropdown>
-          <a data-site-dropdown-toggle class="navbar-link" aria-expanded="false"></a>
+          <a class="navbar-link is-arrowless" href="/one"></a>
+          <button data-site-dropdown-toggle class="navbar-link" aria-expanded="false"></button>
           <div class="navbar-dropdown"></div>
         </div>
         <div data-site-dropdown>
-          <a data-site-dropdown-toggle class="navbar-link" aria-expanded="false"></a>
+          <a class="navbar-link is-arrowless" href="/two"></a>
+          <button data-site-dropdown-toggle class="navbar-link" aria-expanded="false"></button>
           <div class="navbar-dropdown"></div>
         </div>
       </div>
@@ -69,7 +71,8 @@ describe('site navigation', () => {
     document.body.innerHTML = `
       <div data-site-root>
         <div data-site-dropdown class="is-active">
-          <a data-site-dropdown-toggle class="navbar-link" aria-expanded="true"></a>
+          <a class="navbar-link is-arrowless" href="/one"></a>
+          <button data-site-dropdown-toggle class="navbar-link" aria-expanded="true"></button>
           <div class="navbar-dropdown"></div>
         </div>
         <div data-site-close-dropdowns></div>
@@ -92,7 +95,8 @@ describe('site navigation', () => {
     document.body.innerHTML = `
       <div data-site-root>
         <div data-site-dropdown data-site-dropdown-hover="true">
-          <a data-site-dropdown-toggle class="navbar-link" aria-expanded="false"></a>
+          <a class="navbar-link is-arrowless" href="/one"></a>
+          <button data-site-dropdown-toggle class="navbar-link" aria-expanded="false"></button>
           <div class="navbar-dropdown"></div>
         </div>
       </div>
@@ -108,6 +112,50 @@ describe('site navigation', () => {
     expect(dropdown?.classList.contains('is-active')).toBe(false);
   });
 
+  it('keeps hover dropdowns open while hovering the menu', () => {
+    document.body.innerHTML = `
+      <div data-site-root>
+        <div data-site-dropdown data-site-dropdown-hover="true">
+          <a class="navbar-link is-arrowless" href="/one"></a>
+          <button data-site-dropdown-toggle class="navbar-link" aria-expanded="false"></button>
+          <div class="navbar-dropdown"></div>
+        </div>
+      </div>
+    `;
+
+    initSiteNavigation(document);
+
+    const dropdown = document.querySelector<HTMLElement>('[data-site-dropdown]');
+    const menu = document.querySelector<HTMLElement>('.navbar-dropdown');
+
+    dropdown?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    expect(dropdown?.classList.contains('is-active')).toBe(true);
+
+    menu?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    expect(dropdown?.classList.contains('is-active')).toBe(true);
+  });
+
+  it('does not toggle dropdowns when main link is clicked', () => {
+    document.body.innerHTML = `
+      <div data-site-root>
+        <div data-site-dropdown>
+          <a class="navbar-link is-arrowless" href="/main"></a>
+          <button data-site-dropdown-toggle class="navbar-link" aria-expanded="false"></button>
+          <div class="navbar-dropdown"></div>
+        </div>
+      </div>
+    `;
+
+    initSiteNavigation(document);
+
+    const dropdown = document.querySelector<HTMLElement>('[data-site-dropdown]');
+    const mainLink = document.querySelector<HTMLElement>('.navbar-link.is-arrowless');
+
+    mainLink?.addEventListener('click', (event) => event.preventDefault());
+    mainLink?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(dropdown?.classList.contains('is-active')).toBe(false);
+  });
+
   it('registers dropdowns added after initialization', () => {
     document.body.innerHTML = `
       <div data-site-root>
@@ -120,7 +168,7 @@ describe('site navigation', () => {
     const root = document.querySelector<HTMLElement>('[data-site-root]');
     const dropdown = document.createElement('div');
     dropdown.dataset.siteDropdown = '';
-    const toggle = document.createElement('a');
+    const toggle = document.createElement('button');
     toggle.dataset.siteDropdownToggle = '';
     toggle.className = 'navbar-link';
     toggle.setAttribute('aria-expanded', 'false');

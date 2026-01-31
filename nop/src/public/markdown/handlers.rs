@@ -10,7 +10,6 @@ use crate::public::page_meta_cache::check_file_access;
 use crate::public::{PageRenderContext, PublicRequestContext};
 use crate::security;
 use actix_web::{HttpResponse, Result};
-use gray_matter::{Matter, engine::YAML};
 use pulldown_cmark::Options;
 use tokio::fs;
 
@@ -67,9 +66,6 @@ pub async fn serve_markdown_alias(
         Err(_) => return crate::public::error::serve_500(error_renderer, Some(template_engine)),
     };
 
-    let matter = Matter::<YAML>::new();
-    let result = matter.parse(&content);
-
     let title = object
         .title
         .clone()
@@ -84,7 +80,7 @@ pub async fn serve_markdown_alias(
     options.insert(Options::ENABLE_TASKLISTS);
 
     let rendered_html = match generate_html(&RenderRequest {
-        result: &result,
+        markdown: &content,
         shortcode_registry,
         options: &options,
         sanitizer,

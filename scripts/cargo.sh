@@ -8,14 +8,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VENDOR_SCRIPT="${SCRIPT_DIR}/update-rust-vendor.sh"
-
-if [ ! -x "$VENDOR_SCRIPT" ]; then
-  echo "Missing vendor update script: $VENDOR_SCRIPT" >&2
-  exit 1
-fi
-
-"$VENDOR_SCRIPT" --ensure
 
 CARGO_DIR="${CARGO_DIR:-}"
 if [ -n "$CARGO_DIR" ]; then

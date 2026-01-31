@@ -31,10 +31,10 @@ This document is the single source of truth for how NoPressure stores and manage
 - The runtime root is resolved from `-C <root>` (defaults to the current working directory).
 - Content, themes, and state live alongside `config.yaml` and `users.yaml`:
   - `content/` for flat hashed storage and sidecar metadata.
-  - `themes/` for public layout templates (HTML fragments).
+  - `themes/` for public theme variable files (`.theme`) used by the public renderer
+    (see `docs/content/themes.md`).
   - `state/` for runtime state (`state/sys`, `state/sc`).
 - The server ensures required directories exist at startup and expects them to be writable when admin features are enabled.
-- `content/legacy/` is reserved for migrated trees and must be ignored by the cache and runtime scanners.
 
 ### Flat Hashed Storage Layout
 
@@ -43,6 +43,7 @@ This document is the single source of truth for how NoPressure stores and manage
 - The ID is used as the canonical internal identifier in management APIs and parent references.
 - Blobs are sharded into subdirectories by byte to avoid large single directories.
 - A canonical layout uses a single shard level directly under `content/`:
+- Startup validation requires `content/` to contain only shard directories named as two lowercase hex digits; unexpected files or directories cause bootstrap to fail.
 
 ```
 content/aa/<id>.<version>
@@ -71,7 +72,8 @@ Fields:
 - `nav_parent_id` (optional ContentId hex string; defines parent/child grouping)
 - `nav_order` (optional integer; controls ordering within root and child lists)
 - `original_filename` (optional string; preserved from upload)
-- `theme` (optional string; if themes remain supported per object)
+- `theme` (optional string; selects `<runtime-root>/themes/<theme>.theme`, see
+  `docs/content/themes.md`)
 
 Notes:
 
@@ -113,11 +115,6 @@ Example:
 
 - MIME type is detected at upload and stored in the sidecar.
 - There are no `.mime-types` manifests or directory-based MIME caches.
-
-### Migration
-
-- Legacy hierarchical trees under `content/` must be migrated into the flat layout before caching.
-- Migration rules and sidecar mapping live in `docs/content/file-migration.md`.
 
 ### Write Expectations and Atomicity
 

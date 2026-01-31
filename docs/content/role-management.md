@@ -108,8 +108,6 @@ All requests and responses require a monotonic `workflow_id` per connection and 
 ### Integration Points
 
 - Tag and user management must validate roles against RoleStore (unknown roles are rejected).
-- File migration must ensure roles discovered in legacy front matter exist in RoleStore before tag
-  creation (create missing roles via the role store).
 - Auth flows continue to use user roles for JWT claims; role availability is sourced from RoleStore.
 
 ### Testing Scope

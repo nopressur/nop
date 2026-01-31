@@ -3,5 +3,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-pub mod flat_storage;
-pub mod reserved_paths;
+import { writable } from "svelte/store";
+
+export const contentEditorViewPagePath = writable<string | null>(null);
+
+export function setContentEditorViewPagePath(path: string | null): void {
+  contentEditorViewPagePath.set(path);
+}

@@ -7,11 +7,10 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
 {% for item in navigation %}
   {% if item.children %}
-    <div class="navbar-item has-dropdown is-hoverable" data-site-dropdown>
-      <a class="navbar-link" href="{{ item.path }}" aria-haspopup="true" aria-expanded="false"
-        data-site-dropdown-toggle>
-        {{ item.title }}
-      </a>
+    <div class="navbar-item has-dropdown is-hoverable" data-site-dropdown data-site-dropdown-hover="true">
+      <a class="navbar-link is-arrowless" href="{{ item.path }}">{{ item.title }}</a>
+      <button class="navbar-link" type="button" aria-haspopup="true" aria-expanded="false"
+        aria-label="Toggle {{ item.title }} menu" data-site-dropdown-toggle></button>
       <div class="navbar-dropdown">
         {% for child in item.children %}
           <a class="navbar-item" href="{{ child.path }}">{{ child.title }}</a>

@@ -224,7 +224,7 @@ test("public navbar logout clears auth cookie", async ({ page, harness, rng }) =
   await expect(userNav).toBeVisible({ timeout: 15000 });
 
   await humanClick(userNav, rng);
-  const dropdown = userMenu.locator("[data-site-dropdown]");
+  const dropdown = userMenu;
   await expect(dropdown).toHaveClass(/is-active/, { timeout: 15000 });
   const logoutLink = userMenu.getByRole("link", { name: "Logout" });
   await expect(logoutLink).toBeVisible({ timeout: 15000 });

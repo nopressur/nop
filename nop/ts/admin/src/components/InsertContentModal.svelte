@@ -8,7 +8,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 <script lang="ts">
   import { createEventDispatcher, tick } from "svelte";
   import Button from "./Button.svelte";
-  import Input from "./Input.svelte";
+  import SearchInput from "./SearchInput.svelte";
   import Select from "./Select.svelte";
   import { listContent } from "../services/content";
   import type { ContentListItem } from "../services/content";
@@ -301,7 +301,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
         >
           Search
         </label>
-        <Input
+        <SearchInput
           id="insert-search"
           bind:value={query}
           className="mt-2"

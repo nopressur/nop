@@ -12,6 +12,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   export let options: string[] = [];
   export let selected: string[] = [];
   export let disabled = false;
+  export let optionsReady = true;
   export let placeholder = "All tags";
   export let emptyLabel = "No tags available";
   export let id = "";
@@ -22,7 +23,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   const dispatch = createEventDispatcher<{ change: string[] }>();
 
   $: selectionLabel = selected.length > 0 ? selected.join(", ") : placeholder;
-  $: if (selected.some((value) => !options.includes(value))) {
+  $: if (optionsReady && selected.some((value) => !options.includes(value))) {
     selected = selected.filter((value) => options.includes(value));
     dispatch("change", [...selected]);
   }

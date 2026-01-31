@@ -34,8 +34,6 @@ This guide summarizes how NoPressure builds, watches, and ships the `nop` binary
 - `examples/docker-slim/` – expects a prebuilt `nop` binary dropped into the directory. `Dockerfile` simply packages that binary with runtime dependencies; ideal for CI pipelines where the binary is built elsewhere.
 
 ## Supporting Utilities
-
-- `scripts/cargo.sh` ensures patched Rust vendor crates are present (via `scripts/update-rust-vendor.sh`) before running any cargo command.
 - `build.rs` watches `nop/ts/admin` and `nop/ts/login` sources and rebuilds the SPA assets when
   needed (`npm install` + `npm run build` as required). Login builds emit `login.js` + `login.css`
   into a versioned `nop/builtin/login-<hash>` directory and update `login-spa-version.txt`.

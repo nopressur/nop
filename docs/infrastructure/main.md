@@ -13,7 +13,7 @@ This document walks through the NoPressure entrypoint so contributors understand
 4. **Bootstrap runtime root** via `bootstrap::bootstrap_runtime` (before daemonization):
    - Fails fast if the runtime root contains unexpected top-level entries.
    - Creates missing `config.yaml`, `users.yaml`, `content/`, `themes/`, and `state/` (plus `state/sys`, `state/sc`) without overwriting existing files.
-   - Writes `content/index.md` and `themes/default.html` when missing.
+   - Writes `content/index.md` and `themes/default.theme` when missing (see `docs/content/themes.md`).
    - Loads and validates the config, then constructs `RuntimePaths`.
 5. **Determine final run mode**:
    - If bootstrap created `config.yaml` or `users.yaml`, force foreground for that run.
@@ -80,7 +80,7 @@ Finally the server sets the worker pool size from `config.server.workers` and bi
 - New cross-cutting services should be created before `HttpServer::new` and injected via `web::Data`. This keeps runtime wiring explicit.
 - Middleware ordering matters: headers must precede auth and CSRF so they can observe post-auth state, while auth must precede admin/public route registration.
 - Keep fatal error messages concise and actionable; they surface directly to operators.
-- A guarded Actix test (`tests::test_awc_tls_connectivity`) verifies TLS support for the `awc` client. It runs opportunistically and logs a skip message if outbound HTTPS is unavailable.
+- An Actix test (`tests::test_awc_tls_connectivity`) spins up a local self-signed TLS listener and exercises the `awc` client against it to validate TLS support without external network access.
 
 <!--
 This file is part of the product NoPressure.

@@ -20,7 +20,9 @@ pub async fn generate_html_page_with_user(
     render_ctx: &PageRenderContext<'_>,
 ) -> String {
     // Load theme content
-    let theme_content = load_theme_content(render_ctx.runtime_paths, render_ctx.theme).await;
+    let release_hex = render_ctx.release_tracker.current_hex();
+    let theme_content =
+        load_theme_content(render_ctx.runtime_paths, render_ctx.theme, &release_hex).await;
 
     // Generate navigation HTML
     let nav_html =
@@ -41,7 +43,6 @@ pub async fn generate_html_page_with_user(
     // Prepare template variables
     let escaped_title = crate::public::nav::html_escape(title);
     let escaped_app_name = crate::public::nav::html_escape(&render_ctx.config.app.name);
-    let release_hex = render_ctx.release_tracker.current_hex();
     let bulma_href = format!("/builtin/bulma.min.css?v={}", release_hex);
     let favicon_href = format!("/builtin/favicon.ico?v={}", release_hex);
     let site_src = format!("/builtin/site.js?v={}", release_hex);

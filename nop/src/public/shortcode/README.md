@@ -101,19 +101,15 @@ Markdown File → Parse → Process Events → Generate HTML → Sanitize → Fi
 
 ### Detailed Processing Pipeline
 
-#### 1. **Markdown Parsing** (`src/public/markdown.rs`)
+#### 1. **Markdown Parsing** (`src/public/markdown/parser.rs`)
 
 ```rust
 pub fn generate_html(
-    result: &gray_matter::ParsedEntity,
-    shortcode_registry: &ShortcodeRegistry,
-    options: &Options,
-    config: &ValidatedConfig,
-    md_path: &str,
-) -> String
+    request: &RenderRequest<'_>,
+) -> Result<RenderedMarkdown, MarkdownRenderError>
 ```
 
-The markdown file is first parsed using `pulldown_cmark` to generate a stream of markdown events.
+The markdown text is parsed using `pulldown_cmark` to generate a stream of markdown events.
 
 #### 2. **Event Processing Loop**
 

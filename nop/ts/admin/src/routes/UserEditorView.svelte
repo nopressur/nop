@@ -20,9 +20,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
     updateUserName,
     updateUserPassword,
   } from "../services/users";
-  import { createRole, listRoles } from "../services/roles";
+  import { listRoles } from "../services/roles";
   import { validateEmailAddress } from "../validation/email";
-  import { validateRoleName } from "../validation/roles";
   import { addWindowListener, removeWindowListener } from "../services/browser";
 
   type Bootstrap = {
@@ -34,7 +33,6 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let name = "";
   let password = "";
   let confirm = "";
-  let newRole = "";
 
   let availableRoles: string[] = [];
   let selectedRoles = new Set<string>();
@@ -132,28 +130,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     const nameValue = name.trim();
     const emailValue = email.trim();
 
-    const newRoleValue = newRole.trim();
-    const roleValidation = validateRoleName(newRoleValue);
-    if (!roleValidation.valid) {
-      pushNotification(roleValidation.error, "error");
-      return;
-    }
-
-    const roles = new Set(selectedRoles);
-    if (newRoleValue) {
-      if (!availableRoles.includes(newRoleValue)) {
-        try {
-          await createRole(newRoleValue);
-          availableRoles = [...availableRoles, newRoleValue].sort((a, b) => a.localeCompare(b));
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to create role";
-          pushNotification(message, "error");
-          return;
-        }
-      }
-      roles.add(newRoleValue);
-    }
-    const rolesList = Array.from(roles.values());
+    const rolesList = Array.from(selectedRoles.values());
 
     let passwordValue: string | null = null;
     if (password || confirm) {
@@ -214,7 +191,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
       }
 
       const rolesToAdd = rolesList.filter((role) => !initialRoles.has(role));
-      const rolesToRemove = Array.from(initialRoles).filter((role) => !roles.has(role));
+      const rolesSet = new Set(rolesList);
+      const rolesToRemove = Array.from(initialRoles).filter((role) => !rolesSet.has(role));
 
       for (const role of rolesToAdd) {
         lastMessage = await addUserRole(emailValue, role);
@@ -292,10 +270,6 @@ The code and documentation in this repository is licensed under the GNU Affero G
               {role}
             </label>
           {/each}
-        </div>
-        <div class="mt-3 max-w-[240px]">
-          <label for="user-role" class="text-[11px] uppercase tracking-[0.3em] text-muted">Add Role</label>
-          <Input id="user-role" bind:value={newRole} className="mt-2" placeholder="new role" />
         </div>
       </div>
     {/if}

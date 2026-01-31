@@ -45,7 +45,7 @@ Status: Developed
 - Provide helper functions to:
   - Write blob files and RON sidecars for Markdown and binary content.
   - Seed tags and tag access rules in `state/sys/tags.yaml`.
-  - Seed themes with known templates.
+  - Seed themes with known `.theme` files (see `docs/content/themes.md`).
 
 ### Auth and Session
 

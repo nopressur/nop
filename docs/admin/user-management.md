@@ -64,8 +64,9 @@ Status: Developed
 - `password_confirm` (UI workflow only)
   - Must match `password` before submit.
   - Not sent to the management bus.
-- `new_role`
-  - Optional; same validation as `roles`.
+- `roles`
+  - Selected from the available role list sourced from `roles.yaml`.
+  - Roles are created or renamed in the Roles editor; user edit does not create new roles.
 - `delete_confirm` (UI workflow only)
   - UI requires the admin to re-enter the target email before deletion.
   - Not sent to the management bus.

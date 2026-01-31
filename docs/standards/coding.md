@@ -26,6 +26,14 @@ These guidelines keep the codebase consistent and approachable for both AI assis
 - Use descriptive names (`validate_new_file_path`, not `check_dir`) to ease AI comprehension.
 - Log messages should include actionable context (user, path, error). Use emoji markers (`🔧`, `🚨`, `🚫`) consistently for dev-mode/info/warnings.
 
+## Crates and Libraries
+
+- Limit crate and library use to the minimum, always provide a rationale for using new libraries
+- Vendoring and build-time patching is not permitted, only mature and stable libraries are permitted
+- Prefer libraries that preserve compatibility across all supported platforms whenever possible
+- Target platform compatibility for the command-line build: macOS, Linux, and Windows
+- Stop and flag at design and implementation time if a selected library proves to be unfit for purpose
+
 ## Error Handling
 
 - Never return raw IO or serde errors to clients. Wrap with domain-specific messages via `shared::json_error_response` or HTTP error responses.

@@ -4,7 +4,7 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use super::{BootstrapError, log_action};
-use openssl::rand::rand_bytes;
+use getrandom::fill;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -72,7 +72,7 @@ fn normalize_root(root: &Path) -> Result<PathBuf, BootstrapError> {
 
 fn generate_jwt_secret() -> Result<String, BootstrapError> {
     let mut bytes = [0u8; 32];
-    rand_bytes(&mut bytes).map_err(|err| {
+    fill(&mut bytes).map_err(|err| {
         BootstrapError::Io(io::Error::other(format!(
             "Failed to generate JWT secret: {}",
             err

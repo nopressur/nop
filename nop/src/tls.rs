@@ -41,7 +41,6 @@ pub(crate) struct TlsState {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct TlsAcmeState {
-    pub provider: String,
     pub directory_url: String,
     pub contact_email: String,
     pub account_id: Option<String>,
@@ -56,13 +55,11 @@ struct TlsFingerprintPayload {
 
 #[derive(Debug, Serialize)]
 struct AcmeFingerprintPayload {
-    provider: String,
     environment: AcmeEnvironment,
     directory_url: Option<String>,
     contact_email: String,
     challenge: AcmeChallenge,
     dns_provider: Option<String>,
-    dns_exec_present: bool,
 }
 pub fn load_rustls_config(
     runtime_paths: &RuntimePaths,
@@ -147,13 +144,11 @@ pub(crate) fn tls_config_fingerprint(tls_config: &TlsConfig) -> io::Result<Strin
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "ACME config missing"))?;
         let dns = acme.dns.as_ref();
         Some(AcmeFingerprintPayload {
-            provider: acme.provider.clone(),
             environment: acme.environment,
             directory_url: acme.directory_url.clone(),
             contact_email: acme.contact_email.clone(),
             challenge: acme.challenge,
             dns_provider: dns.map(|dns| dns.provider.clone()),
-            dns_exec_present: dns.and_then(|dns| dns.exec.as_ref()).is_some(),
         })
     } else {
         None

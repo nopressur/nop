@@ -27,7 +27,7 @@ async fn create_save_delete_theme() {
 
     let create_payload = NewThemePayload {
         name: "blue".to_string(),
-        content: "<style>.blue{color:#00f;}</style>".to_string(),
+        content: "color-background-primary-light #00f\n".to_string(),
     };
     let req = common::add_auth_headers(
         test::TestRequest::post()
@@ -40,11 +40,11 @@ async fn create_save_delete_theme() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), StatusCode::OK);
 
-    let theme_path = harness.runtime_paths.themes_dir.join("blue.html");
+    let theme_path = harness.runtime_paths.themes_dir.join("blue.theme");
     assert!(theme_path.exists(), "theme should be created");
 
     let save_payload = ThemePayload {
-        content: "<style>.blue{color:#009;}</style>".to_string(),
+        content: "color-background-primary-light #009\n".to_string(),
     };
     let req = common::add_auth_headers(
         test::TestRequest::post()

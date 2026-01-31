@@ -11,9 +11,8 @@ use crate::public::shortcode::{
     replace_shortcode_placeholders,
 };
 use crate::security;
-use gray_matter;
 use once_cell::sync::Lazy;
-use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, html};
+use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, TagEnd, html};
 use regex::Regex;
 
 static EXTERNAL_LINK_REGEX: Lazy<Result<Regex, regex::Error>> =
@@ -44,7 +43,7 @@ pub(super) struct RenderedMarkdown {
 }
 
 pub(super) struct RenderRequest<'a> {
-    pub(super) result: &'a gray_matter::ParsedEntity,
+    pub(super) markdown: &'a str,
     pub(super) shortcode_registry: &'a ShortcodeRegistry,
     pub(super) options: &'a Options,
     pub(super) sanitizer: &'a HtmlSanitizer,
@@ -63,7 +62,7 @@ pub(super) fn generate_html(
         user: request.user,
     };
     let shortcode_result = process_text_with_shortcodes(
-        &request.result.content,
+        request.markdown,
         request.shortcode_registry,
         &shortcode_ctx,
     );
@@ -154,7 +153,7 @@ fn count_paragraph_lengths(
                     has_paragraph: false,
                 });
             }
-            Event::End(Tag::Item) => {
+            Event::End(TagEnd::Item) => {
                 if let Some(item_stats) = item_stack.pop()
                     && !item_stats.has_paragraph
                     && item_stats.has_non_whitespace
@@ -174,7 +173,7 @@ fn count_paragraph_lengths(
                     item_stats.has_paragraph = true;
                 }
             }
-            Event::End(Tag::Paragraph) => {
+            Event::End(TagEnd::Paragraph) => {
                 if in_paragraph && has_non_whitespace {
                     stats.total_paragraphs += 1;
                     if current_len > short_paragraph_length {
@@ -184,10 +183,10 @@ fn count_paragraph_lengths(
                 in_paragraph = false;
                 in_image = false;
             }
-            Event::Start(Tag::Image(_, _, _)) if in_paragraph || !item_stack.is_empty() => {
+            Event::Start(Tag::Image { .. }) if in_paragraph || !item_stack.is_empty() => {
                 in_image = true;
             }
-            Event::End(Tag::Image(_, _, _)) if in_paragraph || !item_stack.is_empty() => {
+            Event::End(TagEnd::Image) if in_paragraph || !item_stack.is_empty() => {
                 in_image = false;
             }
             Event::Text(text) | Event::Html(text) if in_paragraph && !in_image => {
@@ -366,7 +365,12 @@ fn post_process_html(
 
 fn process_event<'a>(event: Event<'a>, current_md_path: &str, cache: &PageMetaCache) -> Event<'a> {
     match event {
-        Event::Start(Tag::Image(link_type, dest_url, title)) => {
+        Event::Start(Tag::Image {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) => {
             // Handle image links
             let url_str = dest_url.as_ref();
 
@@ -383,7 +387,12 @@ fn process_event<'a>(event: Event<'a>, current_md_path: &str, cache: &PageMetaCa
             // Check if it's an external URL
             if url_str.starts_with("http://") || url_str.starts_with("https://") {
                 // External image - keep as is
-                return Event::Start(Tag::Image(link_type, dest_url, title));
+                return Event::Start(Tag::Image {
+                    link_type,
+                    dest_url,
+                    title,
+                    id,
+                });
             }
 
             let normalized_path = match security::normalize_relative_path(current_md_path, url_str)
@@ -417,23 +426,39 @@ fn process_event<'a>(event: Event<'a>, current_md_path: &str, cache: &PageMetaCa
             if let Some(versioned_url) =
                 version_asset_url_if_needed(url_str, current_md_path, cache)
             {
-                Event::Start(Tag::Image(
+                Event::Start(Tag::Image {
                     link_type,
-                    CowStr::Boxed(versioned_url.into()),
+                    dest_url: CowStr::Boxed(versioned_url.into()),
                     title,
-                ))
+                    id,
+                })
             } else {
-                Event::Start(Tag::Image(link_type, dest_url, title))
+                Event::Start(Tag::Image {
+                    link_type,
+                    dest_url,
+                    title,
+                    id,
+                })
             }
         }
-        Event::Start(Tag::Link(link_type, dest_url, title)) => {
+        Event::Start(Tag::Link {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) => {
             // Handle links by modifying attributes
             let url_str = dest_url.as_ref();
 
             // Check if it's an external URL
             if url_str.starts_with("http://") || url_str.starts_with("https://") {
                 // For external links, we'll handle this in a post-processing step
-                Event::Start(Tag::Link(link_type, dest_url, title))
+                Event::Start(Tag::Link {
+                    link_type,
+                    dest_url,
+                    title,
+                    id,
+                })
             } else {
                 // For local links, validate using new routing-based logic
 
@@ -459,13 +484,19 @@ fn process_event<'a>(event: Event<'a>, current_md_path: &str, cache: &PageMetaCa
                 if let Some(versioned_url) =
                     version_asset_url_if_needed(url_str, current_md_path, cache)
                 {
-                    Event::Start(Tag::Link(
+                    Event::Start(Tag::Link {
                         link_type,
-                        CowStr::Boxed(versioned_url.into()),
+                        dest_url: CowStr::Boxed(versioned_url.into()),
                         title,
-                    ))
+                        id,
+                    })
                 } else {
-                    Event::Start(Tag::Link(link_type, dest_url, title))
+                    Event::Start(Tag::Link {
+                        link_type,
+                        dest_url,
+                        title,
+                        id,
+                    })
                 }
             }
         }
@@ -563,7 +594,6 @@ mod tests {
     use crate::templates::MiniJinjaEngine;
     use crate::util::ReleaseTracker;
     use crate::util::test_fixtures::TestFixtureRoot;
-    use gray_matter::{Matter, engine::YAML};
     use pulldown_cmark::Options;
     use std::fs;
     use std::sync::Arc;
@@ -648,13 +678,6 @@ mod tests {
         (fixture, runtime_paths)
     }
 
-    // Helper function to create test markdown content with front matter
-    fn create_test_markdown(content: &str) -> gray_matter::ParsedEntity {
-        let matter = Matter::<YAML>::new();
-        let full_content = format!("---\ntitle: Test Page\n---\n{}", content);
-        matter.parse(&full_content)
-    }
-
     // Helper function to create a test cache for tests
     fn create_test_cache(runtime_paths: &RuntimePaths) -> PageMetaCache {
         PageMetaCache::new(
@@ -669,7 +692,7 @@ mod tests {
     }
 
     fn render_markdown(
-        parsed_entity: &gray_matter::ParsedEntity,
+        markdown: &str,
         registry: &ShortcodeRegistry,
         options: &Options,
         sanitizer: &HtmlSanitizer,
@@ -678,7 +701,7 @@ mod tests {
         short_paragraph_length: usize,
     ) -> RenderedMarkdown {
         generate_html(&RenderRequest {
-            result: parsed_entity,
+            markdown,
             shortcode_registry: registry,
             options,
             sanitizer,
@@ -727,11 +750,10 @@ Here's a [link to example](https://example.com).
 - [ ] Task pending
 "#;
 
-        let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
         let rendered = render_markdown(
-            &parsed_entity,
+            markdown_content,
             &registry,
             &options,
             &sanitizer,
@@ -789,11 +811,10 @@ And another video with controls disabled:
 
 Some text after the videos."#;
 
-        let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
         let rendered = render_markdown(
-            &parsed_entity,
+            markdown_content,
             &registry,
             &options,
             &sanitizer,
@@ -847,11 +868,10 @@ Here's a video without src:
 
 Some text after."#;
 
-        let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
         let rendered = render_markdown(
-            &parsed_entity,
+            markdown_content,
             &registry,
             &options,
             &sanitizer,
@@ -888,11 +908,10 @@ And another one:
 
 Some text after the cards."#;
 
-        let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
         let rendered = render_markdown(
-            &parsed_entity,
+            markdown_content,
             &registry,
             &options,
             &sanitizer,
@@ -950,11 +969,10 @@ Missing both:
 
 Some text after."#;
 
-        let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
         let rendered = render_markdown(
-            &parsed_entity,
+            markdown_content,
             &registry,
             &options,
             &sanitizer,
@@ -1011,11 +1029,10 @@ Another video:
 
 End of content with ~~strikethrough~~."#;
 
-        let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
         let rendered = render_markdown(
-            &parsed_entity,
+            markdown_content,
             &registry,
             &options,
             &sanitizer,
@@ -1088,11 +1105,10 @@ Link card: ((link-card title="Safe Link" link="https://safe.com"))
 
 JavaScript in user content: <a href="javascript:alert('bad')">bad link</a>"#;
 
-        let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
         let rendered = render_markdown(
-            &parsed_entity,
+            markdown_content,
             &registry,
             &options,
             &sanitizer,
@@ -1142,11 +1158,10 @@ Just regular **markdown** content.
 
 [External link](https://example.com)"#;
 
-        let parsed_entity = create_test_markdown(markdown_content);
         let cache = create_test_cache(&runtime_paths);
         let sanitizer = create_test_sanitizer();
         let rendered = render_markdown(
-            &parsed_entity,
+            markdown_content,
             &registry,
             &options,
             &sanitizer,
@@ -1180,11 +1195,11 @@ Just regular **markdown** content.
         let fixture = TestFixtureRoot::new_unique("markdown-full-page").expect("fixture root");
         fixture.init_runtime_layout().expect("layout init");
         let runtime_paths = fixture.runtime_paths().expect("runtime paths");
-        let blue_theme = r#"<style>
-/* Blue Theme - Cool and professional */
-.test-theme { color: #3366ff; }
-</style>"#;
-        fs::write(runtime_paths.themes_dir.join("blue.html"), blue_theme)
+        let blue_theme = r#"# Blue Theme variables
+color-background-primary-light #3366ff
+font-body-family "Test Font", sans-serif
+"#;
+        fs::write(runtime_paths.themes_dir.join("blue.theme"), blue_theme)
             .expect("write blue theme");
         let markdown_content = "# About NoPressure\n\nFlat storage content test.";
         let content_id = ContentId(1);
@@ -1230,13 +1245,18 @@ Just regular **markdown** content.
             .block_on(cache.rebuild_cache(true))
             .expect("cache rebuild");
 
-        let parsed = Matter::<YAML>::new().parse(markdown_content);
         let title = sidecar.title.as_deref().expect("sidecar title");
         let theme = sidecar.theme.as_deref();
 
         let sanitizer = create_test_sanitizer();
         let rendered = render_markdown(
-            &parsed, &registry, &options, &sanitizer, &cache, "about", 256,
+            markdown_content,
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "about",
+            256,
         );
         let navigation = generate_navigation_with_user(&cache, None);
         let release_tracker = ReleaseTracker::new();
@@ -1261,7 +1281,8 @@ Just regular **markdown** content.
 
         assert!(html_page.contains("<title>About NoPressure</title>"));
         assert!(html_page.contains("<h1>About NoPressure</h1>"));
-        assert!(html_page.contains("Blue Theme - Cool and professional"));
+        assert!(html_page.contains("/builtin/theme-preset.css?v="));
+        assert!(html_page.contains("--color-background-primary-light: #3366ff;"));
         assert!(html_page.contains("Test App"));
         assert!(html_page.contains("/builtin/bulma.min.css?v="));
         assert!(html_page.contains(&format!(

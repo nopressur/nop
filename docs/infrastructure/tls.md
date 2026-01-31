@@ -1,6 +1,6 @@
 # TLS Modes and Well-Known Routing
 
-Status: Developed
+Status: In Progress
 
 ## Objectives
 
@@ -8,9 +8,18 @@ Status: Developed
 - Enforce two behaviors:
   - TLS disabled: a single HTTP main server serves all routes.
   - TLS enabled: HTTPS main server serves all routes, HTTP well-known server serves `/.well-known/*`.
-- Support TLS material sources: self-signed, user-provided, and ACME (lers).
-- Keep all TLS-related files under `state/sys/tls/` with no subdirectories.
+- Support TLS material sources: self-signed, user-provided, and ACME (in-house implementation).
+- Keep TLS material under `state/sys/tls/` with no ACME subdirectories.
 - Document reverse-proxy expectations and configuration implications.
+
+## Action Plan
+
+- [x] Update TLS documentation to reflect the in-house ACME implementation, Cloudflare-only DNS-01, and storage rooted in `state/sys/tls/`.
+- [x] Add an ACME Caravaggio document for implementation details and scoped action plan.
+- [x] Remove the acmex crate + vendor patching and replace ACME logic with the in-house implementation described in `docs/infrastructure/acme.md`.
+- [x] Update TLS storage layout to remove any `state/sys/tls/cache/` usage while keeping existing TLS state files stable.
+- [x] Run targeted ACME coverage (unit + Pebble HTTP-01/DNS-01) and confirm config validation rules for ACME.
+- [ ] Confirm readiness and switch status to `Developed` once approved.
 
 ## Technical Details
 
@@ -21,7 +30,6 @@ Status: Developed
 - Provide a handler registry keyed by well-known paths (e.g., `/acme-challenge/<token>`) so subsystems can register responders.
 - The well-known HTTP listener routes requests only through the registry; unknown paths return 404.
 - ACME HTTP-01 tokens are stored in memory (no disk persistence) and exposed through the registry for the lifetime of the challenge.
-- ACME DNS-01 exec helpers keep cleanup tokens in an in-memory single-writer worker to avoid shared locks.
 - `well-known` listeners remain required when TLS is enabled, but only serve registered in-memory handlers and redirect all other paths to HTTPS.
 
 ### Server Roles and Modes
@@ -50,24 +58,26 @@ does not expose multi-listener binding.
 - `well-known` listeners always serve only `/.well-known/*` and redirect all other paths to HTTPS.
 - When TLS is disabled, `well-known` listeners are not configured and the route is not mounted.
 
-### TLS Material Storage (No Subdirectories)
+### TLS Material Storage
 
-All TLS-related files live directly in `state/sys/tls/`.
+TLS material lives in `state/sys/tls/` with no ACME subdirectories.
 
 **Active certificate and key**
 - `state/sys/tls/cert.pem`
 - `state/sys/tls/key.pem`
 
-**TLS state and ACME account**
+**TLS state**
 - `state/sys/tls/state.yaml`
-- `state/sys/tls/acme-account.pem`
+
+**ACME state and account material**
+- Stored under `state/sys/tls/` (no subdirectories). File naming is implementation-defined and must not require an `acme-*` naming convention.
 
 `state.yaml` tracks issuance provenance and the current TLS configuration fingerprint. It records:
 - `mode` (`self-signed`, `user-provided`, `acme`)
 - `domains`
 - `config_fingerprint`
 - `issued_at`
-- `acme` (provider, directory URL, contact email, optional account ID) when in ACME mode
+- `acme` (directory URL, contact email, optional account ID) when in ACME mode
 
 **Optional bookkeeping**
 - `state/sys/tls/last-renewed.txt` (timestamp for diagnostics)
@@ -75,6 +85,10 @@ All TLS-related files live directly in `state/sys/tls/`.
 Self-signed generation and user-provided certificates both resolve to the
 active `cert.pem` and `key.pem` paths so there is a single canonical location
 for the running server.
+
+**Entropy and key material**
+- Random bytes are sourced from the OS CSPRNG via `getrandom`.
+- ACME account keys are managed by the in-house ACME implementation and stored under `state/sys/tls/`.
 
 ### Configuration Shape
 
@@ -93,21 +107,17 @@ server:
 #   redirect_base_url: "https://example.com" # optional
 #
 #   acme:
-#     provider: "lers"
 #     environment: "production" # or "staging"
 #     directory_url: "https://acme-v02.api.letsencrypt.org/directory" # optional override
 #     insecure_skip_verify: false # testing only
 #     contact_email: "admin@example.com"
 #     challenge: "http-01"      # http-01 | dns-01
 #     dns:
-#       provider: "cloudflare" # cloudflare | exec
+#       provider: "cloudflare"
 #       api_token: "env:CF_API_TOKEN" # supports env:NAME lookups
 #       resolver: ["1.1.1.1", "1.0.0.1"] # optional DNS resolver override
 #       propagation_check: false # optional, defaults to false
 #       propagation_delay_seconds: 30 # optional delay before ACME validation
-#       exec:
-#         present_command: "/usr/local/bin/acme-dns-present"
-#         cleanup_command: "/usr/local/bin/acme-dns-cleanup"
 ```
 
 TLS-enabled example (dual-port):
@@ -136,35 +146,34 @@ Validation rules:
 - `tls.domains` required for `acme` and for SANs on self-signed certs.
 - `acme.contact_email` required when `mode: acme`.
 - `acme.dns.*` required when `challenge: dns-01`.
-- `acme.provider` must be `lers`.
-- `acme.dns.provider` must be `cloudflare` or `exec`.
-- `acme.dns.exec` requires `present_command` and `cleanup_command`.
+- `acme.dns.provider` must be `cloudflare`.
 - `acme.dns.resolver` optional list of DNS resolvers for DNS-01 TXT checks; defaults to authoritative name servers.
 - `acme.dns.propagation_check` optional boolean to enable DNS-01 TXT propagation checks; defaults to false.
 - `acme.dns.propagation_delay_seconds` optional delay before ACME validation; defaults to 30 seconds.
 - `acme.directory_url`, when set, must start with `https://`.
 
-### ACME With lers
+### ACME Implementation (In-House)
 
 **HTTP-01**
-- Implement a custom `lers::Solver` that stores `{token, key_authorization}` in
-  a shared map.
+- Use an HTTP-01 provider that stores `{token, key_authorization}` in
+  the in-memory token store.
 - Actix `/.well-known/acme-challenge/{token}` serves the stored value.
 - HTTP listener remains active to satisfy ACME validation; all other HTTP paths
   redirect to HTTPS.
 
 **DNS-01**
-- Use `lers` DNS solver with `cloudflare`, or `exec` to run custom commands.
-- `exec` provider receives `ACME_DOMAIN`, `ACME_TOKEN`, and `ACME_KEY_AUTHORIZATION`.
-- `exec` commands are executed via `sh -c` on the host.
+- Use the Cloudflare DNS provider with an API token.
 - DNS-01 waits for TXT propagation before ACME validation proceeds.
 - No HTTP exposure required for validation; HTTP listener still runs for
   redirects if TLS mode requires it.
+- DNS providers must not execute shell commands; only Cloudflare is supported.
 
 **Certificate output**
-- `lers` issues a single SAN certificate for `tls.domains`.
+- The in-house ACME client issues a single SAN certificate for `tls.domains`.
 - Write the resulting chain and key to `state/sys/tls/cert.pem` and
   `state/sys/tls/key.pem`.
+
+For implementation details and the ACME-specific action plan, see `docs/infrastructure/acme.md`.
 
 **Issuance triggers**
 - TLS issuance is driven by `state.yaml` plus certificate validation.
@@ -179,8 +188,8 @@ Validation rules:
   within 2 days.
 
 **Current implementation note**
-- ACME mode uses lers to issue and renew certificates at runtime. If issuance
-  is required and fails, startup fails until issuance succeeds.
+- ACME mode will use the in-house ACME client to issue and renew certificates at runtime.
+  If issuance is required and fails, startup fails until issuance succeeds.
 
 ### Reload and Renewal
 
@@ -197,7 +206,7 @@ Validation rules:
   - TLS disabled: HTTP serves all routes, no well-known mount.
   - TLS enabled: HTTP serves only `/.well-known/*` and redirects others.
 - Well-known handler registry responses (in-memory).
-- ACME solver unit tests (token insertion, cleanup, and HTTP-01 handler).
+- ACME unit tests (token insertion/cleanup, HTTP-01 provider, DNS propagation checks).
 - ACME integration test uses a local Pebble stack when Docker is available;
   if Docker is missing, the test warns and skips.
   - Use `scripts/acme-pebble.sh start|stop|status` to manage the Pebble stack

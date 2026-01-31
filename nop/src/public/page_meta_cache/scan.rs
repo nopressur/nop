@@ -308,13 +308,6 @@ fn cleanup_temp_entry(path: &Path) {
 }
 
 fn should_skip_directory(content_root: &Path, path: &Path, name: &str) -> bool {
-    if name == "legacy"
-        && let Ok(relative) = path.strip_prefix(content_root)
-        && relative.components().count() == 1
-    {
-        return true;
-    }
-
     if let Ok(relative) = path.strip_prefix(content_root)
         && relative.components().count() == 1
     {

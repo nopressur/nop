@@ -47,7 +47,7 @@ Status: Developed
   - `admin` (full access),
   - `editor` (content edit access),
   - `viewer` (read-only).
-- Seed content and themes with stable, known fixtures to validate permissions and renders
+- Seed content and themes with stable, known fixtures (including `.theme` files) to validate permissions and renders
   (public page, restricted page, tag-based listing, and a basic theme switch).
 - Use deterministic fixture names and slugs so assertions stay consistent across runs.
 

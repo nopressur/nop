@@ -401,9 +401,8 @@ pub enum AcmeEnvironment {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct AcmeConfig {
-    #[serde(default = "default_acme_provider")]
-    pub provider: String,
     #[serde(default = "default_acme_environment")]
     pub environment: AcmeEnvironment,
     pub directory_url: Option<String>,
@@ -415,22 +414,16 @@ pub struct AcmeConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct AcmeDnsConfig {
     pub provider: String,
     pub api_token: Option<String>,
-    pub exec: Option<AcmeDnsExecConfig>,
     #[serde(default, deserialize_with = "deserialize_resolver_vec")]
     pub resolver: Vec<String>,
     #[serde(default = "default_acme_dns_propagation_check")]
     pub propagation_check: bool,
     #[serde(default = "default_acme_dns_propagation_delay_seconds")]
     pub propagation_delay_seconds: u64,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct AcmeDnsExecConfig {
-    pub present_command: String,
-    pub cleanup_command: String,
 }
 
 fn deserialize_resolver_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -487,10 +480,6 @@ where
     }
 
     deserializer.deserialize_any(ResolverVisitor)
-}
-
-fn default_acme_provider() -> String {
-    "lers".to_string()
 }
 
 fn default_acme_environment() -> AcmeEnvironment {
@@ -1122,12 +1111,6 @@ impl Config {
                 )
             })?;
 
-            if acme.provider.trim().to_lowercase() != "lers" {
-                return Err(ConfigError::ValidationError(
-                    "tls.acme.provider must be set to lers".to_string(),
-                ));
-            }
-
             if acme.contact_email.trim().is_empty() || !acme.contact_email.contains('@') {
                 return Err(ConfigError::ValidationError(
                     "tls.acme.contact_email must be a valid email".to_string(),
@@ -1155,41 +1138,20 @@ impl Config {
                     ));
                 }
                 let provider = dns.provider.trim().to_lowercase();
-                match provider.as_str() {
-                    "cloudflare" => {
-                        let token = dns.api_token.as_ref().ok_or_else(|| {
-                            ConfigError::ValidationError(
-                                "tls.acme.dns.api_token is required for cloudflare".to_string(),
-                            )
-                        })?;
-                        if token.trim().is_empty() {
-                            return Err(ConfigError::ValidationError(
-                                "tls.acme.dns.api_token cannot be empty".to_string(),
-                            ));
-                        }
-                    }
-                    "exec" => {
-                        let exec = dns.exec.as_ref().ok_or_else(|| {
-                            ConfigError::ValidationError(
-                                "tls.acme.dns.exec is required for exec provider".to_string(),
-                            )
-                        })?;
-                        if exec.present_command.trim().is_empty() {
-                            return Err(ConfigError::ValidationError(
-                                "tls.acme.dns.exec.present_command cannot be empty".to_string(),
-                            ));
-                        }
-                        if exec.cleanup_command.trim().is_empty() {
-                            return Err(ConfigError::ValidationError(
-                                "tls.acme.dns.exec.cleanup_command cannot be empty".to_string(),
-                            ));
-                        }
-                    }
-                    _ => {
-                        return Err(ConfigError::ValidationError(
-                            "tls.acme.dns.provider must be cloudflare or exec".to_string(),
-                        ));
-                    }
+                if provider != "cloudflare" {
+                    return Err(ConfigError::ValidationError(
+                        "tls.acme.dns.provider must be cloudflare".to_string(),
+                    ));
+                }
+                let token = dns.api_token.as_ref().ok_or_else(|| {
+                    ConfigError::ValidationError(
+                        "tls.acme.dns.api_token is required for cloudflare".to_string(),
+                    )
+                })?;
+                if token.trim().is_empty() {
+                    return Err(ConfigError::ValidationError(
+                        "tls.acme.dns.api_token cannot be empty".to_string(),
+                    ));
                 }
 
                 if !dns.resolver.is_empty() {
@@ -1405,7 +1367,6 @@ mod tests {
     fn validate_tls_config_requires_dns_settings_for_dns01() {
         let mut tls = base_tls_config(TlsMode::Acme);
         tls.acme = Some(AcmeConfig {
-            provider: "lers".to_string(),
             environment: AcmeEnvironment::Staging,
             directory_url: None,
             insecure_skip_verify: false,
@@ -1418,26 +1379,9 @@ mod tests {
     }
 
     #[test]
-    fn validate_tls_config_rejects_unknown_acme_provider() {
-        let mut tls = base_tls_config(TlsMode::Acme);
-        tls.acme = Some(AcmeConfig {
-            provider: "other".to_string(),
-            environment: AcmeEnvironment::Staging,
-            directory_url: None,
-            insecure_skip_verify: false,
-            contact_email: "admin@example.com".to_string(),
-            challenge: AcmeChallenge::Http01,
-            dns: None,
-        });
-        let result = Config::validate_tls_config(&tls);
-        assert!(result.is_err(), "unknown provider should fail");
-    }
-
-    #[test]
     fn validate_tls_config_rejects_invalid_directory_url() {
         let mut tls = base_tls_config(TlsMode::Acme);
         tls.acme = Some(AcmeConfig {
-            provider: "lers".to_string(),
             environment: AcmeEnvironment::Staging,
             directory_url: Some("http://localhost/dir".to_string()),
             insecure_skip_verify: false,
@@ -1450,33 +1394,9 @@ mod tests {
     }
 
     #[test]
-    fn validate_tls_config_rejects_unknown_dns_provider() {
+    fn validate_tls_config_rejects_exec_dns_provider() {
         let mut tls = base_tls_config(TlsMode::Acme);
         tls.acme = Some(AcmeConfig {
-            provider: "lers".to_string(),
-            environment: AcmeEnvironment::Staging,
-            directory_url: None,
-            insecure_skip_verify: false,
-            contact_email: "admin@example.com".to_string(),
-            challenge: AcmeChallenge::Dns01,
-            dns: Some(AcmeDnsConfig {
-                provider: "other".to_string(),
-                api_token: Some("token".to_string()),
-                exec: None,
-                resolver: Vec::new(),
-                propagation_check: false,
-                propagation_delay_seconds: 30,
-            }),
-        });
-        let result = Config::validate_tls_config(&tls);
-        assert!(result.is_err(), "unknown dns provider should fail");
-    }
-
-    #[test]
-    fn validate_tls_config_requires_exec_commands() {
-        let mut tls = base_tls_config(TlsMode::Acme);
-        tls.acme = Some(AcmeConfig {
-            provider: "lers".to_string(),
             environment: AcmeEnvironment::Staging,
             directory_url: None,
             insecure_skip_verify: false,
@@ -1484,17 +1404,13 @@ mod tests {
             challenge: AcmeChallenge::Dns01,
             dns: Some(AcmeDnsConfig {
                 provider: "exec".to_string(),
-                api_token: None,
-                exec: Some(AcmeDnsExecConfig {
-                    present_command: "".to_string(),
-                    cleanup_command: "".to_string(),
-                }),
+                api_token: Some("token".to_string()),
                 resolver: Vec::new(),
                 propagation_check: false,
                 propagation_delay_seconds: 30,
             }),
         });
         let result = Config::validate_tls_config(&tls);
-        assert!(result.is_err(), "exec provider requires commands");
+        assert!(result.is_err(), "exec dns provider should fail");
     }
 }

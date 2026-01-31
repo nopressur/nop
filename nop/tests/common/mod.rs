@@ -121,12 +121,14 @@ impl TestHarness {
         let user_services = Arc::new(user_services);
 
         let upload_registry = Arc::new(UploadRegistry::new());
+        let release_tracker = Arc::new(ReleaseTracker::new());
         let management_bus = build_management_bus(
             &config,
             &runtime_paths,
             user_services.clone(),
             page_cache.clone(),
             upload_registry.clone(),
+            release_tracker.clone(),
         );
         let app_state = Arc::new(AppState::new(
             &config.app.name,
@@ -134,7 +136,6 @@ impl TestHarness {
             management_bus,
             upload_registry,
         ));
-        let release_tracker = Arc::new(ReleaseTracker::new());
         let shortcode_registry = Arc::new(create_default_registry_with_config(
             &config,
             &release_tracker,
@@ -203,6 +204,7 @@ fn build_management_bus(
     user_services: Arc<UserServices>,
     page_cache: Arc<PageMetaCache>,
     upload_registry: Arc<UploadRegistry>,
+    release_tracker: Arc<ReleaseTracker>,
 ) -> ManagementBus {
     let registry = build_default_registry().expect("management registry");
     let context = ManagementContext::from_components_with_user_services_and_cache(
@@ -213,7 +215,9 @@ fn build_management_bus(
         Some(page_cache),
     )
     .expect("management context");
-    let context = context.with_upload_registry(upload_registry);
+    let context = context
+        .with_upload_registry(upload_registry)
+        .with_release_tracker(release_tracker);
     ManagementBus::start(registry, context)
 }
 
@@ -507,13 +511,9 @@ fn seed_content(runtime_paths: &RuntimePaths) {
 
 fn seed_themes(fixture: &TestFixtureRoot) {
     let themes_dir = fixture.themes_dir();
-    let default_theme = r#"<style>
-.test-theme { color: #222; }
-</style>"#;
-    fs::write(themes_dir.join("default.html"), default_theme).expect("default theme");
+    let default_theme = "color-background-primary-light #222\n";
+    fs::write(themes_dir.join("default.theme"), default_theme).expect("default theme");
 
-    let alt_theme = r#"<style>
-.alt-theme { color: #3366ff; }
-</style>"#;
-    fs::write(themes_dir.join("alt.html"), alt_theme).expect("alt theme");
+    let alt_theme = "color-background-primary-light #3366ff\n";
+    fs::write(themes_dir.join("alt.theme"), alt_theme).expect("alt theme");
 }

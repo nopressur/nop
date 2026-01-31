@@ -46,7 +46,7 @@ Bootstrap runs immediately after resolving the runtime root (`-C <root>` or CWD)
    - If `users.auth_method` resolves to `oidc`, do not create `users.yaml`.
 4. **Runtime paths check**:
    - Ensure `content/`, `themes/`, `state/` (plus `state/sys`, `state/sc`) exist; create only what is missing.
-   - If `content/` or `themes/` were missing, create a default home object (blob + sidecar) and `themes/default.html` using the embedded red theme template.
+- If `content/` or `themes/` were missing, create a default home object (blob + sidecar) and `themes/default.theme` using the embedded red theme template (see `docs/content/themes.md`).
 5. **Run mode decision**:
    - If bootstrap created `config.yaml` or `users.yaml`, the server stays in the foreground for that run to keep credentials visible.
 6. **Normal startup flow**:
@@ -64,11 +64,12 @@ The bootstrap step ensures all required root-level components exist (or are crea
 - `content/`
   - Default home object blob + sidecar (created if missing and `content/` was created or if required file is missing)
 - `themes/`
-  - `themes/default.html` (created if missing; content sourced from embedded red theme)
+- `themes/default.theme` (created if missing; content sourced from embedded red theme)
 - `state/`
   - `state/sys/`
   - `state/sc/`
   - `state/sys/tls/` (when TLS is configured or auto-configured)
+    - `state/sys/tls/` (ACME state lives alongside TLS material; no subdirectories)
 - `logs/` (created when daemon logging is enabled)
 - `nop.pid` (created only while the daemon is running)
 
@@ -131,7 +132,7 @@ If `users.yaml` is missing, bootstrap creates a local admin account:
 - Name: `Administrator`
 - Roles: `admin`
 - Password: 16 characters, ASCII alphanumeric only (`A-Za-z0-9`)
-- Password generation must be cryptographically strong (`OsRng` or equivalent).
+- Password generation must be cryptographically strong (OS CSPRNG via `getrandom` or equivalent).
 - The plaintext password is logged once with a warning to change it immediately.
 - The stored password in `users.yaml` must follow the password provider format described in
   `docs/iam/password-login.md`.
@@ -170,10 +171,10 @@ When required content/theme files are missing:
 - The default home object should be created with a minimal, working page that renders in the default theme. Keep it simple and include a short notice that the site was auto-generated.
 - The home object sidecar should include the canonical alias (default `index`) and a title unless
   the home route is configured to `/id/<hex>`.
-- `themes/default.html` should be created from an embedded template:
+- `themes/default.theme` should be created from an embedded template:
   - Use the existing red theme styling (distinctive warning red to prompt change).
   - Embed the template as a static string in code (no external file dependency at runtime).
-  - Write the embedded template into `themes/default.html` only when the file is missing.
+- Write the embedded template into `themes/default.theme` only when the file is missing.
 
 ### Logging and Safety
 
@@ -188,7 +189,7 @@ When required content/theme files are missing:
   - Missing `config.yaml` creates expected defaults (ports 7080/7443, self-signed TLS, local auth).
   - Missing `users.yaml` creates admin with a 16-char alphanumeric password and a password
     provider block (see `docs/iam/password-login.md`).
-  - Missing `content/` and `themes/` create the home object (blob + sidecar) and `themes/default.html` from embedded red theme.
+- Missing `content/` and `themes/` create the home object (blob + sidecar) and `themes/default.theme` from embedded red theme.
   - Idempotency: re-running bootstrap does not modify existing files.
   - `-C <root>` path handling uses the provided directory.
 - Add tests to ensure TLS directories (`state/sys/tls`) are created when TLS is configured.

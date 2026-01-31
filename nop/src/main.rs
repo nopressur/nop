@@ -842,24 +842,58 @@ mod tests {
         // Initialize the crypto provider for rustls - ignore errors if already set
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        // Test that awc can connect to HTTPS endpoints
-        let client = awc::Client::default();
-        let response = client.get("https://httpbin.org/get").send().await;
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(["localhost".to_string()])
+                .expect("generate self-signed cert");
+        let cert_der = cert.der().clone();
+        let key_der = rustls::pki_types::PrivateKeyDer::from(
+            rustls::pki_types::PrivatePkcs8KeyDer::from(signing_key.serialize_der()),
+        );
 
-        match response {
-            Ok(resp) => {
-                assert!(
-                    resp.status().is_success(),
-                    "Should get successful response, got status: {}",
-                    resp.status()
-                );
-            }
-            Err(e) => {
-                // This test requires network connectivity and may fail in CI environments
-                // Just log the error and skip the test rather than failing
-                eprintln!("TLS test skipped due to network error: {}", e);
-                return;
-            }
-        }
+        let tls_config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert_der.clone()], key_der)
+            .expect("build rustls server config");
+
+        let listener =
+            std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind TLS listener");
+        let addr = listener.local_addr().expect("resolve TLS listener address");
+
+        let server = actix_web::HttpServer::new(|| {
+            actix_web::App::new().route(
+                "/health",
+                actix_web::web::get().to(|| async { actix_web::HttpResponse::Ok().finish() }),
+            )
+        })
+        .listen_rustls_0_23(listener, tls_config)
+        .expect("start TLS server")
+        .run();
+        let handle = server.handle();
+        actix_web::rt::spawn(server);
+
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(cert_der)
+            .expect("add self-signed cert to root store");
+
+        let mut client_config = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        client_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+
+        let client = awc::Client::builder()
+            .connector(awc::Connector::new().rustls_0_23(std::sync::Arc::new(client_config)))
+            .finish();
+        let url = format!("https://localhost:{}/health", addr.port());
+        let response = client.get(url).send().await;
+
+        handle.stop(true).await;
+
+        let resp = response.expect("TLS request should succeed");
+        assert!(
+            resp.status().is_success(),
+            "Should get successful response, got status: {}",
+            resp.status()
+        );
     }
 }

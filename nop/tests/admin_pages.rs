@@ -143,6 +143,95 @@ async fn content_upload_list_update_delete() {
 }
 
 #[actix_web::test]
+async fn nav_alias_change_bumps_release_tracker() {
+    let harness = common::TestHarness::new().await;
+    let bus = harness.app_state.management_bus.clone();
+
+    let parent_upload = ContentUploadRequest {
+        alias: Some("docs".to_string()),
+        title: Some("Docs".to_string()),
+        mime: "text/markdown".to_string(),
+        tags: vec!["docs".to_string()],
+        nav_title: Some("Docs".to_string()),
+        nav_parent_id: None,
+        nav_order: Some(0),
+        original_filename: None,
+        theme: None,
+        content: b"# Docs\n\nParent.".to_vec(),
+    };
+
+    let parent_response = bus
+        .send(
+            nop::management::next_connection_id(),
+            10,
+            ManagementCommand::Content(ContentCommand::Upload(parent_upload)),
+        )
+        .await
+        .expect("parent upload response");
+    assert_eq!(parent_response.action_id, CONTENT_ACTION_UPLOAD_OK);
+    let parent_payload = match parent_response.payload {
+        ResponsePayload::ContentUpload(payload) => payload,
+        other => panic!("unexpected payload: {:?}", other),
+    };
+    let parent_id = parent_payload.id;
+
+    let child_upload = ContentUploadRequest {
+        alias: Some("docs/child".to_string()),
+        title: Some("Child".to_string()),
+        mime: "text/markdown".to_string(),
+        tags: vec!["docs".to_string()],
+        nav_title: Some("Child".to_string()),
+        nav_parent_id: Some(parent_id.clone()),
+        nav_order: Some(1),
+        original_filename: None,
+        theme: None,
+        content: b"# Child\n\nChild page.".to_vec(),
+    };
+
+    let child_response = bus
+        .send(
+            nop::management::next_connection_id(),
+            11,
+            ManagementCommand::Content(ContentCommand::Upload(child_upload)),
+        )
+        .await
+        .expect("child upload response");
+    assert_eq!(child_response.action_id, CONTENT_ACTION_UPLOAD_OK);
+    let child_payload = match child_response.payload {
+        ResponsePayload::ContentUpload(payload) => payload,
+        other => panic!("unexpected payload: {:?}", other),
+    };
+
+    let before = harness.release_tracker.current();
+
+    let update_response = bus
+        .send(
+            nop::management::next_connection_id(),
+            12,
+            ManagementCommand::Content(ContentCommand::Update(ContentUpdateRequest {
+                id: child_payload.id.clone(),
+                new_alias: Some("docs/child-updated".to_string()),
+                title: None,
+                tags: None,
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                theme: None,
+                content: None,
+            })),
+        )
+        .await
+        .expect("update response");
+    assert_eq!(update_response.action_id, CONTENT_ACTION_UPDATE_OK);
+
+    let after = harness.release_tracker.current();
+    assert!(
+        after > before,
+        "release tracker should bump when nav item alias changes"
+    );
+}
+
+#[actix_web::test]
 async fn non_markdown_upload_exposes_id_alias() {
     let harness = common::TestHarness::new().await;
     let bus = harness.app_state.management_bus.clone();

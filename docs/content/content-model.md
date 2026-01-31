@@ -75,10 +75,11 @@ This document is the single source of truth for public content resolution and re
 
 ### Sidecar Metadata
 
-The public pipeline reads metadata from RON sidecar files, not front matter.
+The public pipeline reads metadata from RON sidecar files.
 
 - `title` is used for page titles and navigation labels.
-- `theme` selects `<runtime-root>/themes/<theme>.html` and falls back to `default.html`.
+- `theme` selects `<runtime-root>/themes/<theme>.theme` and falls back to `default.theme`
+  (see `docs/content/themes.md`).
 - `tags` drive access control and tag-list shortcodes.
 
 ### Access Control and RBAC
@@ -91,6 +92,7 @@ The public pipeline reads metadata from RON sidecar files, not front matter.
 
 ### Markdown Rendering
 
+- Markdown content is rendered as-is; front matter is not parsed or stripped.
 - `generate_html` configures `pulldown_cmark` with tables, strikethrough, footnotes, and task lists enabled.
 - `process_event` enforces security rules:
   - Image sources are validated against traversal attempts and must exist locally.
@@ -109,11 +111,11 @@ The public pipeline reads metadata from RON sidecar files, not front matter.
 
 ### Themes and Layout
 
-- Themes live under `themes/` as HTML fragments; `default.html` is required.
-- `generate_html_page_with_user` loads themes via `load_theme_content` with canonical path checks.
-- Theme fragments are injected into `public/templates/main_layout.html` alongside user navigation fragments.
-- Admin code never reads `themes/`; only the public renderer loads themes.
-- Public markdown pages apply a content-width cap in the main layout: 1152px when any paragraph (including tight list items) exceeds `rendering.short_paragraph_length` (default 256), otherwise 960px. Set `rendering.short_paragraph_length` to `0` to disable compact width entirely. The navbar container is not affected.
+Theme file format, variables, and rendering details live in `docs/content/themes.md`.
+Public markdown pages still apply a content-width cap in the main layout: 1152px when any paragraph
+(including tight list items) exceeds `rendering.short_paragraph_length` (default 256), otherwise
+960px. Set `rendering.short_paragraph_length` to `0` to disable compact width entirely. The navbar
+container is not affected.
 
 ### Admin Edit Button (Public Navbar)
 
@@ -131,7 +133,10 @@ The public pipeline reads metadata from RON sidecar files, not front matter.
 - Navigation labels are treated as plain text and HTML-escaped at render time.
 - `nav_parent_id` (ContentId hex string) defines parent/child grouping; only root items (no parent) render top-level links.
 - `nav_order` (integer) defines ordering for both top-level items and their children; lower numbers render first.
-- Children are rendered under their parent in `nav_order` order; ties are resolved by alias for determinism.
+- Children are rendered under their parent in `nav_order` order; ties are resolved alphabetically by nav title
+  (case-insensitive), then alias for determinism.
+- Nav paths derive from the content alias (or `id/<hex>` when alias is empty); changing the alias for
+  a navbar item is a navigation change and must bump the release tracker.
 - Missing parent IDs or nodes are skipped with a warning so navigation generation never panics.
 - Parent selection data is sourced from the page metadata cache and exposed via the content management domain.
 

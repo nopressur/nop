@@ -61,13 +61,13 @@ export async function seedFixtureData(
   const users = buildUsersYaml();
   const roles = buildRolesYaml();
   const indexMd = buildIndexContent(smokeHeading);
-  const theme = buildThemeCss();
+  const theme = buildThemeVars();
 
   await Promise.all([
     fs.writeFile(path.join(rootDir, "config.yaml"), config, "utf8"),
     fs.writeFile(path.join(rootDir, "users.yaml"), users, "utf8"),
     fs.writeFile(path.join(stateSysDir, "roles.yaml"), roles, "utf8"),
-    fs.writeFile(path.join(themesDir, "default.html"), theme, "utf8"),
+    fs.writeFile(path.join(themesDir, "default.theme"), theme, "utf8"),
   ]);
 
   await writeFlatMarkdown({
@@ -91,16 +91,6 @@ export async function seedFixtureData(
       path: "/",
     },
   };
-}
-
-export async function writeLegacyMarkdown(options: {
-  contentDir: string;
-  relativePath: string;
-  body: string;
-}): Promise<void> {
-  const fullPath = path.join(options.contentDir, options.relativePath);
-  await fs.mkdir(path.dirname(fullPath), { recursive: true });
-  await fs.writeFile(fullPath, options.body, "utf8");
 }
 
 function buildConfigYaml(port: number): string {
@@ -137,8 +127,8 @@ function buildIndexContent(heading: string): string {
   return `# ${heading}\n\nThis page validates the Playwright harness.`;
 }
 
-function buildThemeCss(): string {
-  return `    <style>\n        body {\n            font-family: Arial, sans-serif;\n            background-color: #f6f6f6;\n            color: #222;\n        }\n\n        .content h1 {\n            color: #1f2933;\n        }\n    </style>\n`;
+function buildThemeVars(): string {
+  return `# Playwright seed theme\ncolor-background-primary-light #f6f6f6\ncolor-text-primary-light #222\ncolor-content-link-light #1f2933\nfont-body-family Arial, sans-serif\nfont-body-size 16px\nfont-body-line-height normal\n`;
 }
 
 function buildSeededUsers(): SeededData["users"] {

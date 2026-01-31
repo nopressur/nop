@@ -16,6 +16,7 @@ Status: Developed
 ### Admin UX refinements
 
 - Content list search should update rows in place without clearing the table while fetching.
+- The top-right header link switches to `View Page` when a markdown editor has a saved content ID and targets `/id/<id>`; otherwise it stays `View Site`.
 - Editor UX:
   - Provide a Close/Cancel action plus Escape behavior that opens an unsaved-changes modal when edits exist.
     - Modal actions: Save (persist and return to list), Discard (return to list), Cancel (stay).
@@ -27,7 +28,8 @@ Status: Developed
   - Alias inputs validate on change and surface inline error states (red border + helper text).
   - Collapse sidecar fields behind a right-aligned chevron toggle that expands downward.
 - Form controls:
-  - Theme selection uses a dropdown populated from a lightweight REST endpoint that returns theme names.
+  - Theme selection uses a dropdown populated from a lightweight REST endpoint that returns theme
+    names (from `.theme` files; see `docs/content/themes.md`).
   - Selecting the default theme clears the theme field by sending an empty string; omitted fields are treated as unchanged.
   - Navbar fields include title, parent selection, and numeric order.
   - Tags use a chip-style multi-select from existing tags; missing tags are removed and not shown.
@@ -45,6 +47,8 @@ Status: Developed
     more than one file is queued.
 - The content list includes a multi-select tag filter that matches all selected tags and seeds
   default tags for new uploads.
+  - Tag filters persist in-memory across list/editor navigation and must not be cleared while the
+    tag options list is still loading.
   - Content editor uploads inherit the page’s current tag selection, including unsaved edits.
   - Binary uploads run a two-step validation:
     - Pre-validation (filename, mime, size) builds placeholder blocks for rejected files.
@@ -196,7 +200,7 @@ Status: Developed
 - Use system light/dark preferences only (no manual toggle) and keep sharp edges with a small radius.
 - Prefer compact controls with consistent sizing to maximize editor/listing space.
 - Shared components replace current duplicated JS helpers:
-  - `NotificationToaster`, `Pagination`, `Button`, `Input`, `Select`, `AceEditor`.
+  - `NotificationToaster`, `Pagination`, `Button`, `Input`, `SearchInput`, `Select`, `AceEditor`.
 - Toast notifications must emit a console log with the same message and a tone-based severity.
 - Toast notifications are centered horizontally at the top of the viewport, can overlap the navbar, and use
   a compact single-line layout with `max-width: 400px` and `width: 90vw` (truncate overflow if needed).
@@ -245,8 +249,8 @@ Status: Developed
 - `/admin/users/new` -> `UserEditorView` (create mode).
 - `/admin/users/edit/:email` -> `UserEditorView` (edit mode).
 - `/admin/themes` -> `ThemeListView` with list + delete controls.
-- `/admin/themes/new` -> `ThemeEditorView` (create mode) with theme name + HTML editor.
-- `/admin/themes/customize/:theme` -> `ThemeEditorView` (edit mode) with HTML editor.
+- `/admin/themes/new` -> `ThemeEditorView` (create mode) with theme name + variable editor.
+- `/admin/themes/customize/:theme` -> `ThemeEditorView` (edit mode) with variable editor.
 
 ### Documentation Coverage
 

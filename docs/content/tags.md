@@ -161,7 +161,7 @@ Notes:
 
 ### Content Tag Integration
 
-- Content objects will reference tags in sidecar metadata rather than front matter.
+- Content objects will reference tags in sidecar metadata.
 - Tag access rules are enforceable by the public pipeline; behavior must be documented and implemented.
 - Role definitions and validation rules live in `docs/content/role-management.md`.
 - Tags default to `intersect` when no access rule is specified.

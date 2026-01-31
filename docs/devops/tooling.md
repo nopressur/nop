@@ -5,12 +5,9 @@ This catalog highlights repo-provided tooling that speeds up development, testin
 ## Rust Build Utilities
 
 - `scripts/cargo.sh`
-  - Wrapper for `cargo` that ensures the patched Rust vendor crates are available first.
+  - Wrapper for `cargo` that standardizes repo usage.
   - Works with any cargo subcommand (build, check, test, fmt, clippy, run, etc.).
   - Resolves the crate automatically (uses `nop/` when invoked from repo root).
-- `scripts/update-rust-vendor.sh`
-  - Downloads pinned crates from crates.io and applies local patches into `nop/target/vendor/`.
-  - `--ensure` skips work when the vendor directory and marker are already valid.
 
 ## Versioning Utilities
 

@@ -18,7 +18,7 @@ admin:
   # Examples: "/control-panel", "/dashboard", "/management", "/adm"
 
 # TLS configuration (enables HTTPS when present).
-# TLS files live under state/sys/tls/ with no subdirectories.
+# TLS files live under state/sys/tls/ (ACME state is stored alongside TLS material).
 # tls:
 #   mode: "self-signed"        # self-signed | user-provided | acme
 #   domains:
@@ -26,18 +26,14 @@ admin:
 #     - "www.example.com"
 #   redirect_base_url: "https://example.com"
 #   acme:
-#     provider: "lers"
 #     environment: "production" # production | staging
 #     directory_url: "https://acme-v02.api.letsencrypt.org/directory"
 #     insecure_skip_verify: false
 #     contact_email: "admin@example.com"
 #     challenge: "http-01"       # http-01 | dns-01
 #     dns:
-#       provider: "cloudflare"   # cloudflare | exec
+#       provider: "cloudflare"
 #       api_token: "env:CF_API_TOKEN"
-#       exec:
-#         present_command: "/usr/local/bin/acme-dns-present"
-#         cleanup_command: "/usr/local/bin/acme-dns-cleanup"
 
 # File upload configuration for admin panel
 upload:

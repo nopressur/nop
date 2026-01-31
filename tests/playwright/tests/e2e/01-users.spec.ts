@@ -16,6 +16,11 @@ const NEW_USER = {
 };
 
 test("user management CRUD and listing", async ({ page, harness, rng }) => {
+  const pageErrors: Error[] = [];
+  page.on("pageerror", (error) => {
+    pageErrors.push(error);
+  });
+
   await login({
     page,
     baseUrl: harness.baseUrl,
@@ -87,6 +92,8 @@ test("user management CRUD and listing", async ({ page, harness, rng }) => {
 
   await humanClick(page.getByRole("button", { name: "Save" }), rng);
   await page.waitForURL(/\/admin\/users/);
+
+  expect(pageErrors).toEqual([]);
 
   await expect(
     page.getByRole("cell", { name: NEW_USER.updatedName })

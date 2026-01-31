@@ -10,7 +10,6 @@ use crate::content::flat_storage::{
     ContentSidecar, ContentVersion, blob_path, generate_content_id, sidecar_path,
     write_sidecar_atomic,
 };
-use crate::content::migration::migrate_legacy_content;
 use crate::runtime_paths::RuntimePaths;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -20,9 +19,9 @@ pub(super) const DEFAULT_HOME_MD: &str = "# Welcome to NoPressure!\n\nThis site 
 const DEFAULT_HOME_ALIAS: &str = "index";
 const DEFAULT_HOME_TITLE: &str = "Welcome";
 
-pub(crate) const RED_THEME_HTML: &str = include_str!(concat!(
+pub(crate) const RED_THEME_THEME: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/src/bootstrap/themes/red.html"
+    "/src/bootstrap/themes/red.theme"
 ));
 
 pub fn ensure_paths(root: &Path, config: &ValidatedConfig) -> Result<RuntimePaths, BootstrapError> {
@@ -49,25 +48,8 @@ pub fn ensure_paths(root: &Path, config: &ValidatedConfig) -> Result<RuntimePath
 
     ensure_roles(&runtime_paths)?;
 
+    ensure_flat_content_layout(&runtime_paths.content_dir)?;
     ensure_default_content(&runtime_paths)?;
-    let report = migrate_legacy_content(&runtime_paths).map_err(|err| {
-        BootstrapError::Io(io::Error::other(format!(
-            "Content migration failed: {}",
-            err
-        )))
-    })?;
-    if report.migrated {
-        log_action(format!(
-            "migrated {} legacy files into flat storage",
-            report.files_migrated
-        ));
-        if report.tags_created > 0 {
-            log_action(format!("created {} legacy role tags", report.tags_created));
-        }
-        if report.index_placeholder_created {
-            log_action("created placeholder index.md (no legacy root index.md found)");
-        }
-    }
     ensure_default_theme(&runtime_paths)?;
 
     Ok(runtime_paths)
@@ -150,8 +132,8 @@ fn ensure_default_content(runtime_paths: &RuntimePaths) -> Result<(), BootstrapE
 }
 
 fn ensure_default_theme(runtime_paths: &RuntimePaths) -> Result<(), BootstrapError> {
-    let default_theme = runtime_paths.themes_dir.join("default.html");
-    if write_new_file(&default_theme, RED_THEME_HTML)? {
+    let default_theme = runtime_paths.themes_dir.join("default.theme");
+    if write_new_file(&default_theme, RED_THEME_THEME)? {
         log_action(format!(
             "created {} from embedded red theme",
             default_theme.display()
@@ -190,9 +172,6 @@ fn has_content(root: &Path) -> Result<bool, BootstrapError> {
             }
 
             if file_type.is_dir() {
-                if should_skip_dir(root, &path) {
-                    continue;
-                }
                 stack.push(path);
                 continue;
             }
@@ -206,19 +185,52 @@ fn has_content(root: &Path) -> Result<bool, BootstrapError> {
     Ok(false)
 }
 
-fn should_skip_dir(content_root: &Path, path: &Path) -> bool {
-    if let Some(name) = path.file_name().and_then(|value| value.to_str())
-        && name.starts_with('.')
-    {
-        return true;
+fn ensure_flat_content_layout(content_dir: &Path) -> Result<(), BootstrapError> {
+    if !content_dir.exists() {
+        return Ok(());
     }
-    if let Ok(relative) = path.strip_prefix(content_root)
-        && relative.components().count() == 1
-        && relative == Path::new("legacy")
-    {
-        return true;
+
+    let mut unexpected = Vec::new();
+    for entry in fs::read_dir(content_dir)? {
+        let entry = entry.map_err(BootstrapError::Io)?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(BootstrapError::Io)?;
+        let name = match path.file_name().and_then(|value| value.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+
+        if file_type.is_dir() {
+            if is_shard_dir(&name) {
+                continue;
+            }
+            unexpected.push(name);
+            continue;
+        }
+
+        if file_type.is_file() || file_type.is_symlink() {
+            unexpected.push(name);
+        }
     }
-    false
+
+    if unexpected.is_empty() {
+        return Ok(());
+    }
+
+    unexpected.sort();
+    let unexpected_list = unexpected.join(", ");
+    Err(BootstrapError::Io(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!(
+            "Content directory '{}' contains unexpected entries: {}. Expected only shard directories named as two lowercase hex digits.",
+            content_dir.display(),
+            unexpected_list
+        ),
+    )))
+}
+
+fn is_shard_dir(name: &str) -> bool {
+    name.len() == 2 && name.chars().all(|c| c.is_ascii_hexdigit()) && name == name.to_lowercase()
 }
 
 #[cfg(test)]
@@ -319,9 +331,6 @@ mod tests {
                 let path = entry.path();
                 let file_type = entry.file_type().ok()?;
                 if file_type.is_dir() {
-                    if should_skip_dir(content_dir, &path) {
-                        continue;
-                    }
                     stack.push(path);
                     continue;
                 }

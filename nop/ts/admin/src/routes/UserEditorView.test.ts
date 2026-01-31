@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-import { render, waitFor } from "@testing-library/svelte";
+import { cleanup, render, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UserEditorView from "./UserEditorView.svelte";
 
 type RouteState = {
@@ -39,7 +39,6 @@ const routerMocks = vi.hoisted(() => {
 });
 
 const roleMocks = vi.hoisted(() => ({
-  createRole: vi.fn(),
   listRoles: vi.fn().mockResolvedValue([]),
 }));
 
@@ -62,7 +61,6 @@ vi.mock("../stores/notifications", () => ({
 }));
 
 vi.mock("../services/roles", () => ({
-  createRole: roleMocks.createRole,
   listRoles: roleMocks.listRoles,
 }));
 
@@ -83,6 +81,10 @@ describe("UserEditorView", () => {
       query: new URLSearchParams(),
       fullPath: "/admin/users/new",
     });
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("saves on Enter", async () => {
@@ -118,5 +120,50 @@ describe("UserEditorView", () => {
     await userEvent.keyboard("{Escape}");
 
     expect(routerMocks.navigate).toHaveBeenCalledWith("/users");
+  });
+
+  it("does not render the add role field", async () => {
+    const { queryByLabelText } = render(UserEditorView);
+
+    await waitFor(() => expect(roleMocks.listRoles).toHaveBeenCalled());
+
+    expect(queryByLabelText("Add Role")).toBeNull();
+  });
+
+  it("updates roles when editing an existing user", async () => {
+    routerMocks.route.set({
+      path: "/users/edit/editor@example.com",
+      query: new URLSearchParams(),
+      fullPath: "/admin/users/edit/editor@example.com",
+    });
+    roleMocks.listRoles.mockResolvedValueOnce(["editor", "viewer"]);
+    userMocks.getUser.mockResolvedValueOnce({
+      email: "editor@example.com",
+      name: "Editor User",
+      roles: ["editor"],
+    });
+
+    const { findByLabelText, getByRole } = render(UserEditorView);
+
+    await waitFor(() => expect(userMocks.getUser).toHaveBeenCalledWith("editor@example.com"));
+
+    const editorRole = await findByLabelText("editor");
+    const viewerRole = await findByLabelText("viewer");
+
+    expect(editorRole).toBeChecked();
+    expect(viewerRole).not.toBeChecked();
+
+    await userEvent.click(viewerRole);
+    await userEvent.click(editorRole);
+
+    await userEvent.click(getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(userMocks.addUserRole).toHaveBeenCalledWith("editor@example.com", "viewer"),
+    );
+    await waitFor(() =>
+      expect(userMocks.removeUserRole).toHaveBeenCalledWith("editor@example.com", "editor"),
+    );
+    await waitFor(() => expect(routerMocks.navigate).toHaveBeenCalledWith("/users"));
   });
 });

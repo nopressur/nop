@@ -26,7 +26,7 @@ describe('user menu', () => {
     initUserMenu();
     await flush();
 
-    const root = document.querySelector('[data-site-user-menu]');
+    const root = document.querySelector<HTMLElement>('[data-site-user-menu]');
     expect(root?.children.length).toBe(0);
     const editButton = document.querySelector('[data-site-edit-button]');
     expect(editButton).toBeNull();
@@ -49,7 +49,7 @@ describe('user menu', () => {
     initUserMenu();
     await flush();
 
-    const root = document.querySelector('[data-site-user-menu]');
+    const root = document.querySelector<HTMLElement>('[data-site-user-menu]');
     expect(root?.dataset.siteDropdown).toBeDefined();
 
     const toggle = root?.querySelector('.navbar-link');

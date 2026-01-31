@@ -103,10 +103,15 @@ fn sort_nav_ids(
         let left_node = nodes.get(left);
         let right_node = nodes.get(right);
         match (left_node, right_node) {
-            (Some(left_node), Some(right_node)) => left_node
-                .order
-                .cmp(&right_node.order)
-                .then_with(|| left_node.alias.cmp(&right_node.alias)),
+            (Some(left_node), Some(right_node)) => {
+                let left_title = left_node.title.to_lowercase();
+                let right_title = right_node.title.to_lowercase();
+                left_node
+                    .order
+                    .cmp(&right_node.order)
+                    .then_with(|| left_title.cmp(&right_title))
+                    .then_with(|| left_node.alias.cmp(&right_node.alias))
+            }
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
@@ -154,22 +159,6 @@ fn object_route_alias(object: &crate::public::page_meta_cache::CachedObject) -> 
     } else {
         object.alias.clone()
     }
-}
-
-pub fn capitalize_and_clean(s: &str) -> String {
-    s.replace(['_', '-'], " ")
-        .split_whitespace()
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => {
-                    first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
-                }
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 pub fn html_escape(input: &str) -> String {
@@ -234,5 +223,51 @@ mod tests {
         let nodes = HashMap::new();
 
         assert!(build_nav_item(ContentId(99), &nodes).is_none());
+    }
+
+    #[test]
+    fn sort_nav_ids_orders_by_title_when_order_matches() {
+        let alpha = ContentId(1);
+        let beta = ContentId(2);
+        let charlie = ContentId(3);
+        let mut nodes = HashMap::new();
+        nodes.insert(
+            alpha,
+            NavNode {
+                parent_id: None,
+                title: "Alpha".to_string(),
+                path: "/alpha".to_string(),
+                order: 0,
+                alias: "alpha".to_string(),
+                children: Vec::new(),
+            },
+        );
+        nodes.insert(
+            beta,
+            NavNode {
+                parent_id: None,
+                title: "beta".to_string(),
+                path: "/beta".to_string(),
+                order: 0,
+                alias: "beta".to_string(),
+                children: Vec::new(),
+            },
+        );
+        nodes.insert(
+            charlie,
+            NavNode {
+                parent_id: None,
+                title: "Charlie".to_string(),
+                path: "/charlie".to_string(),
+                order: 0,
+                alias: "charlie".to_string(),
+                children: Vec::new(),
+            },
+        );
+        let mut ids = vec![charlie, beta, alpha];
+
+        sort_nav_ids(&mut ids, &nodes);
+
+        assert_eq!(ids, vec![alpha, beta, charlie]);
     }
 }

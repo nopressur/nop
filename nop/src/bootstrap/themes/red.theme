@@ -1,0 +1,50 @@
+# Theme palette for red
+
+color-background-primary-light #fdf2f2
+color-background-secondary-light #f8b4b4
+color-content-background-light #ffffff
+color-text-primary-light #7f1d1d
+color-text-secondary-light #991b1b
+color-navbar-background-light rgba(255, 255, 255, 0.95)
+color-footer-background-light rgba(255, 255, 255, 0.95)
+color-border-light rgba(220, 38, 38, 0.2)
+color-shadow-light rgba(220, 38, 38, 0.1)
+color-code-background-light #fee2e2
+color-blockquote-background-light #fee2e2
+color-table-border-light #fca5a5
+color-table-header-background-light #fee2e2
+color-background-primary-dark #450a0a
+color-background-secondary-dark #7f1d1d
+color-content-background-dark #7f1d1d
+color-text-primary-dark #fecaca
+color-text-secondary-dark #f87171
+color-navbar-background-dark rgba(127, 29, 29, 0.95)
+color-footer-background-dark rgba(127, 29, 29, 0.95)
+color-border-dark rgba(248, 113, 113, 0.3)
+color-shadow-dark rgba(0, 0, 0, 0.4)
+color-code-background-dark #991b1b
+color-blockquote-background-dark #991b1b
+color-table-border-dark #dc2626
+color-table-header-background-dark #991b1b
+color-content-link-light #dc2626
+color-content-link-dark #f87171
+color-breadcrumb-link-dark #f87171
+color-content-blockquote-border-light #dc2626
+color-navbar-dropdown-arrow-light #b91c1c
+color-navbar-dropdown-border-top-light rgba(220, 38, 38, 0.2)
+color-navbar-dropdown-item-hover-background-light #fee2e2
+color-navbar-dropdown-background-dark #450a0a
+color-navbar-dropdown-border-dark rgba(248, 113, 113, 0.3)
+color-navbar-dropdown-shadow-dark rgba(0, 0, 0, 0.4)
+color-navbar-dropdown-item-hover-background-dark #991b1b
+color-navbar-link-hover-background-dark #991b1b
+color-navbar-dropdown-link-hover-background-dark #991b1b
+color-notification-warning-background-dark #dc2626
+color-notification-warning-text-dark #fef2f2
+
+# Typography
+font-body-family 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+font-heading-family 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+font-mono-family monospace
+font-body-size 16px
+font-body-line-height normal

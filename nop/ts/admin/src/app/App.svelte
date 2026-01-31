@@ -24,6 +24,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import { enforceAdminRoute } from "../routes/routeValidation";
   import { addWindowListener, removeWindowListener } from "../services/browser";
   import { route, isActiveRoute, navigate } from "../stores/router";
+  import { contentEditorViewPagePath } from "../stores/contentEditorLink";
 
   const config = getAdminRuntimeConfig();
   const basePath = config.adminPath.replace(/\/$/, "");
@@ -86,12 +87,21 @@ The code and documentation in this repository is licensed under the GNU Affero G
         {config.appName}
       </div>
     </div>
-    <a
-      class="text-[10px] uppercase tracking-[0.35em] text-muted hover:text-text"
-      href="/"
-    >
-      View Site
-    </a>
+    {#if $contentEditorViewPagePath}
+      <a
+        class="text-[10px] uppercase tracking-[0.35em] text-muted hover:text-text"
+        href={$contentEditorViewPagePath}
+      >
+        View Page
+      </a>
+    {:else}
+      <a
+        class="text-[10px] uppercase tracking-[0.35em] text-muted hover:text-text"
+        href="/"
+      >
+        View Site
+      </a>
+    {/if}
   </header>
 
   {#if navOpen}

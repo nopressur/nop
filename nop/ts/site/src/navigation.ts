@@ -93,7 +93,11 @@ export function initSiteNavigation(root: ParentNode = document): SiteNavigationC
         closeAllDropdowns();
         setDropdownActive(dropdown, true);
       };
-      const onLeave = () => {
+      const onLeave = (event: MouseEvent) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && dropdown.contains(next)) {
+          return;
+        }
         setDropdownActive(dropdown, false);
       };
       dropdown.addEventListener('mouseenter', onEnter);

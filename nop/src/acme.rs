@@ -12,30 +12,31 @@ use crate::tls::{
     tls_config_fingerprint, validate_private_key, write_tls_state,
 };
 use async_trait::async_trait;
-use lers::solver::dns::CloudflareDns01Solver;
-use lers::{Directory, LETS_ENCRYPT_PRODUCTION_URL, LETS_ENCRYPT_STAGING_URL, Solver};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use log::{info, warn};
-use openssl::ec::{EcGroup, EcKey};
-use openssl::nid::Nid;
-use openssl::pkey::{PKey, Private};
 use reqwest::Client;
+use reqwest::StatusCode;
+use ring::signature::{EcdsaKeyPair, KeyPair};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::error::Error as StdError;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
-use std::sync::{Arc, RwLock, mpsc};
-use std::thread;
+use std::result::Result as StdResult;
+use std::sync::{Arc, RwLock};
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
-use tokio::process::Command;
 use tokio::sync::OnceCell;
-use trust_dns_resolver::TokioAsyncResolver;
-use trust_dns_resolver::config::{
-    NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig, ResolverOpts,
-};
-use trust_dns_resolver::proto::rr::{RData, RecordType};
+use hickory_resolver::TokioResolver;
+use hickory_resolver::config::{NameServerConfig, NameServerConfigGroup, ResolverConfig};
+use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::proto::rr::{RData, RecordType};
+use hickory_resolver::proto::xfer::Protocol;
 
 const RENEWAL_WINDOW_DAYS: i64 = 30;
 const RENEWAL_INTERVAL_HOURS: u64 = 12;
@@ -88,33 +89,63 @@ impl AcmeTokenStore {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ChallengeType {
+    Http01,
+    Dns01,
+}
+
+#[async_trait]
+pub(crate) trait Http01Provider: Send + Sync {
+    async fn present(
+        &self,
+        domain: &str,
+        token: &str,
+        key_authorization: &str,
+    ) -> StdResult<(), Box<dyn StdError>>;
+
+    async fn cleanup(&self, token: &str) -> StdResult<(), Box<dyn StdError>>;
+}
+
+#[async_trait]
+pub(crate) trait DnsProvider: Send + Sync {
+    async fn add_txt_record(&self, domain: &str, value: &str)
+        -> StdResult<(), Box<dyn StdError>>;
+    async fn remove_txt_record(
+        &self,
+        domain: &str,
+        value: &str,
+    ) -> StdResult<(), Box<dyn StdError>>;
+}
+
 #[derive(Clone)]
-pub struct AcmeHttp01Solver {
+pub struct AcmeHttp01Provider {
     store: AcmeTokenStore,
 }
 
-impl AcmeHttp01Solver {
+impl AcmeHttp01Provider {
     pub fn new(store: AcmeTokenStore) -> Self {
         Self { store }
     }
 }
 
 #[async_trait]
-impl Solver for AcmeHttp01Solver {
+impl Http01Provider for AcmeHttp01Provider {
     async fn present(
         &self,
-        domain: String,
-        token: String,
-        key_authorization: String,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-        self.store.insert(token, key_authorization, domain);
+        domain: &str,
+        token: &str,
+        key_authorization: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.store.insert(
+            token.to_string(),
+            key_authorization.to_string(),
+            domain.to_string(),
+        );
         Ok(())
     }
 
-    async fn cleanup(
-        &self,
-        token: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    async fn cleanup(&self, token: &str) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(entry) = self.store.remove(token) {
             log::debug!("ACME token cleaned for {}", entry.domain);
         }
@@ -122,125 +153,6 @@ impl Solver for AcmeHttp01Solver {
     }
 }
 
-#[derive(Clone)]
-struct ExecDns01Solver {
-    present_command: String,
-    cleanup_command: String,
-    tokens: ExecDnsTokenStore,
-}
-
-#[derive(Clone, Debug)]
-struct ExecDnsTokenEntry {
-    domain: String,
-    key_authorization: String,
-}
-
-#[derive(Clone)]
-struct ExecDnsTokenStore {
-    sender: mpsc::Sender<ExecDnsTokenCommand>,
-}
-
-enum ExecDnsTokenCommand {
-    Insert {
-        token: String,
-        entry: ExecDnsTokenEntry,
-    },
-    Take {
-        token: String,
-        reply: mpsc::Sender<Option<ExecDnsTokenEntry>>,
-    },
-}
-
-impl ExecDns01Solver {
-    fn new(present_command: String, cleanup_command: String) -> Self {
-        Self {
-            present_command,
-            cleanup_command,
-            tokens: ExecDnsTokenStore::new(),
-        }
-    }
-
-    async fn run_command(
-        &self,
-        command: &str,
-        domain: &str,
-        token: &str,
-        key_authorization: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .env("ACME_DOMAIN", domain)
-            .env("ACME_TOKEN", token)
-            .env("ACME_KEY_AUTHORIZATION", key_authorization)
-            .env("ACME_DNS_VALUE", key_authorization)
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Box::new(io::Error::other(format!(
-                "DNS exec command failed ({}) stdout={} stderr={}",
-                command, stdout, stderr
-            ))));
-        }
-
-        Ok(())
-    }
-}
-
-impl ExecDnsTokenStore {
-    fn new() -> Self {
-        let (sender, receiver) = mpsc::channel();
-        let thread = thread::Builder::new().name("acme-exec-dns".to_string());
-        if let Err(err) = thread.spawn(move || run_exec_dns_tokens(receiver)) {
-            warn!("ACME exec DNS token worker failed to start: {}", err);
-        }
-        Self { sender }
-    }
-
-    fn insert(&self, token: String, entry: ExecDnsTokenEntry) {
-        if self
-            .sender
-            .send(ExecDnsTokenCommand::Insert { token, entry })
-            .is_err()
-        {
-            warn!("ACME exec DNS token store channel closed; cleanup may fail");
-        }
-    }
-
-    fn take(&self, token: &str) -> Option<ExecDnsTokenEntry> {
-        let (reply, receive) = mpsc::channel();
-        if self
-            .sender
-            .send(ExecDnsTokenCommand::Take {
-                token: token.to_string(),
-                reply,
-            })
-            .is_err()
-        {
-            warn!("ACME exec DNS token store channel closed; cleanup skipped");
-            return None;
-        }
-        receive.recv().ok().flatten()
-    }
-}
-
-fn run_exec_dns_tokens(receiver: mpsc::Receiver<ExecDnsTokenCommand>) {
-    let mut tokens: HashMap<String, ExecDnsTokenEntry> = HashMap::new();
-    while let Ok(command) = receiver.recv() {
-        match command {
-            ExecDnsTokenCommand::Insert { token, entry } => {
-                tokens.insert(token, entry);
-            }
-            ExecDnsTokenCommand::Take { token, reply } => {
-                let entry = tokens.remove(&token);
-                let _ = reply.send(entry);
-            }
-        }
-    }
-}
 
 #[async_trait]
 trait DnsTxtResolver: Send + Sync {
@@ -274,6 +186,7 @@ fn build_name_servers(addrs: &[SocketAddr]) -> NameServerConfigGroup {
             socket_addr: *addr,
             protocol: Protocol::Udp,
             tls_dns_name: None,
+            http_endpoint: None,
             trust_negative_responses: false,
             bind_addr: None,
         });
@@ -289,7 +202,7 @@ fn format_resolver_label(addrs: &[SocketAddr]) -> String {
         .join(", ")
 }
 
-async fn lookup_zone_for_name(resolver: &TokioAsyncResolver, name: &str) -> io::Result<String> {
+async fn lookup_zone_for_name(resolver: &TokioResolver, name: &str) -> io::Result<String> {
     let mut current = name.trim_end_matches('.').to_string();
     loop {
         let query = format!("{current}.");
@@ -310,7 +223,7 @@ async fn lookup_zone_for_name(resolver: &TokioAsyncResolver, name: &str) -> io::
 }
 
 async fn lookup_authoritative_servers(
-    resolver: &TokioAsyncResolver,
+    resolver: &TokioResolver,
     zone: &str,
 ) -> io::Result<Vec<String>> {
     let query = if zone.ends_with('.') {
@@ -324,7 +237,7 @@ async fn lookup_authoritative_servers(
         .map_err(|err| io::Error::other(err.to_string()))?;
     let mut names = Vec::new();
     for record in lookup.record_iter() {
-        if let Some(RData::NS(ns)) = record.data() {
+        if let RData::NS(ns) = record.data() {
             names.push(ns.to_utf8());
         }
     }
@@ -338,7 +251,7 @@ async fn lookup_authoritative_servers(
 }
 
 async fn resolve_name_server_addresses(
-    resolver: &TokioAsyncResolver,
+    resolver: &TokioResolver,
     servers: &[String],
 ) -> io::Result<Vec<SocketAddr>> {
     let mut addrs = Vec::new();
@@ -361,20 +274,24 @@ async fn resolve_name_server_addresses(
 }
 
 async fn build_authoritative_resolver(
-    resolver: &TokioAsyncResolver,
+    resolver: &TokioResolver,
     name: &str,
-) -> io::Result<(TokioAsyncResolver, Vec<SocketAddr>, String)> {
+) -> io::Result<(TokioResolver, Vec<SocketAddr>, String)> {
     let zone = lookup_zone_for_name(resolver, name).await?;
     let servers = lookup_authoritative_servers(resolver, &zone).await?;
     let addrs = resolve_name_server_addresses(resolver, &servers).await?;
     let name_servers = build_name_servers(&addrs);
     let config = ResolverConfig::from_parts(None, Vec::new(), name_servers);
-    let resolver = TokioAsyncResolver::tokio(config, ResolverOpts::default());
+    let resolver = TokioResolver::builder_with_config(
+        config,
+        TokioConnectionProvider::default(),
+    )
+    .build();
     Ok((resolver, addrs, zone))
 }
 
 struct ExplicitDnsResolver {
-    resolver: TokioAsyncResolver,
+    resolver: TokioResolver,
 }
 
 impl ExplicitDnsResolver {
@@ -391,7 +308,11 @@ impl ExplicitDnsResolver {
         }
         let name_servers = build_name_servers(&addrs);
         let config = ResolverConfig::from_parts(None, Vec::new(), name_servers);
-        let resolver = TokioAsyncResolver::tokio(config, ResolverOpts::default());
+        let resolver = TokioResolver::builder_with_config(
+            config,
+            TokioConnectionProvider::default(),
+        )
+        .build();
         let label = format_resolver_label(&addrs);
         info!("ACME DNS-01 resolver set to {}", label);
         Ok(Self { resolver })
@@ -419,21 +340,22 @@ impl DnsTxtResolver for ExplicitDnsResolver {
 }
 
 struct AuthoritativeDnsResolver {
-    bootstrap: TokioAsyncResolver,
-    resolver: OnceCell<TokioAsyncResolver>,
+    bootstrap: TokioResolver,
+    resolver: OnceCell<TokioResolver>,
 }
 
 impl AuthoritativeDnsResolver {
     fn new() -> io::Result<Self> {
-        let bootstrap = TokioAsyncResolver::tokio_from_system_conf()
-            .map_err(|err| io::Error::other(err.to_string()))?;
+        let bootstrap = TokioResolver::builder_tokio()
+            .map_err(|err| io::Error::other(err.to_string()))?
+            .build();
         Ok(Self {
             bootstrap,
             resolver: OnceCell::new(),
         })
     }
 
-    async fn resolver_for(&self, name: &str) -> io::Result<&TokioAsyncResolver> {
+    async fn resolver_for(&self, name: &str) -> io::Result<&TokioResolver> {
         self.resolver
             .get_or_try_init(|| async {
                 let (resolver, addrs, zone) =
@@ -469,24 +391,21 @@ impl DnsTxtResolver for AuthoritativeDnsResolver {
     }
 }
 
-struct Dns01PropagationSolver {
-    inner: Box<dyn Solver + Send + Sync>,
+struct DnsPropagation {
     resolver: Arc<dyn DnsTxtResolver>,
     label: String,
     propagation_check: bool,
     propagation_delay: StdDuration,
 }
 
-impl Dns01PropagationSolver {
+impl DnsPropagation {
     fn new(
-        inner: Box<dyn Solver + Send + Sync>,
         resolver: Arc<dyn DnsTxtResolver>,
         label: String,
         propagation_check: bool,
         propagation_delay: StdDuration,
     ) -> Self {
         Self {
-            inner,
             resolver,
             label,
             propagation_check,
@@ -494,13 +413,13 @@ impl Dns01PropagationSolver {
         }
     }
 
-    async fn wait_for_propagation(
-        &self,
-        name: &str,
-        expected: &str,
-        attempts: usize,
-        interval: StdDuration,
-    ) -> io::Result<()> {
+    async fn wait_for_propagation(&self, name: &str, expected: &str) -> io::Result<()> {
+        if !self.propagation_check {
+            return Ok(());
+        }
+
+        let attempts = 12;
+        let interval = StdDuration::from_secs(5);
         let started = std::time::Instant::now();
         let fqdn = if name.ends_with('.') {
             name.to_string()
@@ -591,119 +510,939 @@ impl Dns01PropagationSolver {
     }
 }
 
-#[async_trait]
-impl Solver for Dns01PropagationSolver {
-    async fn present(
+struct CloudflareDnsProvider {
+    client: Client,
+    api_token: String,
+    propagation: DnsPropagation,
+    zone_cache: RwLock<HashMap<String, String>>,
+    record_cache: RwLock<HashMap<String, String>>,
+}
+
+impl CloudflareDnsProvider {
+    fn new(
+        client: Client,
+        api_token: String,
+        propagation: DnsPropagation,
+    ) -> Self {
+        Self {
+            client,
+            api_token,
+            propagation,
+            zone_cache: RwLock::new(HashMap::new()),
+            record_cache: RwLock::new(HashMap::new()),
+        }
+    }
+
+    fn auth_header(&self) -> String {
+        format!("Bearer {}", self.api_token)
+    }
+
+    async fn resolve_zone_id(&self, name: &str) -> io::Result<String> {
+        let trimmed = name.trim_end_matches('.').to_string();
+        let labels: Vec<&str> = trimmed.split('.').collect();
+        for start in 1..labels.len() {
+            let candidate = labels[start..].join(".");
+            if let Some(id) = self.get_cached_zone(&candidate) {
+                return Ok(id);
+            }
+            if let Some(id) = self.fetch_zone_id(&candidate).await? {
+                self.cache_zone(&candidate, &id);
+                return Ok(id);
+            }
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Cloudflare zone not found for {}", name),
+        ))
+    }
+
+    fn cache_zone(&self, zone: &str, id: &str) {
+        if let Ok(mut guard) = self.zone_cache.write() {
+            guard.insert(zone.to_string(), id.to_string());
+        }
+    }
+
+    fn get_cached_zone(&self, zone: &str) -> Option<String> {
+        self.zone_cache
+            .read()
+            .ok()
+            .and_then(|guard| guard.get(zone).cloned())
+    }
+
+    async fn fetch_zone_id(&self, zone: &str) -> io::Result<Option<String>> {
+        #[derive(serde::Deserialize)]
+        struct Zone {
+            id: String,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ZoneResponse {
+            success: bool,
+            result: Vec<Zone>,
+            errors: Vec<CloudflareError>,
+        }
+
+        let response = self
+            .client
+            .get("https://api.cloudflare.com/client/v4/zones")
+            .header("Authorization", self.auth_header())
+            .query(&[("name", zone)])
+            .send()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        let payload: ZoneResponse = response
+            .json()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        if !payload.success {
+            return Err(io::Error::other(format_cloudflare_errors(&payload.errors)));
+        }
+        Ok(payload.result.first().map(|zone| zone.id.clone()))
+    }
+
+    fn record_cache_key(zone_id: &str, name: &str, value: &str) -> String {
+        format!("{zone_id}|{name}|{value}")
+    }
+
+    fn cache_record(&self, zone_id: &str, name: &str, value: &str, record_id: &str) {
+        if let Ok(mut guard) = self.record_cache.write() {
+            guard.insert(
+                Self::record_cache_key(zone_id, name, value),
+                record_id.to_string(),
+            );
+        }
+    }
+
+    fn take_cached_record(&self, zone_id: &str, name: &str, value: &str) -> Option<String> {
+        self.record_cache
+            .write()
+            .ok()
+            .and_then(|mut guard| guard.remove(&Self::record_cache_key(zone_id, name, value)))
+    }
+
+    async fn create_record(&self, zone_id: &str, name: &str, value: &str) -> io::Result<String> {
+        #[derive(serde::Serialize)]
+        struct CreateDnsRecord<'a> {
+            #[serde(rename = "type")]
+            record_type: &'a str,
+            name: &'a str,
+            content: &'a str,
+            ttl: u32,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct RecordResult {
+            id: String,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct RecordResponse {
+            success: bool,
+            result: RecordResult,
+            errors: Vec<CloudflareError>,
+        }
+
+        let response = self
+            .client
+            .post(format!(
+                "https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records"
+            ))
+            .header("Authorization", self.auth_header())
+            .json(&CreateDnsRecord {
+                record_type: "TXT",
+                name,
+                content: value,
+                ttl: 120,
+            })
+            .send()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        let payload: RecordResponse = response
+            .json()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        if !payload.success {
+            return Err(io::Error::other(format_cloudflare_errors(&payload.errors)));
+        }
+        Ok(payload.result.id)
+    }
+
+    async fn delete_record(&self, zone_id: &str, record_id: &str) -> io::Result<()> {
+        #[derive(serde::Deserialize)]
+        struct DeleteResponse {
+            success: bool,
+            errors: Vec<CloudflareError>,
+        }
+
+        let response = self
+            .client
+            .delete(format!(
+                "https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records/{record_id}"
+            ))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        let payload: DeleteResponse = response
+            .json()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        if !payload.success {
+            return Err(io::Error::other(format_cloudflare_errors(&payload.errors)));
+        }
+        Ok(())
+    }
+
+    async fn delete_record_by_lookup(
         &self,
-        domain: String,
-        token: String,
-        key_authorization: String,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-        info!(
-            "ACME DNS-01 presenting challenge (domain={}, solver={})",
-            domain, self.label
-        );
-        let cleanup_token = token.clone();
-        self.inner
-            .present(domain.clone(), token, key_authorization.clone())
-            .await?;
-        let name = format!("_acme-challenge.{domain}");
-        let attempts = self.inner.attempts();
-        let interval = self.inner.interval();
-        if self.propagation_delay.as_secs() > 0 {
+        zone_id: &str,
+        name: &str,
+        value: &str,
+    ) -> io::Result<()> {
+        #[derive(serde::Deserialize)]
+        struct Record {
+            id: String,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct RecordResponse {
+            success: bool,
+            result: Vec<Record>,
+            errors: Vec<CloudflareError>,
+        }
+
+        let response = self
+            .client
+            .get(format!(
+                "https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records"
+            ))
+            .header("Authorization", self.auth_header())
+            .query(&[("type", "TXT"), ("name", name), ("content", value)])
+            .send()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        let payload: RecordResponse = response
+            .json()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        if !payload.success {
+            return Err(io::Error::other(format_cloudflare_errors(&payload.errors)));
+        }
+        if let Some(record) = payload.result.first() {
+            self.delete_record(zone_id, &record.id).await?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CloudflareError {
+    code: Option<i64>,
+    message: Option<String>,
+}
+
+fn format_cloudflare_errors(errors: &[CloudflareError]) -> String {
+    if errors.is_empty() {
+        return "Cloudflare API error".to_string();
+    }
+    errors
+        .iter()
+        .map(|err| {
+            let code = err
+                .code
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let message = err.message.as_deref().unwrap_or("unknown error");
+            format!("{}: {}", code, message)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[async_trait]
+impl DnsProvider for CloudflareDnsProvider {
+    async fn add_txt_record(
+        &self,
+        domain: &str,
+        value: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let zone_id = self.resolve_zone_id(domain).await?;
+        let record_id = self.create_record(&zone_id, domain, value).await?;
+        self.cache_record(&zone_id, domain, value, &record_id);
+
+        if self.propagation.propagation_delay.as_secs() > 0 {
             info!(
                 "ACME DNS-01 propagation delay started (duration={:?}, domain={}, solver={})",
-                self.propagation_delay, domain, self.label
+                self.propagation.propagation_delay, domain, self.propagation.label
             );
-            tokio::time::sleep(self.propagation_delay).await;
+            tokio::time::sleep(self.propagation.propagation_delay).await;
         }
-        if self.propagation_check
-            && let Err(err) = self
-                .wait_for_propagation(&name, &key_authorization, attempts, interval)
-                .await
-        {
-            if let Err(clean_err) = self.inner.cleanup(&cleanup_token).await {
-                warn!(
-                    "ACME DNS-01 cleanup failed after propagation error (domain={}, error={})",
-                    domain, clean_err
-                );
-            }
+        if let Err(err) = self.propagation.wait_for_propagation(domain, value).await {
+            let _ = self.delete_record(&zone_id, &record_id).await;
             return Err(Box::new(err));
         }
+
         Ok(())
     }
 
-    async fn cleanup(
+    async fn remove_txt_record(
         &self,
-        token: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-        self.inner.cleanup(token).await
-    }
-
-    fn attempts(&self) -> usize {
-        self.inner.attempts()
-    }
-
-    fn interval(&self) -> StdDuration {
-        self.inner.interval()
+        domain: &str,
+        value: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let zone_id = self.resolve_zone_id(domain).await?;
+        if let Some(record_id) = self.take_cached_record(&zone_id, domain, value) {
+            self.delete_record(&zone_id, &record_id).await?;
+        } else {
+            self.delete_record_by_lookup(&zone_id, domain, value).await?;
+        }
+        Ok(())
     }
 }
 
-#[async_trait]
-impl Solver for ExecDns01Solver {
-    async fn present(
-        &self,
-        domain: String,
-        token: String,
-        key_authorization: String,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-        self.run_command(&self.present_command, &domain, &token, &key_authorization)
-            .await?;
+// Reserved for ACME test harness overrides.
+pub enum AcmeProviderOverride {
+    #[allow(dead_code)]
+    Http01(Box<dyn Http01Provider>),
+    #[allow(dead_code)]
+    Dns01(Box<dyn DnsProvider>),
+}
 
-        self.tokens.insert(
-            token,
-            ExecDnsTokenEntry {
-                domain,
-                key_authorization,
-            },
-        );
+#[derive(Deserialize)]
+struct AcmeDirectory {
+    #[serde(rename = "newNonce")]
+    new_nonce: String,
+    #[serde(rename = "newAccount")]
+    new_account: String,
+    #[serde(rename = "newOrder")]
+    new_order: String,
+}
 
-        Ok(())
+#[derive(Serialize, Deserialize)]
+struct AcmeAccountPayload {
+    contact: Vec<String>,
+    #[serde(rename = "termsOfServiceAgreed")]
+    terms_of_service_agreed: bool,
+}
+
+#[derive(Clone)]
+struct AcmeAccount {
+    id: String,
+    key: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AcmeOrderPayload {
+    identifiers: Vec<AcmeIdentifier>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AcmeIdentifier {
+    #[serde(rename = "type")]
+    type_: String,
+    value: String,
+}
+
+#[derive(Deserialize)]
+struct AcmeOrder {
+    status: String,
+    authorizations: Vec<String>,
+    finalize: String,
+    certificate: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AcmeAuthorization {
+    status: String,
+    identifier: AcmeIdentifier,
+    challenges: Vec<AcmeChallengeRecord>,
+}
+
+#[derive(Deserialize, Clone)]
+struct AcmeChallengeRecord {
+    #[serde(rename = "type")]
+    type_: String,
+    url: String,
+    token: String,
+}
+
+struct AcmeCertResult {
+    certificate: Vec<u8>,
+    private_key: Vec<u8>,
+}
+
+struct AcmeProviderSet {
+    http01: Option<Box<dyn Http01Provider>>,
+    dns: Option<Box<dyn DnsProvider>>,
+}
+
+struct ProvisionRequest<'a> {
+    client: &'a Client,
+    directory_url: &'a str,
+    domains: &'a [String],
+    contact_email: &'a str,
+    challenge_type: ChallengeType,
+    http01_provider: Option<&'a dyn Http01Provider>,
+    dns_provider: Option<&'a dyn DnsProvider>,
+    account_key_path: &'a Path,
+}
+
+async fn provision_certificate(
+    request: ProvisionRequest<'_>,
+) -> io::Result<(Vec<u8>, Vec<u8>, Option<String>)> {
+    let directory = fetch_directory(request.client, request.directory_url).await?;
+    let account_key = load_or_create_account_key(request.account_key_path)?;
+    let account_id = register_account(
+        request.client,
+        &directory,
+        &account_key,
+        request.contact_email,
+    )
+    .await?;
+    let account = AcmeAccount {
+        id: account_id.clone(),
+        key: account_key,
+    };
+
+    let order_url =
+        create_order(request.client, &directory, &account, request.domains).await?;
+    let order = fetch_order(request.client, &directory, &order_url, &account).await?;
+    handle_challenge(
+        request.client,
+        &directory,
+        &order,
+        request.challenge_type,
+        request.http01_provider,
+        request.dns_provider,
+        &account,
+    )
+    .await?;
+    let cert = finalize_order(
+        request.client,
+        &directory,
+        &order,
+        &order_url,
+        &account,
+        request.domains,
+    )
+    .await?;
+    Ok((cert.certificate, cert.private_key, Some(account_id)))
+}
+
+async fn fetch_directory(client: &Client, directory_url: &str) -> io::Result<AcmeDirectory> {
+    let response = client
+        .get(directory_url)
+        .send()
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))?
+        .error_for_status()
+        .map_err(|err| io::Error::other(err.to_string()))?;
+    response
+        .json::<AcmeDirectory>()
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))
+}
+
+fn load_or_create_account_key(path: &Path) -> io::Result<Vec<u8>> {
+    if path.exists() {
+        return fs::read(path);
     }
 
-    async fn cleanup(
-        &self,
-        token: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let entry = self.tokens.take(token);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let key_pair = EcdsaKeyPair::generate_pkcs8(
+        &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+        &ring::rand::SystemRandom::new(),
+    )
+    .map_err(|err| io::Error::other(err.to_string()))?;
+    let key = key_pair.as_ref().to_vec();
+    fs::write(path, &key)?;
+    Ok(key)
+}
 
-        if let Some(entry) = entry {
-            self.run_command(
-                &self.cleanup_command,
-                &entry.domain,
-                token,
-                &entry.key_authorization,
-            )
-            .await?;
+async fn register_account(
+    client: &Client,
+    directory: &AcmeDirectory,
+    key: &[u8],
+    contact_email: &str,
+) -> io::Result<String> {
+    let key_pair = EcdsaKeyPair::from_pkcs8(
+        &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+        key,
+        &ring::rand::SystemRandom::new(),
+    )
+    .map_err(|err| io::Error::other(err.to_string()))?;
+
+    let payload = AcmeAccountPayload {
+        contact: vec![format!("mailto:{}", contact_email)],
+        terms_of_service_agreed: true,
+    };
+    let response = post_jws_with_retry(client, directory, &directory.new_account, |nonce| {
+        create_jws(&key_pair, &directory.new_account, None, nonce, &payload)
+    })
+    .await?;
+
+    response
+        .headers()
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string())
+        .ok_or_else(|| io::Error::other("Missing account location"))
+}
+
+async fn create_order(
+    client: &Client,
+    directory: &AcmeDirectory,
+    account: &AcmeAccount,
+    domains: &[String],
+) -> io::Result<String> {
+    let key_pair = EcdsaKeyPair::from_pkcs8(
+        &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+        &account.key,
+        &ring::rand::SystemRandom::new(),
+    )
+    .map_err(|err| io::Error::other(err.to_string()))?;
+    let payload = AcmeOrderPayload {
+        identifiers: domains
+            .iter()
+            .map(|domain| AcmeIdentifier {
+                type_: "dns".to_string(),
+                value: domain.to_string(),
+            })
+            .collect(),
+    };
+    let response = post_jws_with_retry(client, directory, &directory.new_order, |nonce| {
+        create_jws(
+            &key_pair,
+            &directory.new_order,
+            Some(&account.id),
+            nonce,
+            &payload,
+        )
+    })
+    .await?;
+    response
+        .headers()
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string())
+        .ok_or_else(|| io::Error::other("Missing order URL"))
+}
+
+async fn fetch_order(
+    client: &Client,
+    directory: &AcmeDirectory,
+    order_url: &str,
+    account: &AcmeAccount,
+) -> io::Result<AcmeOrder> {
+    let key_pair = EcdsaKeyPair::from_pkcs8(
+        &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+        &account.key,
+        &ring::rand::SystemRandom::new(),
+    )
+    .map_err(|err| io::Error::other(err.to_string()))?;
+    let response = post_jws_with_retry(client, directory, order_url, |nonce| {
+        create_jws_post_as_get(&key_pair, order_url, Some(&account.id), nonce)
+    })
+    .await?;
+    response
+        .json::<AcmeOrder>()
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))
+}
+
+async fn finalize_order(
+    client: &Client,
+    directory: &AcmeDirectory,
+    order: &AcmeOrder,
+    order_url: &str,
+    account: &AcmeAccount,
+    domains: &[String],
+) -> io::Result<AcmeCertResult> {
+    let key_pair = EcdsaKeyPair::from_pkcs8(
+        &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+        &account.key,
+        &ring::rand::SystemRandom::new(),
+    )
+    .map_err(|err| io::Error::other(err.to_string()))?;
+    let (csr, private_key_pem) = generate_csr(domains)?;
+    let payload = json!({ "csr": URL_SAFE_NO_PAD.encode(&csr) });
+    let response = post_jws_with_retry(client, directory, &order.finalize, |nonce| {
+        create_jws(
+            &key_pair,
+            &order.finalize,
+            Some(&account.id),
+            nonce,
+            &payload,
+        )
+    })
+    .await?;
+
+    let mut current_order: AcmeOrder = response
+        .json()
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))?;
+    if current_order.status != "valid" {
+        for _ in 0..10 {
+            tokio::time::sleep(StdDuration::from_secs(2)).await;
+            current_order = fetch_order(client, directory, order_url, account).await?;
+            if current_order.status == "valid" {
+                break;
+            }
+            if current_order.status == "invalid" {
+                return Err(io::Error::other("Order not valid"));
+            }
+        }
+    }
+
+    if current_order.status != "valid" {
+        return Err(io::Error::other("Order not valid"));
+    }
+
+    if let Some(cert_url) = current_order.certificate.as_ref() {
+        let response = post_jws_with_retry(client, directory, cert_url, |nonce| {
+            create_jws_post_as_get(&key_pair, cert_url, Some(&account.id), nonce)
+        })
+        .await?;
+        let cert = response
+            .bytes()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        Ok(AcmeCertResult {
+            certificate: cert.to_vec(),
+            private_key: private_key_pem,
+        })
+    } else {
+        Err(io::Error::other("Order not valid"))
+    }
+}
+
+async fn handle_challenge(
+    client: &Client,
+    directory: &AcmeDirectory,
+    order: &AcmeOrder,
+    challenge_type: ChallengeType,
+    http01_provider: Option<&dyn Http01Provider>,
+    dns_provider: Option<&dyn DnsProvider>,
+    account: &AcmeAccount,
+) -> io::Result<()> {
+    let key_pair = EcdsaKeyPair::from_pkcs8(
+        &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+        &account.key,
+        &ring::rand::SystemRandom::new(),
+    )
+    .map_err(|err| io::Error::other(err.to_string()))?;
+    let thumbprint = jwk_thumbprint(&key_pair)?;
+
+    for auth_url in &order.authorizations {
+        let mut auth = fetch_authorization(client, directory, auth_url, account).await?;
+        let domain = auth.identifier.value.clone();
+        let challenge = auth
+            .challenges
+            .iter()
+            .find(|candidate| {
+                candidate.type_
+                    == match challenge_type {
+                        ChallengeType::Http01 => "http-01",
+                        ChallengeType::Dns01 => "dns-01",
+                    }
+            })
+            .cloned()
+            .ok_or_else(|| io::Error::other("Challenge not found"))?;
+
+        let key_authorization = format!("{}.{}", challenge.token, thumbprint);
+        let mut dns_cleanup: Option<(String, String)> = None;
+
+        match challenge_type {
+            ChallengeType::Http01 => {
+                let provider = http01_provider
+                    .ok_or_else(|| io::Error::other("HTTP-01 requires a provider"))?;
+                provider
+                    .present(&domain, &challenge.token, &key_authorization)
+                    .await
+                    .map_err(|err| io::Error::other(err.to_string()))?;
+
+                let nonce = get_nonce(client, directory).await?;
+                let jws = create_jws(
+                    &key_pair,
+                    &challenge.url,
+                    Some(&account.id),
+                    &nonce,
+                    &json!({}),
+                )?;
+                client
+                    .post(&challenge.url)
+                    .header("Content-Type", "application/jose+json")
+                    .body(jws)
+                    .send()
+                    .await
+                    .map_err(|err| io::Error::other(err.to_string()))?
+                    .error_for_status()
+                    .map_err(|err| io::Error::other(err.to_string()))?;
+            }
+            ChallengeType::Dns01 => {
+                let provider = dns_provider
+                    .ok_or_else(|| io::Error::other("DNS-01 requires a DNS provider"))?;
+                let txt_value = dns01_txt_value(&key_authorization);
+                let name = format!("_acme-challenge.{domain}");
+                provider
+                    .add_txt_record(&name, &txt_value)
+                    .await
+                    .map_err(|err| io::Error::other(err.to_string()))?;
+
+                let nonce = get_nonce(client, directory).await?;
+                let jws = create_jws(
+                    &key_pair,
+                    &challenge.url,
+                    Some(&account.id),
+                    &nonce,
+                    &json!({}),
+                )?;
+                client
+                    .post(&challenge.url)
+                    .header("Content-Type", "application/jose+json")
+                    .body(jws)
+                    .send()
+                    .await
+                    .map_err(|err| io::Error::other(err.to_string()))?
+                    .error_for_status()
+                    .map_err(|err| io::Error::other(err.to_string()))?;
+
+                dns_cleanup = Some((name, txt_value));
+            }
         }
 
-        Ok(())
+        for _ in 0..10 {
+            auth = fetch_authorization(client, directory, auth_url, account).await?;
+            if auth.status == "valid" {
+                break;
+            }
+            if auth.status == "invalid" {
+                if let Some((name, txt_value)) = dns_cleanup.take()
+                    && let Some(provider) = dns_provider
+                {
+                    provider
+                        .remove_txt_record(&name, &txt_value)
+                        .await
+                        .map_err(|err| io::Error::other(err.to_string()))?;
+                }
+                return Err(io::Error::other("Challenge validation failed"));
+            }
+            tokio::time::sleep(StdDuration::from_secs(2)).await;
+        }
+
+        if challenge_type == ChallengeType::Http01
+            && let Some(provider) = http01_provider
+        {
+            provider
+                .cleanup(&challenge.token)
+                .await
+                .map_err(|err| io::Error::other(err.to_string()))?;
+        }
+
+        if let Some((name, txt_value)) = dns_cleanup
+            && let Some(provider) = dns_provider
+        {
+            provider
+                .remove_txt_record(&name, &txt_value)
+                .await
+                .map_err(|err| io::Error::other(err.to_string()))?;
+        }
     }
+
+    Ok(())
 }
 
-// Reserved for ACME test harness overrides (HTTP-01 now, DNS-01 later).
-pub enum AcmeSolverOverride {
-    #[allow(dead_code)]
-    Http01(Box<dyn Solver + Send + Sync>),
-    #[allow(dead_code)]
-    Dns01(Box<dyn Solver + Send + Sync>),
+async fn fetch_authorization(
+    client: &Client,
+    directory: &AcmeDirectory,
+    auth_url: &str,
+    account: &AcmeAccount,
+) -> io::Result<AcmeAuthorization> {
+    let key_pair = EcdsaKeyPair::from_pkcs8(
+        &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+        &account.key,
+        &ring::rand::SystemRandom::new(),
+    )
+    .map_err(|err| io::Error::other(err.to_string()))?;
+    let response = post_jws_with_retry(client, directory, auth_url, |nonce| {
+        create_jws_post_as_get(&key_pair, auth_url, Some(&account.id), nonce)
+    })
+    .await?;
+    response
+        .json::<AcmeAuthorization>()
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))
+}
+
+async fn get_nonce(client: &Client, directory: &AcmeDirectory) -> io::Result<String> {
+    let response = client
+        .head(&directory.new_nonce)
+        .send()
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))?;
+    response
+        .headers()
+        .get("replay-nonce")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string())
+        .ok_or_else(|| io::Error::other("Missing nonce"))
+}
+
+fn create_jws<T: Serialize>(
+    key_pair: &EcdsaKeyPair,
+    url: &str,
+    kid: Option<&str>,
+    nonce: &str,
+    payload: &T,
+) -> io::Result<String> {
+    let payload_b64 = URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(payload).map_err(|err| io::Error::other(err.to_string()))?,
+    );
+    let mut protected = serde_json::Map::new();
+    protected.insert("alg".to_string(), json!("ES256"));
+    protected.insert("nonce".to_string(), json!(nonce));
+    protected.insert("url".to_string(), json!(url));
+    if let Some(kid) = kid {
+        protected.insert("kid".to_string(), json!(kid));
+    } else {
+        protected.insert("jwk".to_string(), jwk_from_key_pair(key_pair));
+    }
+    let protected_b64 = URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&protected).map_err(|err| io::Error::other(err.to_string()))?,
+    );
+    let input = format!("{}.{}", protected_b64, payload_b64);
+    let signature = key_pair
+        .sign(&ring::rand::SystemRandom::new(), input.as_bytes())
+        .map_err(|err| io::Error::other(format!("ring sign error: {err:?}")))?;
+    let signature_b64 = URL_SAFE_NO_PAD.encode(signature.as_ref());
+    serde_json::to_string(&json!({
+        "protected": protected_b64,
+        "payload": payload_b64,
+        "signature": signature_b64,
+    }))
+    .map_err(|err| io::Error::other(err.to_string()))
+}
+
+fn create_jws_post_as_get(
+    key_pair: &EcdsaKeyPair,
+    url: &str,
+    kid: Option<&str>,
+    nonce: &str,
+) -> io::Result<String> {
+    let payload_b64 = "";
+    let mut protected = serde_json::Map::new();
+    protected.insert("alg".to_string(), json!("ES256"));
+    protected.insert("nonce".to_string(), json!(nonce));
+    protected.insert("url".to_string(), json!(url));
+    if let Some(kid) = kid {
+        protected.insert("kid".to_string(), json!(kid));
+    } else {
+        protected.insert("jwk".to_string(), jwk_from_key_pair(key_pair));
+    }
+    let protected_b64 = URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&protected).map_err(|err| io::Error::other(err.to_string()))?,
+    );
+    let input = format!("{}.{}", protected_b64, payload_b64);
+    let signature = key_pair
+        .sign(&ring::rand::SystemRandom::new(), input.as_bytes())
+        .map_err(|err| io::Error::other(format!("ring sign error: {err:?}")))?;
+    let signature_b64 = URL_SAFE_NO_PAD.encode(signature.as_ref());
+    serde_json::to_string(&json!({
+        "protected": protected_b64,
+        "payload": payload_b64,
+        "signature": signature_b64,
+    }))
+    .map_err(|err| io::Error::other(err.to_string()))
+}
+
+async fn post_jws_with_retry<F>(
+    client: &Client,
+    directory: &AcmeDirectory,
+    url: &str,
+    build_jws: F,
+) -> io::Result<reqwest::Response>
+where
+    F: Fn(&str) -> io::Result<String>,
+{
+    for attempt in 0..2 {
+        let nonce = get_nonce(client, directory).await?;
+        let jws = build_jws(&nonce)?;
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/jose+json")
+            .body(jws)
+            .send()
+            .await
+            .map_err(|err| io::Error::other(err.to_string()))?;
+
+        if response.status().is_success() {
+            return Ok(response);
+        }
+
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "ACME request failed".to_string());
+        if status == StatusCode::BAD_REQUEST && body.contains("badNonce") && attempt == 0 {
+            continue;
+        }
+        return Err(io::Error::other(body));
+    }
+
+    Err(io::Error::other("ACME nonce retry exhausted"))
+}
+
+fn jwk_from_key_pair(key_pair: &EcdsaKeyPair) -> serde_json::Value {
+    let (x, y) = key_pair.public_key().as_ref()[1..].split_at(32);
+    json!({
+        "crv": "P-256",
+        "kty": "EC",
+        "x": URL_SAFE_NO_PAD.encode(x),
+        "y": URL_SAFE_NO_PAD.encode(y),
+    })
+}
+
+fn jwk_thumbprint(key_pair: &EcdsaKeyPair) -> io::Result<String> {
+    let jwk_json = serde_json::to_string(&jwk_from_key_pair(key_pair))
+        .map_err(|err| io::Error::other(err.to_string()))?;
+    let digest = Sha256::digest(jwk_json.as_bytes());
+    Ok(URL_SAFE_NO_PAD.encode(digest))
+}
+
+fn dns01_txt_value(key_authorization: &str) -> String {
+    let digest = Sha256::digest(key_authorization.as_bytes());
+    URL_SAFE_NO_PAD.encode(digest)
+}
+
+fn generate_csr(domains: &[String]) -> io::Result<(Vec<u8>, Vec<u8>)> {
+    use rcgen::{CertificateParams, KeyPair as RcgenKeyPair};
+
+    let mut params =
+        CertificateParams::new(domains.to_vec()).map_err(|err| io::Error::other(err.to_string()))?;
+    params.distinguished_name = rcgen::DistinguishedName::new();
+
+    let key_pair = RcgenKeyPair::generate()
+        .map_err(|err| io::Error::other(err.to_string()))?;
+    let csr = params
+        .serialize_request(&key_pair)
+        .map_err(|err| io::Error::other(err.to_string()))?
+        .der()
+        .as_ref()
+        .to_vec();
+    let private_key_pem = key_pair.serialize_pem().into_bytes();
+
+    Ok((csr, private_key_pem))
 }
 
 pub async fn ensure_acme_certificate(
     runtime_paths: &RuntimePaths,
     config: &ValidatedConfig,
     token_store: Option<AcmeTokenStore>,
-    solver_override: Option<AcmeSolverOverride>,
+    provider_override: Option<AcmeProviderOverride>,
 ) -> io::Result<bool> {
     let tls = config
         .tls
@@ -786,7 +1525,7 @@ pub async fn ensure_acme_certificate(
         tls.domains.join(", ")
     );
 
-    let result = issue_certificate(runtime_paths, tls, acme, token_store, solver_override).await;
+    let result = issue_certificate(runtime_paths, tls, acme, token_store, provider_override).await;
 
     match result {
         Ok(()) => Ok(true),
@@ -835,11 +1574,14 @@ async fn issue_certificate(
     tls: &crate::config::TlsConfig,
     acme: &AcmeConfig,
     token_store: Option<AcmeTokenStore>,
-    solver_override: Option<AcmeSolverOverride>,
+    provider_override: Option<AcmeProviderOverride>,
 ) -> io::Result<()> {
-    let directory_url = resolve_directory_url(acme)?;
     let client = build_client(acme)?;
-    let mut builder = Directory::builder(directory_url.clone()).client(client);
+    let tls_dir = runtime_paths.state_sys_dir.join("tls");
+    fs::create_dir_all(&tls_dir)?;
+    let account_key_path = tls_dir.join("account.key");
+    let directory_url = resolve_directory_url(acme);
+
     info!(
         "ACME issuance starting (challenge={:?}, domains={}, directory_url={})",
         acme.challenge,
@@ -847,14 +1589,19 @@ async fn issue_certificate(
         directory_url
     );
 
-    match acme.challenge {
+    let challenge = match acme.challenge {
+        AcmeChallenge::Http01 => ChallengeType::Http01,
+        AcmeChallenge::Dns01 => ChallengeType::Dns01,
+    };
+
+    let providers = match acme.challenge {
         AcmeChallenge::Http01 => {
-            let solver: Box<dyn Solver + Send + Sync> = match solver_override {
-                Some(AcmeSolverOverride::Http01(solver)) => solver,
+            let provider: Box<dyn Http01Provider> = match provider_override {
+                Some(AcmeProviderOverride::Http01(provider)) => provider,
                 Some(_) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        "ACME solver override does not match http-01 challenge",
+                        "ACME provider override does not match http-01 challenge",
                     ));
                 }
                 None => {
@@ -864,80 +1611,52 @@ async fn issue_certificate(
                             "ACME http-01 requires a token store",
                         )
                     })?;
-                    Box::new(AcmeHttp01Solver::new(store))
+                    Box::new(AcmeHttp01Provider::new(store))
                 }
             };
-            let solver: Box<dyn Solver> = solver;
-            builder = builder.http01_solver(solver);
+            AcmeProviderSet {
+                http01: Some(provider),
+                dns: None,
+            }
         }
         AcmeChallenge::Dns01 => {
-            let solver: Box<dyn Solver + Send + Sync> = match solver_override {
-                Some(AcmeSolverOverride::Dns01(solver)) => solver,
+            let provider: Box<dyn DnsProvider> = match provider_override {
+                Some(AcmeProviderOverride::Dns01(provider)) => provider,
                 Some(_) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        "ACME solver override does not match dns-01 challenge",
+                        "ACME provider override does not match dns-01 challenge",
                     ));
                 }
-                None => build_dns_solver(acme)?,
+                None => build_dns_provider(acme)?,
             };
-            let solver: Box<dyn Solver> = solver;
-            builder = builder.dns01_solver(solver);
+            AcmeProviderSet {
+                http01: None,
+                dns: Some(provider),
+            }
         }
-    }
-
-    let directory = builder
-        .build()
-        .await
-        .map_err(|err| io::Error::other(err.to_string()))?;
-
-    let account_key_path = runtime_paths
-        .state_sys_dir
-        .join("tls")
-        .join("acme-account.pem");
-    let account_key = load_or_create_account_key(&account_key_path)?;
-
-    let account = directory
-        .account()
-        .contacts(vec![format!("mailto:{}", acme.contact_email)])
-        .terms_of_service_agreed(true)
-        .private_key(account_key)
-        .create_if_not_exists()
-        .await
-        .map_err(|err| io::Error::other(err.to_string()))?;
-
-    let acme_state = TlsAcmeState {
-        provider: acme.provider.clone(),
-        directory_url: directory_url.clone(),
-        contact_email: acme.contact_email.clone(),
-        account_id: None,
     };
 
-    let mut cert_builder = account.certificate();
-    for domain in &tls.domains {
-        cert_builder = cert_builder.add_domain(domain);
-    }
+    let request = ProvisionRequest {
+        client: &client,
+        directory_url: &directory_url,
+        domains: &tls.domains,
+        contact_email: &acme.contact_email,
+        challenge_type: challenge,
+        http01_provider: providers.http01.as_deref(),
+        dns_provider: providers.dns.as_deref(),
+        account_key_path: &account_key_path,
+    };
+    let (cert_pem, key_pem, account_id) = provision_certificate(request).await?;
 
-    let certificate = cert_builder
-        .obtain()
-        .await
-        .map_err(|err| io::Error::other(err.to_string()))?;
+    let acme_state = TlsAcmeState {
+        directory_url,
+        contact_email: acme.contact_email.clone(),
+        account_id,
+    };
 
-    let tls_dir = runtime_paths.state_sys_dir.join("tls");
-    fs::create_dir_all(&tls_dir)?;
-
-    fs::write(
-        tls_dir.join("cert.pem"),
-        certificate
-            .fullchain_to_pem()
-            .map_err(|err| io::Error::other(err.to_string()))?,
-    )?;
-    fs::write(
-        tls_dir.join("key.pem"),
-        certificate
-            .private_key_to_pem()
-            .map_err(|err| io::Error::other(err.to_string()))?,
-    )?;
+    fs::write(tls_dir.join("cert.pem"), cert_pem)?;
+    fs::write(tls_dir.join("key.pem"), key_pem)?;
     fs::write(
         tls_dir.join("last-renewed.txt"),
         OffsetDateTime::now_utc()
@@ -965,7 +1684,14 @@ fn build_client(acme: &AcmeConfig) -> io::Result<Client> {
         .map_err(|err| io::Error::other(err.to_string()))
 }
 
-fn build_dns_solver(acme: &AcmeConfig) -> io::Result<Box<dyn Solver + Send + Sync>> {
+fn build_cloudflare_client() -> io::Result<Client> {
+    Client::builder()
+        .user_agent("nopressure-acme")
+        .build()
+        .map_err(|err| io::Error::other(err.to_string()))
+}
+
+fn build_dns_provider(acme: &AcmeConfig) -> io::Result<Box<dyn DnsProvider>> {
     let dns = acme.dns.as_ref().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -974,46 +1700,24 @@ fn build_dns_solver(acme: &AcmeConfig) -> io::Result<Box<dyn Solver + Send + Syn
     })?;
 
     let provider = dns.provider.trim().to_lowercase();
-    info!(
-        "ACME DNS-01 solver configured (provider={}, exec_present={})",
-        provider,
-        dns.exec.is_some()
-    );
-    let solver: Box<dyn Solver + Send + Sync> = match provider.as_str() {
-        "cloudflare" => {
-            let token = dns
-                .api_token
-                .as_deref()
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "ACME DNS-01 cloudflare requires api_token",
-                    )
-                })
-                .and_then(resolve_secret)?;
-
-            CloudflareDns01Solver::new_with_token(token)
-                .build()
-                .map(|solver| Box::new(solver) as Box<dyn Solver + Send + Sync>)
-                .map_err(|err| io::Error::other(err.to_string()))
-        }
-        "exec" => {
-            let exec = dns.exec.as_ref().ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "ACME DNS-01 exec requires exec configuration",
-                )
-            })?;
-            Ok(Box::new(ExecDns01Solver::new(
-                exec.present_command.clone(),
-                exec.cleanup_command.clone(),
-            )) as Box<dyn Solver + Send + Sync>)
-        }
-        _ => Err(io::Error::new(
+    info!("ACME DNS-01 provider configured (provider={})", provider);
+    if provider != "cloudflare" {
+        return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("Unsupported DNS-01 provider: {}", dns.provider),
-        )),
-    }?;
+        ));
+    }
+
+    let token = dns
+        .api_token
+        .as_deref()
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "ACME DNS-01 cloudflare requires api_token",
+            )
+        })
+        .and_then(resolve_secret)?;
 
     let resolver: Arc<dyn DnsTxtResolver> = if dns.resolver.is_empty() {
         Arc::new(AuthoritativeDnsResolver::new()?)
@@ -1026,48 +1730,14 @@ fn build_dns_solver(acme: &AcmeConfig) -> io::Result<Box<dyn Solver + Send + Syn
         "ACME DNS-01 propagation configured (check_enabled={}, delay={:?}, solver={})",
         dns.propagation_check, propagation_delay, solver_label
     );
-    Ok(Box::new(Dns01PropagationSolver::new(
-        solver,
+    let client = build_cloudflare_client()?;
+    let propagation = DnsPropagation::new(
         resolver,
         solver_label,
         dns.propagation_check,
         propagation_delay,
-    )))
-}
-
-fn resolve_directory_url(acme: &AcmeConfig) -> io::Result<String> {
-    if let Some(url) = &acme.directory_url {
-        return Ok(url.clone());
-    }
-
-    let url = match acme.environment {
-        AcmeEnvironment::Production => LETS_ENCRYPT_PRODUCTION_URL,
-        AcmeEnvironment::Staging => LETS_ENCRYPT_STAGING_URL,
-    };
-    Ok(url.to_string())
-}
-
-fn load_or_create_account_key(path: &Path) -> io::Result<PKey<Private>> {
-    if path.exists() {
-        let bytes = fs::read(path)?;
-        return PKey::private_key_from_pem(&bytes)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err.to_string()));
-    }
-
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)
-        .map_err(|err| io::Error::other(err.to_string()))?;
-    let ec_key = EcKey::generate(&group).map_err(|err| io::Error::other(err.to_string()))?;
-    let key = PKey::from_ec_key(ec_key).map_err(|err| io::Error::other(err.to_string()))?;
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let pem = key
-        .private_key_to_pem_pkcs8()
-        .map_err(|err| io::Error::other(err.to_string()))?;
-    fs::write(path, pem)?;
-
-    Ok(key)
+    );
+    Ok(Box::new(CloudflareDnsProvider::new(client, token, propagation)))
 }
 
 fn resolve_secret(secret: &str) -> io::Result<String> {
@@ -1082,6 +1752,19 @@ fn resolve_secret(secret: &str) -> io::Result<String> {
     }
 
     Ok(secret.to_string())
+}
+
+fn resolve_directory_url(acme: &AcmeConfig) -> String {
+    if let Some(url) = &acme.directory_url {
+        return url.clone();
+    }
+
+    match acme.environment {
+        AcmeEnvironment::Production => "https://acme-v02.api.letsencrypt.org/directory".to_string(),
+        AcmeEnvironment::Staging => {
+            "https://acme-staging-v02.api.letsencrypt.org/directory".to_string()
+        }
+    }
 }
 
 fn cert_status(cert_path: &Path, key_path: &Path) -> io::Result<CertStatus> {
@@ -1147,14 +1830,10 @@ mod tests {
     #[tokio::test]
     async fn http01_solver_stores_and_cleans() {
         let store = AcmeTokenStore::new();
-        let solver = AcmeHttp01Solver::new(store.clone());
+        let provider = AcmeHttp01Provider::new(store.clone());
 
-        solver
-            .present(
-                "example.com".to_string(),
-                "token".to_string(),
-                "authz".to_string(),
-            )
+        provider
+            .present("example.com", "token", "authz")
             .await
             .expect("present should succeed");
         assert_eq!(
@@ -1162,7 +1841,7 @@ mod tests {
             Some("authz".to_string())
         );
 
-        solver
+        provider
             .cleanup("token")
             .await
             .expect("cleanup should succeed");
@@ -1206,45 +1885,18 @@ mod tests {
             }
         }
 
-        struct NoopSolver;
-
-        #[async_trait]
-        impl Solver for NoopSolver {
-            async fn present(
-                &self,
-                _domain: String,
-                _token: String,
-                _key_authorization: String,
-            ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-                Ok(())
-            }
-
-            async fn cleanup(
-                &self,
-                _token: &str,
-            ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-                Ok(())
-            }
-        }
-
         let resolver = Arc::new(StubResolver {
             calls: AtomicUsize::new(0),
             expected: "token".to_string(),
         });
-        let solver = Dns01PropagationSolver::new(
-            Box::new(NoopSolver),
+        let propagation = DnsPropagation::new(
             resolver,
             "test".to_string(),
             true,
             StdDuration::from_secs(0),
         );
-        let result = solver
-            .wait_for_propagation(
-                "_acme-challenge.example.com",
-                "token",
-                3,
-                StdDuration::from_millis(1),
-            )
+        let result = propagation
+            .wait_for_propagation("_acme-challenge.example.com", "token")
             .await;
         assert!(result.is_ok(), "expected propagation wait to succeed");
     }
@@ -1316,15 +1968,15 @@ mod tests {
     async fn ensure_acme_with_retry<F>(
         runtime_paths: &RuntimePaths,
         config: &ValidatedConfig,
-        mut solver_override: F,
+        mut provider_override: F,
     ) -> bool
     where
-        F: FnMut() -> AcmeSolverOverride,
+        F: FnMut() -> AcmeProviderOverride,
     {
         let mut last_error = None;
 
         for attempt in 1..=3 {
-            match ensure_acme_certificate(runtime_paths, config, None, Some(solver_override()))
+            match ensure_acme_certificate(runtime_paths, config, None, Some(provider_override()))
                 .await
             {
                 Ok(result) => return result,
@@ -1351,9 +2003,9 @@ mod tests {
             fs::create_dir_all(runtime_paths.state_sys_dir.join("tls")).unwrap();
 
             let config = build_acme_test_config(AcmeChallenge::Http01);
-            let solver = PebbleHttp01Solver::new("http://127.0.0.1:8055");
+            let provider = PebbleHttp01Provider::new("http://127.0.0.1:8055");
             let issued = ensure_acme_with_retry(&runtime_paths, &config, || {
-                AcmeSolverOverride::Http01(Box::new(solver.clone()))
+                AcmeProviderOverride::Http01(Box::new(provider.clone()))
             })
             .await;
 
@@ -1384,9 +2036,9 @@ mod tests {
             fs::create_dir_all(runtime_paths.state_sys_dir.join("tls")).unwrap();
 
             let config = build_acme_test_config(AcmeChallenge::Dns01);
-            let solver = PebbleDns01Solver::new("http://127.0.0.1:8055");
+            let provider = PebbleDns01Provider::new("http://127.0.0.1:8055");
             let issued = ensure_acme_with_retry(&runtime_paths, &config, || {
-                AcmeSolverOverride::Dns01(Box::new(solver.clone()))
+                AcmeProviderOverride::Dns01(Box::new(provider.clone()))
             })
             .await;
 
@@ -1410,6 +2062,18 @@ mod tests {
     }
 
     fn build_acme_test_config(challenge: AcmeChallenge) -> ValidatedConfig {
+        let dns = if challenge == AcmeChallenge::Dns01 {
+            Some(AcmeDnsConfig {
+                provider: "cloudflare".to_string(),
+                api_token: Some("token".to_string()),
+                resolver: Vec::new(),
+                propagation_check: false,
+                propagation_delay_seconds: 0,
+            })
+        } else {
+            None
+        };
+
         ValidatedConfig {
             servers: Vec::new(),
             server: ServerConfig {
@@ -1458,13 +2122,12 @@ mod tests {
                 domains: vec!["example.com".to_string()],
                 redirect_base_url: None,
                 acme: Some(AcmeConfig {
-                    provider: "lers".to_string(),
                     environment: AcmeEnvironment::Staging,
                     directory_url: Some("https://localhost:14000/dir".to_string()),
                     insecure_skip_verify: true,
                     contact_email: "admin@example.com".to_string(),
                     challenge,
-                    dns: None,
+                    dns,
                 }),
             }),
             app: AppConfig {
@@ -1544,13 +2207,13 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct PebbleHttp01Solver {
+    struct PebbleHttp01Provider {
         client: Client,
         api_base: String,
         tokens: TestTokenStore,
     }
 
-    impl PebbleHttp01Solver {
+    impl PebbleHttp01Provider {
         fn new(api_base: &str) -> Self {
             Self {
                 client: Client::new(),
@@ -1561,13 +2224,13 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct PebbleDns01Solver {
+    struct PebbleDns01Provider {
         client: Client,
         api_base: String,
         tokens: TestTokenStore,
     }
 
-    impl PebbleDns01Solver {
+    impl PebbleDns01Provider {
         fn new(api_base: &str) -> Self {
             Self {
                 client: Client::new(),
@@ -1578,19 +2241,19 @@ mod tests {
     }
 
     #[async_trait]
-    impl Solver for PebbleHttp01Solver {
+    impl Http01Provider for PebbleHttp01Provider {
         async fn present(
             &self,
-            domain: String,
-            token: String,
-            key_authorization: String,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+            domain: &str,
+            token: &str,
+            key_authorization: &str,
+        ) -> Result<(), Box<dyn std::error::Error>> {
             let addresses = ["10.30.50.3"];
             post_json(
                 &self.client,
                 &format!("{}/add-a", self.api_base),
                 &DnsRequest {
-                    host: &domain,
+                    host: domain,
                     addresses: Some(&addresses),
                 },
             )
@@ -1600,21 +2263,18 @@ mod tests {
                 &self.client,
                 &format!("{}/add-http01", self.api_base),
                 &Http01Request {
-                    token: &token,
-                    content: Some(&key_authorization),
+                    token,
+                    content: Some(key_authorization),
                 },
             )
             .await?;
 
-            self.tokens.insert(token, domain);
+            self.tokens.insert(token.to_string(), domain.to_string());
 
             Ok(())
         }
 
-        async fn cleanup(
-            &self,
-            token: &str,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+        async fn cleanup(&self, token: &str) -> Result<(), Box<dyn std::error::Error>> {
             let domain = self.tokens.take(token);
             let domain = match domain {
                 Some(domain) => domain,
@@ -1646,34 +2306,34 @@ mod tests {
     }
 
     #[async_trait]
-    impl Solver for PebbleDns01Solver {
-        async fn present(
+    impl DnsProvider for PebbleDns01Provider {
+        async fn add_txt_record(
             &self,
-            domain: String,
-            token: String,
-            key_authorization: String,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-            let host = format!("_acme-challenge.{domain}.");
+            domain: &str,
+            value: &str,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            let host = format!("{domain}.");
             post_json(
                 &self.client,
                 &format!("{}/set-txt", self.api_base),
                 &DnsTxtRequest {
                     host: &host,
-                    value: &key_authorization,
+                    value,
                 },
             )
             .await?;
 
-            self.tokens.insert(token, host);
+            self.tokens.insert(domain.to_string(), host);
 
             Ok(())
         }
 
-        async fn cleanup(
+        async fn remove_txt_record(
             &self,
-            token: &str,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-            let host = self.tokens.take(token);
+            domain: &str,
+            _value: &str,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            let host = self.tokens.take(domain);
             let host = match host {
                 Some(host) => host,
                 None => return Ok(()),
@@ -1717,7 +2377,7 @@ mod tests {
         client: &Client,
         url: &str,
         payload: &T,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         client
             .post(url)
             .json(payload)

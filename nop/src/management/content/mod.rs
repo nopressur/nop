@@ -2053,6 +2053,7 @@ async fn handle_update(
         }
     };
 
+    let mut alias_changed = false;
     if let Some(new_alias) = payload.new_alias {
         let canonical = match canonicalize_optional_with_reserved_paths(&new_alias, &reserved_paths)
         {
@@ -2077,7 +2078,9 @@ async fn handle_update(
                 "Alias already in use",
             );
         }
-        sidecar.alias = canonical.unwrap_or_default();
+        let canonical_alias = canonical.unwrap_or_default();
+        alias_changed = canonical_alias != object.alias;
+        sidecar.alias = canonical_alias;
     }
 
     if let Some(title) = payload.title {
@@ -2151,10 +2154,12 @@ async fn handle_update(
         sidecar.nav_parent_id = nav_parent_id.clone();
         sidecar.nav_order = nav_order;
     }
-    let nav_changed = nav_modified
+    let nav_entry_after = nav_title.is_some();
+    let nav_changed = (nav_modified
         && (nav_title != current_nav_title
             || nav_parent_id != current_nav_parent_id
-            || nav_order != current_nav_order);
+            || nav_order != current_nav_order))
+        || (alias_changed && nav_entry_after);
 
     if let Some(theme) = payload.theme {
         let trimmed = theme.trim();
@@ -2240,15 +2245,16 @@ async fn handle_update(
         );
     }
 
-    if clear_children
-        && let Err(err) =
-            clear_child_nav_titles(&cache, &context.runtime_paths.content_dir, object.key.id)
-    {
-        return response_err(CONTENT_ACTION_UPDATE_ERR, workflow_id, &err);
+    let mut child_nav_changed = false;
+    if clear_children {
+        match clear_child_nav_titles(&cache, &context.runtime_paths.content_dir, object.key.id) {
+            Ok(changed) => child_nav_changed = changed,
+            Err(err) => return response_err(CONTENT_ACTION_UPDATE_ERR, workflow_id, &err),
+        }
     }
 
     invalidate_cache(context).await;
-    if nav_changed {
+    if nav_changed || child_nav_changed {
         bump_release_tracker_for_nav_change(context, content_id);
     }
     response_ok(
@@ -3022,6 +3028,7 @@ async fn handle_update_stream_init(
         }
     };
 
+    let mut alias_changed = false;
     if let Some(new_alias) = payload.new_alias.clone() {
         let canonical = match canonicalize_optional_with_reserved_paths(&new_alias, &reserved_paths)
         {
@@ -3048,7 +3055,9 @@ async fn handle_update_stream_init(
                 "Alias already in use",
             );
         }
-        sidecar.alias = canonical.unwrap_or_default();
+        let canonical_alias = canonical.unwrap_or_default();
+        alias_changed = canonical_alias != object.alias;
+        sidecar.alias = canonical_alias;
     }
 
     if let Some(title) = payload.title.clone() {
@@ -3122,10 +3131,12 @@ async fn handle_update_stream_init(
         sidecar.nav_parent_id = nav_parent_id.clone();
         sidecar.nav_order = nav_order;
     }
-    let nav_changed = nav_modified
+    let nav_entry_after = nav_title.is_some();
+    let nav_changed = (nav_modified
         && (nav_title != current_nav_title
             || nav_parent_id != current_nav_parent_id
-            || nav_order != current_nav_order);
+            || nav_order != current_nav_order))
+        || (alias_changed && nav_entry_after);
 
     if let Some(theme) = payload.theme.clone() {
         let trimmed = theme.trim();
@@ -3296,16 +3307,20 @@ async fn handle_update_stream_commit(
         );
     }
 
+    let mut child_nav_changed = false;
     if meta.clear_children
         && let Ok(cache) = get_cache(context).await
-        && let Err(err) =
-            clear_child_nav_titles(&cache, &context.runtime_paths.content_dir, content_id)
     {
-        return response_err(CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR, workflow_id, &err);
+        match clear_child_nav_titles(&cache, &context.runtime_paths.content_dir, content_id) {
+            Ok(changed) => child_nav_changed = changed,
+            Err(err) => {
+                return response_err(CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR, workflow_id, &err);
+            }
+        }
     }
 
     invalidate_cache(context).await;
-    if meta.nav_changed {
+    if meta.nav_changed || child_nav_changed {
         bump_release_tracker_for_nav_change(context, content_id);
     }
     response_ok(
@@ -3575,7 +3590,7 @@ fn clear_child_nav_titles(
     cache: &PageMetaCache,
     content_dir: &Path,
     parent_id: ContentId,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let parent_id_hex = content_id_hex(parent_id);
     let children: Vec<_> = cache
         .list_objects()
@@ -3583,17 +3598,25 @@ fn clear_child_nav_titles(
         .filter(|object| object.nav_parent_id.as_deref() == Some(parent_id_hex.as_str()))
         .collect();
 
+    let mut changed = false;
     for child in children {
         let sidecar_path = sidecar_path(content_dir, child.key.id, child.key.version);
         let mut sidecar = read_sidecar(&sidecar_path)
             .map_err(|err| format!("Failed to read child sidecar: {}", err))?;
+        let had_nav = sidecar.nav_title.is_some()
+            || sidecar.nav_parent_id.is_some()
+            || sidecar.nav_order.is_some();
+        if !had_nav {
+            continue;
+        }
         sidecar.nav_title = None;
         sidecar.nav_parent_id = None;
         sidecar.nav_order = None;
         write_sidecar_atomic(&sidecar_path, &sidecar)
             .map_err(|err| format!("Failed to update child sidecar: {}", err))?;
+        changed = true;
     }
-    Ok(())
+    Ok(changed)
 }
 
 impl ContentListRequest {

@@ -30,6 +30,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import { route, navigate } from "../stores/router";
   import { contentListState } from "../stores/contentListState";
   import {
+    buildContentPublicPath,
     buildContentPublicUrl,
     buildInsertSnippet,
     createMarkdownStream,
@@ -53,6 +54,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     normalizeNavOrderValue,
     type ContentEditorSnapshot,
   } from "./contentEditorState";
+  import { setContentEditorViewPagePath } from "../stores/contentEditorLink";
 
   let alias = "";
   let title = "";
@@ -128,6 +130,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
   onDestroy(() => {
     removeWindowListener("keydown", handleKeydown);
+    setContentEditorViewPagePath(null);
   });
 
   $: if (isNew) {
@@ -148,6 +151,11 @@ The code and documentation in this repository is licensed under the GNU Affero G
     : contentId
       ? `/id/${contentId}`
       : "#";
+
+  $: viewPagePath = isMarkdown && contentId
+    ? buildContentPublicPath({ id: contentId })
+    : null;
+  $: setContentEditorViewPagePath(viewPagePath);
 
   $: navParentOptions = buildNavParentOptions(navIndexItems, contentId, navParentId);
   $: hasNavChildren = !!contentId && navIndexItems.some((item) => item.navParentId === contentId);
