@@ -7,6 +7,12 @@ import type { ResponseFrame } from "../protocol/ws-protocol";
 
 type MessagePayload = { message: string };
 
+export const USER_MUTATION_QUEUE_FULL_MESSAGE = "User mutation queue is full; retry.";
+
+export function isQueueFullError(error: unknown): boolean {
+  return error instanceof Error && error.message === USER_MUTATION_QUEUE_FULL_MESSAGE;
+}
+
 export function handleResponse<T>(params: {
   response: ResponseFrame;
   domainId: number;

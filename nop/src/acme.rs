@@ -12,8 +12,13 @@ use crate::tls::{
     tls_config_fingerprint, validate_private_key, write_tls_state,
 };
 use async_trait::async_trait;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use hickory_resolver::TokioResolver;
+use hickory_resolver::config::{NameServerConfig, NameServerConfigGroup, ResolverConfig};
+use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::proto::rr::{RData, RecordType};
+use hickory_resolver::proto::xfer::Protocol;
 use log::{info, warn};
 use reqwest::Client;
 use reqwest::StatusCode;
@@ -32,11 +37,6 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
 use tokio::sync::OnceCell;
-use hickory_resolver::TokioResolver;
-use hickory_resolver::config::{NameServerConfig, NameServerConfigGroup, ResolverConfig};
-use hickory_resolver::name_server::TokioConnectionProvider;
-use hickory_resolver::proto::rr::{RData, RecordType};
-use hickory_resolver::proto::xfer::Protocol;
 
 const RENEWAL_WINDOW_DAYS: i64 = 30;
 const RENEWAL_INTERVAL_HOURS: u64 = 12;
@@ -109,8 +109,7 @@ pub(crate) trait Http01Provider: Send + Sync {
 
 #[async_trait]
 pub(crate) trait DnsProvider: Send + Sync {
-    async fn add_txt_record(&self, domain: &str, value: &str)
-        -> StdResult<(), Box<dyn StdError>>;
+    async fn add_txt_record(&self, domain: &str, value: &str) -> StdResult<(), Box<dyn StdError>>;
     async fn remove_txt_record(
         &self,
         domain: &str,
@@ -152,7 +151,6 @@ impl Http01Provider for AcmeHttp01Provider {
         Ok(())
     }
 }
-
 
 #[async_trait]
 trait DnsTxtResolver: Send + Sync {
@@ -282,11 +280,8 @@ async fn build_authoritative_resolver(
     let addrs = resolve_name_server_addresses(resolver, &servers).await?;
     let name_servers = build_name_servers(&addrs);
     let config = ResolverConfig::from_parts(None, Vec::new(), name_servers);
-    let resolver = TokioResolver::builder_with_config(
-        config,
-        TokioConnectionProvider::default(),
-    )
-    .build();
+    let resolver =
+        TokioResolver::builder_with_config(config, TokioConnectionProvider::default()).build();
     Ok((resolver, addrs, zone))
 }
 
@@ -308,11 +303,8 @@ impl ExplicitDnsResolver {
         }
         let name_servers = build_name_servers(&addrs);
         let config = ResolverConfig::from_parts(None, Vec::new(), name_servers);
-        let resolver = TokioResolver::builder_with_config(
-            config,
-            TokioConnectionProvider::default(),
-        )
-        .build();
+        let resolver =
+            TokioResolver::builder_with_config(config, TokioConnectionProvider::default()).build();
         let label = format_resolver_label(&addrs);
         info!("ACME DNS-01 resolver set to {}", label);
         Ok(Self { resolver })
@@ -519,11 +511,7 @@ struct CloudflareDnsProvider {
 }
 
 impl CloudflareDnsProvider {
-    fn new(
-        client: Client,
-        api_token: String,
-        propagation: DnsPropagation,
-    ) -> Self {
+    fn new(client: Client, api_token: String, propagation: DnsPropagation) -> Self {
         Self {
             client,
             api_token,
@@ -795,7 +783,8 @@ impl DnsProvider for CloudflareDnsProvider {
         if let Some(record_id) = self.take_cached_record(&zone_id, domain, value) {
             self.delete_record(&zone_id, &record_id).await?;
         } else {
-            self.delete_record_by_lookup(&zone_id, domain, value).await?;
+            self.delete_record_by_lookup(&zone_id, domain, value)
+                .await?;
         }
         Ok(())
     }
@@ -905,8 +894,7 @@ async fn provision_certificate(
         key: account_key,
     };
 
-    let order_url =
-        create_order(request.client, &directory, &account, request.domains).await?;
+    let order_url = create_order(request.client, &directory, &account, request.domains).await?;
     let order = fetch_order(request.client, &directory, &order_url, &account).await?;
     handle_challenge(
         request.client,
@@ -1298,9 +1286,8 @@ fn create_jws<T: Serialize>(
     nonce: &str,
     payload: &T,
 ) -> io::Result<String> {
-    let payload_b64 = URL_SAFE_NO_PAD.encode(
-        serde_json::to_vec(payload).map_err(|err| io::Error::other(err.to_string()))?,
-    );
+    let payload_b64 = URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(payload).map_err(|err| io::Error::other(err.to_string()))?);
     let mut protected = serde_json::Map::new();
     protected.insert("alg".to_string(), json!("ES256"));
     protected.insert("nonce".to_string(), json!(nonce));
@@ -1310,9 +1297,8 @@ fn create_jws<T: Serialize>(
     } else {
         protected.insert("jwk".to_string(), jwk_from_key_pair(key_pair));
     }
-    let protected_b64 = URL_SAFE_NO_PAD.encode(
-        serde_json::to_vec(&protected).map_err(|err| io::Error::other(err.to_string()))?,
-    );
+    let protected_b64 = URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(&protected).map_err(|err| io::Error::other(err.to_string()))?);
     let input = format!("{}.{}", protected_b64, payload_b64);
     let signature = key_pair
         .sign(&ring::rand::SystemRandom::new(), input.as_bytes())
@@ -1342,9 +1328,8 @@ fn create_jws_post_as_get(
     } else {
         protected.insert("jwk".to_string(), jwk_from_key_pair(key_pair));
     }
-    let protected_b64 = URL_SAFE_NO_PAD.encode(
-        serde_json::to_vec(&protected).map_err(|err| io::Error::other(err.to_string()))?,
-    );
+    let protected_b64 = URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(&protected).map_err(|err| io::Error::other(err.to_string()))?);
     let input = format!("{}.{}", protected_b64, payload_b64);
     let signature = key_pair
         .sign(&ring::rand::SystemRandom::new(), input.as_bytes())
@@ -1421,12 +1406,11 @@ fn dns01_txt_value(key_authorization: &str) -> String {
 fn generate_csr(domains: &[String]) -> io::Result<(Vec<u8>, Vec<u8>)> {
     use rcgen::{CertificateParams, KeyPair as RcgenKeyPair};
 
-    let mut params =
-        CertificateParams::new(domains.to_vec()).map_err(|err| io::Error::other(err.to_string()))?;
+    let mut params = CertificateParams::new(domains.to_vec())
+        .map_err(|err| io::Error::other(err.to_string()))?;
     params.distinguished_name = rcgen::DistinguishedName::new();
 
-    let key_pair = RcgenKeyPair::generate()
-        .map_err(|err| io::Error::other(err.to_string()))?;
+    let key_pair = RcgenKeyPair::generate().map_err(|err| io::Error::other(err.to_string()))?;
     let csr = params
         .serialize_request(&key_pair)
         .map_err(|err| io::Error::other(err.to_string()))?
@@ -1737,7 +1721,11 @@ fn build_dns_provider(acme: &AcmeConfig) -> io::Result<Box<dyn DnsProvider>> {
         dns.propagation_check,
         propagation_delay,
     );
-    Ok(Box::new(CloudflareDnsProvider::new(client, token, propagation)))
+    Ok(Box::new(CloudflareDnsProvider::new(
+        client,
+        token,
+        propagation,
+    )))
 }
 
 fn resolve_secret(secret: &str) -> io::Result<String> {
@@ -2093,6 +2081,7 @@ mod tests {
                         audience: "nopressure-users".to_string(),
                         expiration_hours: 12,
                         cookie_name: "nop_auth".to_string(),
+                        force_secure_cookie: false,
                         disable_refresh: false,
                         refresh_threshold_percentage: 10,
                         refresh_threshold_hours: 24,
@@ -2316,10 +2305,7 @@ mod tests {
             post_json(
                 &self.client,
                 &format!("{}/set-txt", self.api_base),
-                &DnsTxtRequest {
-                    host: &host,
-                    value,
-                },
+                &DnsTxtRequest { host: &host, value },
             )
             .await?;
 

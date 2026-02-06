@@ -106,59 +106,33 @@ where
                         let token_str = cookie.value();
 
                         // First validate the JWT and get claims
-                        if let Some(jwt_service) = user_services.get_ref().jwt_service() {
-                            match jwt_service.verify_token(token_str) {
-                                Ok(claims) => {
-                                    // Store the claims in request extensions for CSRF token binding
-                                    req.extensions_mut().insert(claims.clone());
+                        if let Some(jwt_service) = user_services.get_ref().jwt_service()
+                            && let Ok(claims) = jwt_service.verify_token(token_str)
+                            && let Some(user) = user_services.get_ref().validate_jwt_claims(&claims)
+                        {
+                            req.extensions_mut().insert(user);
+                            req.extensions_mut().insert(claims.clone());
 
-                                    // Check if user still exists and validate
-                                    if let Some(user) =
-                                        user_services.get_ref().validate_jwt(token_str).await
-                                    {
-                                        req.extensions_mut().insert(user);
-
-                                        // Check if token should be refreshed
-                                        if !is_logout_request
-                                            && jwt_service.should_refresh_token(&claims)
-                                        {
-                                            match jwt_service.create_refreshed_token(&claims) {
-                                                Ok(new_token) => {
-                                                    // Create new cookie with refreshed token
-                                                    refresh_cookie = Some(
-                                                        jwt_service.create_auth_cookie(&new_token),
-                                                    );
-                                                    log::debug!(
-                                                        "JWT token refreshed for user: {}",
-                                                        claims.sub
-                                                    );
-                                                }
-                                                Err(e) => {
-                                                    log::error!(
-                                                        "Failed to create refreshed token for user {}: {}",
-                                                        claims.sub,
-                                                        e
-                                                    );
-                                                }
-                                            }
-                                        }
+                            // Check if token should be refreshed
+                            if !is_logout_request && jwt_service.should_refresh_token(&claims) {
+                                match jwt_service.create_refreshed_token(&claims) {
+                                    Ok(new_token) => {
+                                        // Create new cookie with refreshed token
+                                        refresh_cookie =
+                                            Some(jwt_service.create_auth_cookie(&new_token));
+                                        log::debug!(
+                                            "JWT token refreshed for user: {}",
+                                            claims.sub
+                                        );
+                                    }
+                                    Err(e) => {
+                                        log::error!(
+                                            "Failed to create refreshed token for user {}: {}",
+                                            claims.sub,
+                                            e
+                                        );
                                     }
                                 }
-                                Err(_) => {
-                                    // Token verification failed, let normal validation handle it
-                                    if let Some(user) =
-                                        user_services.get_ref().validate_jwt(token_str).await
-                                    {
-                                        req.extensions_mut().insert(user);
-                                    }
-                                }
-                            }
-                        } else {
-                            // Fallback to normal validation if JWT service not available
-                            if let Some(user) =
-                                user_services.get_ref().validate_jwt(token_str).await
-                            {
-                                req.extensions_mut().insert(user);
                             }
                         }
                     }
@@ -177,5 +151,179 @@ where
 
             Ok(res)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::iam::store::MemoryUserStore;
+    use crate::iam::types::{DEFAULT_PASSWORD_VERSION, User};
+    use crate::util::test_config::TestConfigBuilder;
+    use actix_http::Request;
+    use actix_web::body::BoxBody;
+    use actix_web::dev::ServiceResponse;
+    use actix_web::{App, HttpResponse, test, web};
+    use chrono::{Duration, Utc};
+    use jsonwebtoken::{EncodingKey, Header, encode};
+    use serde_json::Value;
+    use std::sync::Arc;
+
+    async fn test_endpoint(req: HttpRequest) -> Result<HttpResponse, Error> {
+        Ok(HttpResponse::Ok().json(serde_json::json!({
+            "has_user": req.user_info().is_some(),
+            "has_claims": req.jwt_claims().is_some()
+        })))
+    }
+
+    fn build_user(email: &str, password_version: u32) -> User {
+        User {
+            email: email.to_string(),
+            name: "Test User".to_string(),
+            password: None,
+            legacy_password_hash: None,
+            roles: vec!["admin".to_string()],
+            password_version,
+        }
+    }
+
+    fn build_token(
+        config: &ValidatedConfig,
+        email: &str,
+        password_version: u32,
+        iat: i64,
+        exp: i64,
+    ) -> String {
+        let jwt = config.users.local().expect("local auth config");
+        let claims = Claims {
+            sub: email.to_string(),
+            name: "Test User".to_string(),
+            groups: vec!["admin".to_string()],
+            iat,
+            exp,
+            iss: jwt.jwt.issuer.clone(),
+            aud: jwt.jwt.audience.clone(),
+            jti: "test-jti".to_string(),
+            password_version,
+        };
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(jwt.jwt.secret.as_ref()),
+        )
+        .expect("encode token")
+    }
+
+    async fn call_with_token<S>(
+        app: &S,
+        config: &ValidatedConfig,
+        token: &str,
+    ) -> ServiceResponse<BoxBody>
+    where
+        S: actix_web::dev::Service<Request, Response = ServiceResponse<BoxBody>, Error = Error>,
+    {
+        let cookie_name = &config
+            .users
+            .local()
+            .expect("local auth config")
+            .jwt
+            .cookie_name;
+        let cookie = actix_web::cookie::Cookie::build(cookie_name.clone(), token.to_string())
+            .path("/")
+            .finish();
+        let req = test::TestRequest::get()
+            .uri("/test")
+            .cookie(cookie)
+            .to_request();
+        test::call_service(app, req).await
+    }
+
+    #[actix_web::test]
+    async fn jwt_middleware_skips_claims_when_user_missing() {
+        let config = TestConfigBuilder::new().build();
+        let store = Arc::new(MemoryUserStore::new(Default::default()));
+        let user_services = UserServices::new_with_store(&config, store).expect("user services");
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(config.clone()))
+                .app_data(web::Data::new(user_services))
+                .wrap(JwtAuthMiddlewareFactory)
+                .route("/test", web::get().to(test_endpoint)),
+        )
+        .await;
+
+        let now = Utc::now();
+        let token = build_token(
+            &config,
+            "missing@example.com",
+            DEFAULT_PASSWORD_VERSION,
+            now.timestamp(),
+            (now + Duration::hours(12)).timestamp(),
+        );
+        let resp = call_with_token(&app, &config, &token).await;
+        assert!(resp.status().is_success());
+
+        let body: Value = test::read_body_json(resp).await;
+        assert_eq!(body["has_user"], false);
+        assert_eq!(body["has_claims"], false);
+    }
+
+    #[actix_web::test]
+    async fn jwt_middleware_sets_refresh_cookie_for_old_token() {
+        let config = TestConfigBuilder::new().build();
+        let user = build_user("user@example.com", DEFAULT_PASSWORD_VERSION);
+        let store = Arc::new(MemoryUserStore::from_users(vec![user]));
+        let user_services = UserServices::new_with_store(&config, store).expect("user services");
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(config.clone()))
+                .app_data(web::Data::new(user_services))
+                .wrap(JwtAuthMiddlewareFactory)
+                .route("/test", web::get().to(test_endpoint)),
+        )
+        .await;
+
+        let now = Utc::now();
+        let token = build_token(
+            &config,
+            "user@example.com",
+            DEFAULT_PASSWORD_VERSION,
+            (now - Duration::hours(2)).timestamp(),
+            (now + Duration::hours(10)).timestamp(),
+        );
+        let resp = call_with_token(&app, &config, &token).await;
+        assert!(resp.status().is_success());
+        assert!(resp.headers().contains_key("set-cookie"));
+    }
+
+    #[actix_web::test]
+    async fn jwt_middleware_does_not_refresh_fresh_token() {
+        let config = TestConfigBuilder::new().build();
+        let user = build_user("user@example.com", DEFAULT_PASSWORD_VERSION);
+        let store = Arc::new(MemoryUserStore::from_users(vec![user]));
+        let user_services = UserServices::new_with_store(&config, store).expect("user services");
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(config.clone()))
+                .app_data(web::Data::new(user_services))
+                .wrap(JwtAuthMiddlewareFactory)
+                .route("/test", web::get().to(test_endpoint)),
+        )
+        .await;
+
+        let now = Utc::now();
+        let token = build_token(
+            &config,
+            "user@example.com",
+            DEFAULT_PASSWORD_VERSION,
+            now.timestamp(),
+            (now + Duration::hours(12)).timestamp(),
+        );
+        let resp = call_with_token(&app, &config, &token).await;
+        assert!(resp.status().is_success());
+        assert!(!resp.headers().contains_key("set-cookie"));
     }
 }

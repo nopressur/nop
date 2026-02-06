@@ -10,6 +10,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import Button from "../components/Button.svelte";
   import Input from "../components/Input.svelte";
   import { getAdminBootstrap } from "../config/runtime";
+  import { confirmDialog } from "../stores/confirmDialog";
   import { pushNotification } from "../stores/notifications";
   import { route, navigate } from "../stores/router";
   import {
@@ -20,6 +21,10 @@ The code and documentation in this repository is licensed under the GNU Affero G
     updateUserName,
     updateUserPassword,
   } from "../services/users";
+  import {
+    isQueueFullError,
+    USER_MUTATION_QUEUE_FULL_MESSAGE,
+  } from "../services/response";
   import { listRoles } from "../services/roles";
   import { validateEmailAddress } from "../validation/email";
   import { addWindowListener, removeWindowListener } from "../services/browser";
@@ -122,6 +127,27 @@ The code and documentation in this repository is licensed under the GNU Affero G
     }
   }
 
+  async function runWithQueueRetry<T>(action: () => Promise<T>): Promise<T> {
+    while (true) {
+      try {
+        return await action();
+      } catch (error) {
+        if (!isQueueFullError(error)) {
+          throw error;
+        }
+        const retry = await confirmDialog({
+          title: "System Busy",
+          message: USER_MUTATION_QUEUE_FULL_MESSAGE,
+          confirmLabel: "Retry",
+          cancelLabel: "Cancel",
+        });
+        if (!retry) {
+          throw error;
+        }
+      }
+    }
+  }
+
   async function saveUser(): Promise<void> {
     if (loading) {
       return;
@@ -156,12 +182,14 @@ The code and documentation in this repository is licensed under the GNU Affero G
         return;
       }
       try {
-        const message = await createUser({
-          email: emailValue,
-          name: nameValue,
-          password: passwordValue,
-          roles: rolesList
-        });
+        const message = await runWithQueueRetry(() =>
+          createUser({
+            email: emailValue,
+            name: nameValue,
+            password: passwordValue,
+            roles: rolesList
+          }),
+        );
         pushNotification(message, "success");
         navigate("/users");
       } catch (error) {
@@ -181,12 +209,14 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
     try {
       if (nameValue && nameValue !== initialName) {
-        lastMessage = await updateUserName(emailValue, nameValue);
+        lastMessage = await runWithQueueRetry(() => updateUserName(emailValue, nameValue));
         updated = true;
       }
 
       if (passwordValue) {
-        lastMessage = await updateUserPassword(emailValue, passwordValue);
+        lastMessage = await runWithQueueRetry(() =>
+          updateUserPassword(emailValue, passwordValue),
+        );
         updated = true;
       }
 
@@ -195,12 +225,12 @@ The code and documentation in this repository is licensed under the GNU Affero G
       const rolesToRemove = Array.from(initialRoles).filter((role) => !rolesSet.has(role));
 
       for (const role of rolesToAdd) {
-        lastMessage = await addUserRole(emailValue, role);
+        lastMessage = await runWithQueueRetry(() => addUserRole(emailValue, role));
         updated = true;
       }
 
       for (const role of rolesToRemove) {
-        lastMessage = await removeUserRole(emailValue, role);
+        lastMessage = await runWithQueueRetry(() => removeUserRole(emailValue, role));
         updated = true;
       }
 

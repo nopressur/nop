@@ -15,6 +15,16 @@ impl HtmlSanitizer {
         cleaner
             .strip_comments(true)
             .add_tags(&["span", "figure", "figcaption"])
+            .add_tag_attributes("img", &["style"])
+            .add_tag_attributes("figure", &["style"])
+            .add_tag_attributes("figcaption", &["style"])
+            .add_tag_attributes("p", &["style"])
+            .add_tag_attributes("h1", &["style"])
+            .add_tag_attributes("h2", &["style"])
+            .add_tag_attributes("h3", &["style"])
+            .add_tag_attributes("h4", &["style"])
+            .add_tag_attributes("h5", &["style"])
+            .add_tag_attributes("h6", &["style"])
             .link_rel(Some("noopener noreferrer"))
             .rm_tags(&["script", "link", "iframe", "object", "embed"]);
         Self { cleaner }

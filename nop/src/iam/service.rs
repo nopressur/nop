@@ -11,13 +11,17 @@ use super::types::{
 use std::sync::{Arc, RwLock};
 use tokio::sync::{mpsc, oneshot};
 
+const MUTATION_QUEUE_DEPTH: usize = 128;
+const MUTATION_BATCH_SIZE: usize = 64;
+const MUTATION_QUEUE_FULL_MESSAGE: &str = "User mutation queue is full; retry.";
+
 // Type aliases for complex channel types
 type MutationRequest = (
     UserMutation,
     oneshot::Sender<Result<UserMutationResult, IamError>>,
 );
-type MutationSender = mpsc::UnboundedSender<MutationRequest>;
-type MutationReceiver = mpsc::UnboundedReceiver<MutationRequest>;
+type MutationSender = mpsc::Sender<MutationRequest>;
+type MutationReceiver = mpsc::Receiver<MutationRequest>;
 
 /// Main IAM service that manages user data
 #[derive(Clone)]
@@ -37,18 +41,31 @@ impl IamService {
         // Store users in thread-safe storage
         let users_data = Arc::new(RwLock::new(users));
 
-        // Create a channel for handling user mutations
+        // Create a bounded channel for handling user mutations
         let (mutation_sender, mut mutation_receiver): (MutationSender, MutationReceiver) =
-            mpsc::unbounded_channel();
+            mpsc::channel(MUTATION_QUEUE_DEPTH);
 
         let users_data_clone = users_data.clone();
         let store_clone = store.clone();
 
         // Spawn background task to handle mutations
         tokio::spawn(async move {
-            while let Some((mutation, response_sender)) = mutation_receiver.recv().await {
-                let result = Self::handle_mutation(&mutation, &users_data_clone, &store_clone);
-                let _ = response_sender.send(result);
+            while let Some(request) = mutation_receiver.recv().await {
+                let mut batch = Vec::with_capacity(MUTATION_BATCH_SIZE);
+                batch.push(request);
+                while batch.len() < MUTATION_BATCH_SIZE {
+                    match mutation_receiver.try_recv() {
+                        Ok(request) => batch.push(request),
+                        Err(mpsc::error::TryRecvError::Empty) => break,
+                        Err(mpsc::error::TryRecvError::Disconnected) => break,
+                    }
+                }
+
+                if let Err(err) =
+                    Self::handle_mutation_batch(batch, &users_data_clone, &store_clone).await
+                {
+                    log::error!("User mutation batch failed: {}", err);
+                }
             }
         });
 
@@ -100,31 +117,48 @@ impl IamService {
         }
     }
 
-    fn with_users_write<T>(
+    fn snapshot_users(
         users_data: &Arc<RwLock<UsersData>>,
         store: &Arc<dyn UserStore>,
-        f: impl FnOnce(&mut UsersData) -> Result<T, IamError>,
-    ) -> Result<T, IamError> {
-        let mut guard = match users_data.write() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                log::error!("Users lock poisoned on write; reloading from disk");
-                let mut guard = poisoned.into_inner();
-                let users = store.load()?;
-                *guard = users;
-                users_data.clear_poison();
-                guard
+    ) -> Result<UsersData, IamError> {
+        match users_data.read() {
+            Ok(guard) => Ok(guard.clone()),
+            Err(_) => {
+                log::error!("Users lock poisoned on read; reloading from disk");
+                Self::reload_users_from_store(users_data, store)?;
+                let guard = users_data.read().map_err(|_| {
+                    IamError::ConfigurationError(
+                        "Users lock poisoned after recovery attempt".to_string(),
+                    )
+                })?;
+                Ok(guard.clone())
             }
-        };
-
-        f(&mut guard)
+        }
     }
 
-    /// Handle a user mutation (runs in background thread)
-    fn handle_mutation(
-        mutation: &UserMutation,
+    fn commit_users_snapshot(
         users_data: &Arc<RwLock<UsersData>>,
-        store: &Arc<dyn UserStore>,
+        snapshot: UsersData,
+    ) -> Result<(), IamError> {
+        match users_data.write() {
+            Ok(mut guard) => {
+                *guard = snapshot;
+                users_data.clear_poison();
+                Ok(())
+            }
+            Err(poisoned) => {
+                log::error!("Users lock poisoned on write; recovering");
+                let mut guard = poisoned.into_inner();
+                *guard = snapshot;
+                users_data.clear_poison();
+                Ok(())
+            }
+        }
+    }
+
+    fn apply_mutation(
+        mutation: &UserMutation,
+        users: &mut UsersData,
     ) -> Result<UserMutationResult, IamError> {
         match mutation {
             UserMutation::Update {
@@ -132,9 +166,8 @@ impl IamService {
                 name,
                 password,
                 roles,
-            } => Self::with_users_write(users_data, store, |users| {
-                let mut updated = users.clone();
-                let user = match updated.get_mut(email) {
+            } => {
+                let user = match users.get_mut(email) {
                     Some(user) => user,
                     None => return Err(IamError::UserNotFound(email.clone())),
                 };
@@ -149,25 +182,20 @@ impl IamService {
                 if let Some(roles) = roles {
                     user.roles = roles.clone();
                 }
-
-                store.save(&updated)?;
-                *users = updated;
                 Ok(UserMutationResult::Updated)
-            }),
+            }
             UserMutation::Add {
                 email,
                 name,
                 password,
                 roles,
-            } => Self::with_users_write(users_data, store, |users| {
+            } => {
                 if users.contains_key(email) {
                     return Err(IamError::ConfigurationError(format!(
                         "User {} already exists",
                         email
                     )));
                 }
-
-                let mut updated = users.clone();
                 let user = User {
                     email: email.clone(),
                     name: name.clone(),
@@ -176,24 +204,52 @@ impl IamService {
                     roles: roles.clone(),
                     password_version: DEFAULT_PASSWORD_VERSION,
                 };
-
-                updated.insert(email.clone(), user);
-
-                store.save(&updated)?;
-                *users = updated;
+                users.insert(email.clone(), user);
                 Ok(UserMutationResult::Added)
-            }),
-            UserMutation::Delete { email } => Self::with_users_write(users_data, store, |users| {
-                let mut updated = users.clone();
-                if updated.remove(email).is_some() {
-                    store.save(&updated)?;
-                    *users = updated;
+            }
+            UserMutation::Delete { email } => {
+                if users.remove(email).is_some() {
                     Ok(UserMutationResult::Deleted)
                 } else {
                     Err(IamError::UserNotFound(email.clone()))
                 }
-            }),
+            }
         }
+    }
+
+    async fn handle_mutation_batch(
+        batch: Vec<MutationRequest>,
+        users_data: &Arc<RwLock<UsersData>>,
+        store: &Arc<dyn UserStore>,
+    ) -> Result<(), IamError> {
+        let mut snapshot = Self::snapshot_users(users_data, store)?;
+        let mut results = Vec::with_capacity(batch.len());
+        let mut changed = false;
+
+        for (mutation, responder) in batch {
+            let result = Self::apply_mutation(&mutation, &mut snapshot);
+            if result.is_ok() {
+                changed = true;
+            }
+            results.push((responder, result));
+        }
+
+        if changed {
+            if let Err(err) = store.save_async(&snapshot).await {
+                for (responder, _) in results {
+                    let _ = responder.send(Err(err.clone()));
+                }
+                return Err(err);
+            }
+
+            Self::commit_users_snapshot(users_data, snapshot)?;
+        }
+
+        for (responder, result) in results {
+            let _ = responder.send(result);
+        }
+
+        Ok(())
     }
 
     /// Get a user by email (synchronous read operation)
@@ -201,14 +257,8 @@ impl IamService {
         log::debug!("Looking up user in IAM service: {}", email);
         self.with_users_read(|users| {
             if let Some(user) = users.get(email) {
-                // If user has no roles, they are considered disabled
-                if user.roles.is_empty() {
-                    log::debug!("User found but has no roles (disabled): {}", email);
-                    Ok(None) // Disabled user
-                } else {
-                    log::debug!("User found with roles: {}", email);
-                    Ok(Some(user.clone()))
-                }
+                log::debug!("User found with roles: {}", email);
+                Ok(Some(user.clone()))
             } else {
                 log::debug!("User not found in IAM service: {}", email);
                 Ok(None) // User not found
@@ -219,6 +269,20 @@ impl IamService {
     /// List all users (synchronous read operation)
     pub fn list_users(&self) -> Result<Vec<User>, IamError> {
         self.with_users_read(|users| Ok(users.values().cloned().collect()))
+    }
+
+    fn send_mutation(
+        &self,
+        mutation: UserMutation,
+        response_sender: oneshot::Sender<Result<UserMutationResult, IamError>>,
+    ) -> Result<(), IamError> {
+        match self.mutation_sender.try_send((mutation, response_sender)) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                Err(IamError::Busy(MUTATION_QUEUE_FULL_MESSAGE.to_string()))
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(IamError::ServiceNotInitialized),
+        }
     }
 
     /// Add a new user (async mutation operation)
@@ -238,9 +302,7 @@ impl IamService {
             roles,
         };
 
-        self.mutation_sender
-            .send((mutation, response_sender))
-            .map_err(|_| IamError::ServiceNotInitialized)?;
+        self.send_mutation(mutation, response_sender)?;
 
         let result = response_receiver
             .await
@@ -262,9 +324,7 @@ impl IamService {
             email: email.to_string(),
         };
 
-        self.mutation_sender
-            .send((mutation, response_sender))
-            .map_err(|_| IamError::ServiceNotInitialized)?;
+        self.send_mutation(mutation, response_sender)?;
 
         let result = response_receiver
             .await
@@ -295,9 +355,7 @@ impl IamService {
             roles,
         };
 
-        self.mutation_sender
-            .send((mutation, response_sender))
-            .map_err(|_| IamError::ServiceNotInitialized)?;
+        self.send_mutation(mutation, response_sender)?;
 
         let result = response_receiver
             .await
@@ -318,7 +376,8 @@ mod tests {
     use crate::iam::store::MemoryUserStore;
     use crate::iam::types::DEFAULT_PASSWORD_VERSION;
     use std::collections::HashMap;
-    use std::sync::Arc;
+    use std::sync::{Arc, RwLock};
+    use tokio::sync::Notify;
 
     struct FailingUserStore {
         users: UsersData,
@@ -339,6 +398,50 @@ mod tests {
             Err(IamError::FileError(
                 "Simulated users save failure".to_string(),
             ))
+        }
+    }
+
+    #[derive(Clone)]
+    struct BlockingUserStore {
+        users: Arc<RwLock<UsersData>>,
+        started: Arc<Notify>,
+        gate: Arc<Notify>,
+    }
+
+    impl BlockingUserStore {
+        fn new(users: UsersData, started: Arc<Notify>, gate: Arc<Notify>) -> Self {
+            Self {
+                users: Arc::new(RwLock::new(users)),
+                started,
+                gate,
+            }
+        }
+    }
+
+    impl UserStore for BlockingUserStore {
+        fn load(&self) -> Result<UsersData, IamError> {
+            match self.users.read() {
+                Ok(guard) => Ok(guard.clone()),
+                Err(poisoned) => Ok(poisoned.into_inner().clone()),
+            }
+        }
+
+        fn save(&self, _users: &UsersData) -> Result<(), IamError> {
+            Ok(())
+        }
+
+        fn save_async<'a>(
+            &'a self,
+            _users: &'a UsersData,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), IamError>> + Send + 'a>>
+        {
+            let started = self.started.clone();
+            let gate = self.gate.clone();
+            Box::pin(async move {
+                started.notify_one();
+                gate.notified().await;
+                Ok(())
+            })
         }
     }
 
@@ -418,7 +521,7 @@ mod tests {
         let mut users = HashMap::new();
         let user = sample_user();
         users.insert(user.email.clone(), user);
-        let store = Arc::new(MemoryUserStore::new(users));
+        let store: Arc<dyn UserStore> = Arc::new(MemoryUserStore::new(users));
         let service = IamService::new(store).expect("service");
 
         service
@@ -446,7 +549,7 @@ mod tests {
         let mut users = HashMap::new();
         let user = sample_user();
         users.insert(user.email.clone(), user);
-        let store = Arc::new(MemoryUserStore::new(users));
+        let store: Arc<dyn UserStore> = Arc::new(MemoryUserStore::new(users));
         let service = IamService::new(store).expect("service");
 
         service
@@ -459,5 +562,171 @@ mod tests {
             .expect("get user")
             .expect("user");
         assert_eq!(updated.password_version, DEFAULT_PASSWORD_VERSION);
+    }
+
+    #[tokio::test]
+    async fn get_user_allows_empty_roles() {
+        let mut users = HashMap::new();
+        let mut user = sample_user();
+        user.roles = vec![];
+        users.insert(user.email.clone(), user.clone());
+        let store: Arc<dyn UserStore> = Arc::new(MemoryUserStore::new(users));
+        let service = IamService::new(store).expect("service");
+
+        let fetched = service
+            .get_user("user@example.com")
+            .expect("get user")
+            .expect("user");
+
+        assert!(fetched.roles.is_empty());
+    }
+
+    #[tokio::test]
+    async fn mutation_queue_returns_busy_when_full() {
+        let started = Arc::new(Notify::new());
+        let gate = Arc::new(Notify::new());
+        let store = Arc::new(BlockingUserStore::new(
+            UsersData::new(),
+            started.clone(),
+            gate.clone(),
+        ));
+        let service = IamService::new(store).expect("service");
+
+        let (response_sender, _response_receiver) = oneshot::channel();
+        service
+            .send_mutation(
+                UserMutation::Add {
+                    email: "user0@example.com".to_string(),
+                    name: "User".to_string(),
+                    password: sample_password_block(),
+                    roles: vec![],
+                },
+                response_sender,
+            )
+            .expect("enqueue");
+
+        started.notified().await;
+
+        let mut busy_seen = false;
+        for idx in 1..(MUTATION_QUEUE_DEPTH + 4) {
+            let (response_sender, _response_receiver) = oneshot::channel();
+            let result = service.send_mutation(
+                UserMutation::Add {
+                    email: format!("user{}@example.com", idx),
+                    name: "User".to_string(),
+                    password: sample_password_block(),
+                    roles: vec![],
+                },
+                response_sender,
+            );
+            if matches!(result, Err(IamError::Busy(_))) {
+                busy_seen = true;
+                break;
+            }
+        }
+
+        assert!(busy_seen, "expected busy error when queue is full");
+
+        gate.notify_one();
+    }
+
+    #[tokio::test]
+    async fn mutation_batch_applies_in_order() {
+        let users = UsersData::new();
+        let users_data = Arc::new(RwLock::new(users.clone()));
+        let store: Arc<dyn UserStore> = Arc::new(MemoryUserStore::new(users));
+
+        let (add_tx, add_rx) = oneshot::channel();
+        let (update_tx, update_rx) = oneshot::channel();
+
+        let batch = vec![
+            (
+                UserMutation::Add {
+                    email: "user@example.com".to_string(),
+                    name: "First".to_string(),
+                    password: sample_password_block(),
+                    roles: vec!["editor".to_string()],
+                },
+                add_tx,
+            ),
+            (
+                UserMutation::Update {
+                    email: "user@example.com".to_string(),
+                    name: Some("Second".to_string()),
+                    password: None,
+                    roles: Some(vec!["admin".to_string()]),
+                },
+                update_tx,
+            ),
+        ];
+
+        IamService::handle_mutation_batch(batch, &users_data, &store)
+            .await
+            .expect("batch handled");
+
+        let add_result = add_rx.await.expect("add response");
+        assert!(matches!(add_result, Ok(UserMutationResult::Added)));
+        let update_result = update_rx.await.expect("update response");
+        assert!(matches!(update_result, Ok(UserMutationResult::Updated)));
+
+        let stored = users_data
+            .read()
+            .expect("read users")
+            .get("user@example.com")
+            .cloned()
+            .expect("user exists");
+        assert_eq!(stored.name, "Second");
+        assert_eq!(stored.roles, vec!["admin".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn mutation_batch_failure_does_not_commit_snapshot() {
+        let mut users = UsersData::new();
+        let original = sample_user();
+        users.insert(original.email.clone(), original.clone());
+        let users_data = Arc::new(RwLock::new(users.clone()));
+        let store: Arc<dyn UserStore> = Arc::new(FailingUserStore::new(users));
+
+        let (update_tx, _update_rx) = oneshot::channel();
+        let (add_tx, _add_rx) = oneshot::channel();
+
+        let batch = vec![
+            (
+                UserMutation::Update {
+                    email: original.email.clone(),
+                    name: Some("Updated".to_string()),
+                    password: None,
+                    roles: None,
+                },
+                update_tx,
+            ),
+            (
+                UserMutation::Add {
+                    email: "new@example.com".to_string(),
+                    name: "New".to_string(),
+                    password: sample_password_block(),
+                    roles: vec!["admin".to_string()],
+                },
+                add_tx,
+            ),
+        ];
+
+        let result = IamService::handle_mutation_batch(batch, &users_data, &store).await;
+        assert!(result.is_err());
+
+        let stored = users_data
+            .read()
+            .expect("read users")
+            .get(&original.email)
+            .cloned()
+            .expect("original user");
+        assert_eq!(stored.name, original.name);
+        assert!(
+            users_data
+                .read()
+                .expect("read users")
+                .get("new@example.com")
+                .is_none()
+        );
     }
 }

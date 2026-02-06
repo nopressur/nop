@@ -10,20 +10,82 @@ use awc::ws::Message as ClientMessage;
 use common::ws;
 use futures_util::SinkExt;
 use nop::config::PasswordHashingParams;
-use nop::iam::derive_front_end_hash;
+use nop::iam::{
+    FileUserStore, IamError, UserServices, UserStore, UsersData, build_password_provider_block,
+    derive_front_end_hash,
+};
 use nop::management::ws::{AuthFrame, WsFrame, encode_frame};
 use nop::management::{
     MessageResponse, PasswordPayload, PasswordSaltResponse, PasswordValidateResponse,
-    USER_ACTION_ADD, USER_ACTION_ADD_OK, USER_ACTION_CHANGE, USER_ACTION_CHANGE_OK,
-    USER_ACTION_DELETE, USER_ACTION_DELETE_ERR, USER_ACTION_DELETE_OK, USER_ACTION_PASSWORD_SALT,
-    USER_ACTION_PASSWORD_SALT_OK, USER_ACTION_PASSWORD_SET, USER_ACTION_PASSWORD_SET_OK,
-    USER_ACTION_PASSWORD_UPDATE, USER_ACTION_PASSWORD_UPDATE_ERR, USER_ACTION_PASSWORD_VALIDATE,
-    USER_ACTION_PASSWORD_VALIDATE_OK, USER_ACTION_ROLE_ADD, USER_ACTION_ROLE_ADD_OK,
-    USER_ACTION_ROLE_REMOVE, USER_ACTION_ROLE_REMOVE_OK, USER_ACTION_SHOW, USER_ACTION_SHOW_OK,
-    USERS_DOMAIN_ID, UserAddRequest, UserChangeRequest, UserDeleteRequest, UserPasswordSaltRequest,
-    UserPasswordSetRequest, UserPasswordUpdateRequest, UserPasswordValidateRequest,
-    UserRoleAddRequest, UserRoleRemoveRequest, UserShowRequest, UserShowResponse,
+    USER_ACTION_ADD, USER_ACTION_ADD_ERR, USER_ACTION_ADD_OK, USER_ACTION_CHANGE,
+    USER_ACTION_CHANGE_OK, USER_ACTION_DELETE, USER_ACTION_DELETE_ERR, USER_ACTION_DELETE_OK,
+    USER_ACTION_PASSWORD_SALT, USER_ACTION_PASSWORD_SALT_OK, USER_ACTION_PASSWORD_SET,
+    USER_ACTION_PASSWORD_SET_OK, USER_ACTION_PASSWORD_UPDATE, USER_ACTION_PASSWORD_UPDATE_ERR,
+    USER_ACTION_PASSWORD_VALIDATE, USER_ACTION_PASSWORD_VALIDATE_OK, USER_ACTION_ROLE_ADD,
+    USER_ACTION_ROLE_ADD_OK, USER_ACTION_ROLE_REMOVE, USER_ACTION_ROLE_REMOVE_OK, USER_ACTION_SHOW,
+    USER_ACTION_SHOW_OK, USERS_DOMAIN_ID, UserAddRequest, UserChangeRequest, UserDeleteRequest,
+    UserPasswordSaltRequest, UserPasswordSetRequest, UserPasswordUpdateRequest,
+    UserPasswordValidateRequest, UserRoleAddRequest, UserRoleRemoveRequest, UserShowRequest,
+    UserShowResponse,
 };
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Notify;
+use tokio::time::{Duration, timeout};
+
+const MUTATION_QUEUE_DEPTH: usize = 128;
+const MUTATION_QUEUE_FULL_MESSAGE: &str = "User mutation queue is full; retry.";
+
+struct BlockingUserStore {
+    inner: FileUserStore,
+    started: Arc<Notify>,
+    gate: Arc<Notify>,
+    open: Arc<AtomicBool>,
+}
+
+impl BlockingUserStore {
+    fn new(
+        inner: FileUserStore,
+        started: Arc<Notify>,
+        gate: Arc<Notify>,
+        open: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            inner,
+            started,
+            gate,
+            open,
+        }
+    }
+}
+
+impl UserStore for BlockingUserStore {
+    fn load(&self) -> Result<UsersData, IamError> {
+        self.inner.load()
+    }
+
+    fn save(&self, users: &UsersData) -> Result<(), IamError> {
+        self.inner.save(users)
+    }
+
+    fn save_async<'a>(
+        &'a self,
+        users: &'a UsersData,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), IamError>> + Send + 'a>>
+    {
+        let started = self.started.clone();
+        let gate = self.gate.clone();
+        let open = self.open.clone();
+        let inner = &self.inner;
+        Box::pin(async move {
+            started.notify_one();
+            while !open.load(Ordering::Acquire) {
+                gate.notified().await;
+            }
+            inner.save_async(users).await
+        })
+    }
+}
 
 #[actix_web::test]
 async fn create_update_delete_user() {
@@ -559,4 +621,139 @@ async fn role_remove_removes_role() {
     let show: UserShowResponse = ws::decode_payload(&response.payload);
     assert!(show.roles.contains(&"editor".to_string()));
     assert!(!show.roles.contains(&"writer".to_string()));
+}
+
+#[actix_web::test]
+async fn queue_full_returns_user_error_over_websocket() {
+    let harness = common::TestHarness::new().await;
+    let started = Arc::new(Notify::new());
+    let gate = Arc::new(Notify::new());
+    let open = Arc::new(AtomicBool::new(false));
+    let inner = FileUserStore::new(harness.runtime_paths.users_file.clone()).expect("users store");
+    let store = Arc::new(BlockingUserStore::new(
+        inner,
+        started.clone(),
+        gate.clone(),
+        open.clone(),
+    ));
+    let mut user_services =
+        UserServices::new_with_store(harness.config.as_ref(), store).expect("user services");
+    user_services.set_page_cache(harness.page_cache.clone());
+    let user_services = Arc::new(user_services);
+
+    let bundle = common::build_app_bundle_with_user_services(&harness, user_services.clone());
+    let base_url = ws::start_test_server(bundle).await;
+
+    let password_params = harness
+        .config
+        .users
+        .local()
+        .expect("local auth config")
+        .password
+        .clone();
+    let password_block =
+        build_password_provider_block("busy-pass", &password_params).expect("password block");
+
+    let blocker_services = user_services.clone();
+    let blocker_block = password_block.clone();
+    tokio::spawn(async move {
+        let _ = blocker_services
+            .add_user("blocker@example.com", "Blocker", blocker_block, Vec::new())
+            .await;
+    });
+
+    started.notified().await;
+
+    let busy = Arc::new(Notify::new());
+    for idx in 0..(MUTATION_QUEUE_DEPTH + 4) {
+        let services = user_services.clone();
+        let block = password_block.clone();
+        let busy_notify = busy.clone();
+        tokio::spawn(async move {
+            let email = format!("queued{}@example.com", idx);
+            let result = services.add_user(&email, "Queued", block, Vec::new()).await;
+            if let Err(err) = result {
+                if err.to_string() == MUTATION_QUEUE_FULL_MESSAGE {
+                    busy_notify.notify_one();
+                }
+            }
+        });
+    }
+
+    timeout(Duration::from_secs(2), busy.notified())
+        .await
+        .expect("queue full");
+
+    let session = harness.admin_auth();
+    let client = Client::new();
+    let ticket = harness.ws_ticket_store.issue(&session.jwt_id);
+
+    let (_resp, mut framed) = client
+        .ws(format!("{}/admin/ws", base_url))
+        .cookie(session.cookie.clone())
+        .connect()
+        .await
+        .expect("connect");
+
+    let auth = WsFrame::Auth(AuthFrame {
+        ticket,
+        csrf_token: session.csrf_token.clone(),
+    });
+    let auth_bytes = encode_frame(&auth).expect("encode auth");
+    framed
+        .send(ClientMessage::Binary(auth_bytes.into()))
+        .await
+        .expect("send auth");
+
+    match ws::read_ws_frame(&mut framed).await {
+        WsFrame::AuthOk(_) => {}
+        other => panic!("Expected AuthOk, got {:?}", other),
+    }
+
+    let user_email = "queuefull@example.com";
+    let salt_payload = ws::encode_payload(&UserPasswordSaltRequest {
+        email: user_email.to_string(),
+    });
+    let response = ws::send_request(
+        &mut framed,
+        1,
+        USERS_DOMAIN_ID,
+        USER_ACTION_PASSWORD_SALT,
+        salt_payload,
+    )
+    .await;
+    assert_eq!(response.action_id, USER_ACTION_PASSWORD_SALT_OK);
+
+    let salt: PasswordSaltResponse = ws::decode_payload(&response.payload);
+    let params = PasswordHashingParams::default();
+    let front_end_hash =
+        derive_front_end_hash("queue-pass", &salt.next_front_end_salt, &params.front_end)
+            .expect("front_end_hash");
+
+    let add_payload = ws::encode_payload(&UserAddRequest {
+        email: user_email.to_string(),
+        name: "Queue Full".to_string(),
+        password: PasswordPayload::FrontEndHash {
+            front_end_hash,
+            front_end_salt: salt.next_front_end_salt,
+        },
+        roles: Vec::new(),
+        change_token: Some(salt.change_token),
+    });
+
+    let response = ws::send_request(
+        &mut framed,
+        2,
+        USERS_DOMAIN_ID,
+        USER_ACTION_ADD,
+        add_payload,
+    )
+    .await;
+    assert_eq!(response.action_id, USER_ACTION_ADD_ERR);
+
+    let message: MessageResponse = ws::decode_payload(&response.payload);
+    assert_eq!(message.message, MUTATION_QUEUE_FULL_MESSAGE);
+
+    open.store(true, Ordering::Release);
+    gate.notify_waiters();
 }

@@ -1,17 +1,31 @@
 # Authentication & Authorization Internals
 
+Status: Developed
+
 This document explains how NoPressure authenticates users and evaluates roles across the public
 and admin surfaces. JWT lifecycle and middleware behavior are documented in
 `docs/iam/auth-middleware.md`.
 
-## Components
+## Objectives
 
-- `login/` – HTTP routes and SPA shells for logging in, logging out, and updating profiles (`local.rs`, `oidc.rs` placeholder).
+- Provide a clear, end-to-end view of authentication and authorization decisions.
+- Define IAM user store behavior, persistence guarantees, and mutation semantics.
+- Ensure authentication is role-agnostic; roles govern authorization only.
+- Keep RBAC decisions aligned with `PageMetaCache` and content metadata.
+
+## Technical Details
+
+### Current State (Developed Behavior)
+
+#### Components
+
+- `login/` – HTTP routes and SPA shells for logging in, logging out, and updating profiles
+  (`local.rs`, `oidc.rs` placeholder).
 - `iam/` – Core services for user lookup (`IamService`), JWT management (`jwt::JwtService`), and
   high-level orchestrator (`UserServices`).
 - `util::CsrfTokenStore` – Couples CSRF tokens to JWT IDs; logout routes clear associated tokens.
 
-## Authentication Flow (Local, Modular Login SPA)
+#### Authentication Flow (Local, Modular Login SPA)
 
 This section documents the current SPA-driven login flow described in
 `docs/iam/modular-login.md` and `docs/iam/password-login.md`.
@@ -41,9 +55,10 @@ This section documents the current SPA-driven login flow described in
 6. **Logout** – `POST /login/logout-api` clears CSRF tokens (`cleanup_tokens_for_jwt_id`) and
    sets the logout cookie (expires immediately).
 
-OIDC paths are scaffolded (`login/oidc.rs`) but currently return 404; startup also rejects OIDC configuration.
+OIDC paths are scaffolded (`login/oidc.rs`) but currently return 404; startup also rejects OIDC
+configuration.
 
-## JWT Issuance and Middleware
+#### JWT Issuance and Middleware
 
 - Login flows call `JwtService::create_token` after identity verification and issue the auth cookie.
 - Request-time authentication, refresh, cookie rules, and auth helpers live in
@@ -51,7 +66,7 @@ OIDC paths are scaffolded (`login/oidc.rs`) but currently return 404; startup al
 - JWT claims include `password_version` for password-change revocation; legacy tokens that omit it
   default to version `1`, matching the `users.yaml` default.
 
-## Updated Requirements: Modular Login and Password Login
+#### Modular Login and Password Login (Current)
 
 - Modular login architecture, provider contracts, and SPA requirements live in
   `docs/iam/modular-login.md`.
@@ -61,7 +76,7 @@ OIDC paths are scaffolded (`login/oidc.rs`) but currently return 404; startup al
 - Password login and profile updates retrieve salts and validation via the management bus so
   `users.yaml` is never accessed directly.
 
-## Authorization & Roles
+#### Authorization & Roles
 
 - IAM consults the public content model when authorizing access to public routes. `PageMetaCache` is
   the systemwide source of content metadata and role requirements; it is the authoritative cache
@@ -72,14 +87,14 @@ OIDC paths are scaffolded (`login/oidc.rs`) but currently return 404; startup al
 - `PageMetaCache::user_has_access` enforces tag-based RBAC:
   - Resolves effective roles from the object's tags.
   - Checks if the user has at least one resolved role.
-- Public handlers rely on `req.user_info()` for gated navigation; admin handlers use it for bootstrap data
-  (for example, current user email) and authorization checks.
+- Public handlers rely on `req.user_info()` for gated navigation; admin handlers use it for
+  bootstrap data (for example, current user email) and authorization checks.
 - Admin WebSocket management sessions bind the authenticated user to the connection; server-side
   management handlers treat that session identity as authoritative for actor checks.
 - For exhaustive RBAC examples and edge cases, see `docs/content/public-rbac.md`.
 - Role lifecycle, validation, and CRUD behavior live in `docs/content/role-management.md`.
 
-### Content RBAC Model (Tag-Based)
+#### Content RBAC Model (Tag-Based)
 
 - **Tag roles** gate access for content objects. Objects do not define roles directly.
 - **Access rules** are defined on tags:
@@ -93,33 +108,39 @@ OIDC paths are scaffolded (`login/oidc.rs`) but currently return 404; startup al
 - **Operational tips**:
   - Keep role lists short and re-use canonical names (`editors`, `managers`).
   - Monitor logs for RBAC warnings and tag misconfiguration.
-  - When bulk-updating content outside the admin UI, rebuild the cache (restart or expose a maintenance endpoint) so new permissions take effect.
+  - When bulk-updating content outside the admin UI, rebuild the cache (restart or expose a
+    maintenance endpoint) so new permissions take effect.
 
-## Configuration
+#### User Store
+
+- User storage format, persistence flow, mutation semantics, and scalability considerations are
+  documented in `docs/iam/user-store.md`.
+
+#### Configuration
 
 - `config.users.auth_method` – `local` (implemented) or `oidc` (TODO).
 - `users.yaml` lives at the runtime root and is wired in via `RuntimePaths` during `UserServices::new`.
 - JWT configuration and `dev_mode` behavior are documented in `docs/iam/auth-middleware.md`.
 
-## Users YAML
+#### Users YAML
 
-- Stored under `<runtime-root>/users.yaml` (copy from `examples/users.yaml.example` or let auto-bootstrap generate it). Each entry contains:
-  - `email`, `name`, password provider data (see `docs/iam/password-login.md`), `roles` (array of
-    strings), `password_version` (u32, starts at 1 and increments on password changes).
-- User roles are validated against `roles.yaml` (see `docs/content/role-management.md`).
-- `UserServices::add_user/update_user/delete_user` mutate this file via `IamService`, then refresh caches. Admin UI routes user changes through the management bus, which delegates to these services.
-- If `password_version` is missing (legacy file), the loader assigns version `1` for all users,
-  persists the updated file, and logs a warning.
+- Stored under `<runtime-root>/users.yaml` (copy from `examples/users.yaml.example` or let
+  auto-bootstrap generate it).
+- Format, persistence, and migration behavior are documented in `docs/iam/user-store.md`.
+- Password provider block details are documented in `docs/iam/password-login.md`.
+- Role validation rules live in `docs/content/role-management.md`.
 
-## Integration Notes
+#### Integration Notes
 
 - Always acquire `UserServices` from Actix `web::Data`. Role availability is sourced from
   `roles.yaml` via the role store, while access checks rely on `PageMetaCache`.
-- User input validation for emails and names uses `security::validation` helpers to keep limits consistent.
+- User input validation for emails and names uses `security::validation` helpers to keep limits
+  consistent.
 - When adding new middleware or handlers, call `req.user_info()` instead of reparsing cookies
   (see `docs/iam/auth-middleware.md`).
 - Ensure new JSON APIs under admin scope require CSRF tokens (see `docs/infrastructure/csrf-protection.md`).
-- Tests can simulate auth by inserting `Claims` and `User` into request extensions or by using `JwtService` to generate real tokens.
+- Tests can simulate auth by inserting `Claims` and `User` into request extensions or by using
+  `JwtService` to generate real tokens.
 
 <!--
 This file is part of the product NoPressure.

@@ -198,6 +198,49 @@ impl TestHarness {
     }
 }
 
+pub fn build_app_bundle_with_user_services(
+    harness: &TestHarness,
+    user_services: Arc<UserServices>,
+) -> AppBundle {
+    let upload_registry = Arc::new(UploadRegistry::new());
+    let release_tracker = Arc::new(ReleaseTracker::new());
+    let management_bus = build_management_bus(
+        &harness.config,
+        &harness.runtime_paths,
+        user_services.clone(),
+        harness.page_cache.clone(),
+        upload_registry.clone(),
+        release_tracker.clone(),
+    );
+    let app_state = Arc::new(AppState::new(
+        &harness.config.app.name,
+        harness.runtime_paths.clone(),
+        management_bus,
+        upload_registry,
+    ));
+    let shortcode_registry = Arc::new(create_default_registry_with_config(
+        &harness.config,
+        &release_tracker,
+        app_state.templates.clone(),
+    ));
+    app_state
+        .runtime_paths
+        .ensure_shortcode_dirs(&shortcode_registry.registered_names())
+        .expect("shortcode dirs");
+
+    AppBundle {
+        config: harness.config.clone(),
+        app_state,
+        page_cache: harness.page_cache.clone(),
+        user_services,
+        csrf_store: harness.csrf_store.clone(),
+        ws_ticket_store: harness.ws_ticket_store.clone(),
+        release_tracker,
+        shortcode_registry,
+        admin_path: harness.config.admin.path.clone(),
+    }
+}
+
 fn build_management_bus(
     config: &Arc<ValidatedConfig>,
     runtime_paths: &RuntimePaths,
@@ -310,6 +353,7 @@ fn build_config() -> ValidatedConfig {
                 audience: "nopressure-users".to_string(),
                 expiration_hours: 12,
                 cookie_name: "nop_auth".to_string(),
+                force_secure_cookie: false,
                 disable_refresh: false,
                 refresh_threshold_percentage: 10,
                 refresh_threshold_hours: 24,

@@ -4,8 +4,8 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use crate::admin::shared;
-use crate::bootstrap::paths::RED_THEME_THEME;
 use crate::app_state::AppState;
+use crate::bootstrap::paths::RED_THEME_THEME;
 use crate::config::ValidatedConfig;
 use crate::headers::{generate_csp_nonce, set_strict_csp};
 use crate::security;

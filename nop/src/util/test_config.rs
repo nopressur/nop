@@ -115,6 +115,7 @@ fn build_test_local_users_config() -> ValidatedUsersConfig {
             audience: "nopressure-users".to_string(),
             expiration_hours: 12,
             cookie_name: "nop_auth".to_string(),
+            force_secure_cookie: false,
             disable_refresh: false,
             refresh_threshold_percentage: 10,
             refresh_threshold_hours: 24,

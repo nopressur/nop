@@ -1,39 +1,55 @@
 # Authentication Middleware and JWT Lifecycle
 
+Status: Developed
+
 This document describes the JWT issuance contract and the request-time authentication middleware
 used across public and admin surfaces. Login flows feed into this pipeline, but do not replace it
 (see `docs/iam/authz-authn.md`).
 
-## Components
+## Objectives
+
+- Keep request-time auth secure, performant, and predictable across public/admin surfaces.
+- Define cookie rules that work for localhost behind reverse proxies and production deployments.
+- Document the middleware contract for claims/user injection and CSRF binding.
+
+## Technical Details
+
+### Current State (Developed Behavior)
+
+#### Components
 
 - `jwt::JwtService` creates and refreshes JWTs and builds auth cookies.
 - `JwtAuthMiddleware` validates JWTs on every request and injects auth context.
 - `AuthRequest` provides helpers for handlers (`user_info`, `has_group`, `jwt_id`).
 - `RequireAdminMiddleware` gates admin routes based on `has_group("admin")`.
 
-## JWT Issuance
+#### JWT Issuance
 
 - Login providers call `JwtService::create_token(email, user)` after identity verification.
 - Tokens embed: `sub` (email), roles, expiry, `jti`, and `password_version`.
 - `create_auth_cookie` issues the HTTP cookie (`cookie_name`, default `nop_auth`).
 
-## Middleware Flow
+#### Middleware Flow
 
 - `JwtAuthMiddleware` reads the auth cookie and verifies the JWT signature and claims.
-- On success, it stores `Claims` and `User` in request extensions for downstream handlers.
+- On success, it validates the user against the verified claims, then stores `Claims` and `User`
+  in request extensions for downstream handlers.
 - If `password_version` in the token does not match the current user record, the request is
   rejected and the token is considered invalid.
 - Refresh behavior:
   - `should_refresh_token` checks percentage and absolute thresholds.
   - `create_refreshed_token` issues a replacement cookie attached to the response.
 
-## Cookie and Session Rules
+#### Cookie and Session Rules
 
 - Auth cookies are HttpOnly with `SameSite=Lax`.
-- The secure flag is enabled outside localhost.
+- The secure flag is enabled outside localhost unless overridden by
+  `users.local.jwt.force_secure_cookie`.
+- If expiration timestamp conversion fails, the cookie expiry falls back to "now + configured
+  duration" instead of `UNIX_EPOCH`.
 - Logout clears the auth cookie and removes CSRF tokens bound to the JWT ID.
 
-## Request Context Helpers
+#### Request Context Helpers
 
 - `req.user_info()` returns `Option<User>` for route handlers.
 - `req.has_group("admin")` drives admin gating and UI decisions.
@@ -41,7 +57,7 @@ used across public and admin surfaces. Login flows feed into this pipeline, but 
 - WebSocket admin sessions derive the acting user identity from the authenticated JWT and bind it
   server-side; management requests never include identity fields from the client.
 
-## Profile Menu API
+#### Profile Menu API
 
 `GET /api/profile` returns the authenticated status and any user-menu links. This endpoint is the
 only source of user menu links for the public site; public HTML never embeds profile/admin links.
@@ -88,6 +104,7 @@ Notes:
 - `config.users.local.jwt`:
   - `secret`, `issuer`, `audience`, `expiration_hours`.
   - `cookie_name` for the auth cookie.
+  - `force_secure_cookie` to force the `Secure` cookie flag even on localhost.
   - `disable_refresh`, `refresh_threshold_percentage`, `refresh_threshold_hours`.
 - `dev_mode` affects auth in debug builds only (release builds ignore it and log a warning):
   - `Dangerous` bypasses auth checks (local-only).

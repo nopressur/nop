@@ -13,7 +13,7 @@ use crate::management::codec::{FieldLimit, FieldLimits, FieldValues};
 use crate::management::core::{
     ManagementCommand, ManagementContext, ManagementRequest, ManagementResponse,
 };
-use crate::management::errors::DomainResult;
+use crate::management::errors::{DomainResult, ManagementError, ManagementErrorKind};
 use crate::management::registry::{DomainActionKey, ManagementHandler, ManagementRegistry};
 use crate::management::roles::ensure_roles_exist;
 use crate::management::{OptionMap, WireDecode, WireEncode, WireReader, WireResult, WireWriter};
@@ -75,6 +75,7 @@ const PASSWORD_SALT_TTL_SECONDS: u64 = 600;
 const MAX_ROLE_COUNT: usize = crate::roles::MAX_ROLE_COUNT;
 const MAX_ROLE_CHARS: usize = crate::roles::MAX_ROLE_CHARS;
 const MAX_USER_COUNT: usize = 10000;
+const USER_MUTATION_QUEUE_FULL_MESSAGE: &str = "User mutation queue is full; retry.";
 
 #[derive(Debug, Clone)]
 pub enum UserCommand {
@@ -983,7 +984,7 @@ async fn handle_add(
         .await
     {
         Ok(_) => response_ok(USER_ACTION_ADD_OK, workflow_id, "User added successfully"),
-        Err(err) => response_err(USER_ACTION_ADD_ERR, workflow_id, &err.to_string()),
+        Err(err) => response_mutation_err(USER_ACTION_ADD_ERR, workflow_id, &err.to_string()),
     }
 }
 
@@ -1035,7 +1036,7 @@ async fn handle_change(
             workflow_id,
             "User updated successfully",
         ),
-        Err(err) => response_err(USER_ACTION_CHANGE_ERR, workflow_id, &err.to_string()),
+        Err(err) => response_mutation_err(USER_ACTION_CHANGE_ERR, workflow_id, &err.to_string()),
     }
 }
 
@@ -1086,7 +1087,7 @@ async fn handle_delete(
             workflow_id,
             "User deleted successfully",
         ),
-        Err(err) => response_err(USER_ACTION_DELETE_ERR, workflow_id, &err.to_string()),
+        Err(err) => response_mutation_err(USER_ACTION_DELETE_ERR, workflow_id, &err.to_string()),
     }
 }
 
@@ -1138,7 +1139,9 @@ async fn handle_password_set(
             workflow_id,
             "Password updated successfully",
         ),
-        Err(err) => response_err(USER_ACTION_PASSWORD_SET_ERR, workflow_id, &err.to_string()),
+        Err(err) => {
+            response_mutation_err(USER_ACTION_PASSWORD_SET_ERR, workflow_id, &err.to_string())
+        }
     }
 }
 
@@ -1455,7 +1458,7 @@ async fn handle_password_update(
         .update_user_complete(&email, None, Some(password_block), None)
         .await
     {
-        return response_err(
+        return response_mutation_err(
             USER_ACTION_PASSWORD_UPDATE_ERR,
             workflow_id,
             &err.to_string(),
@@ -1619,7 +1622,7 @@ async fn handle_role_add(
             workflow_id,
             "Role added successfully",
         ),
-        Err(err) => response_err(USER_ACTION_ROLE_ADD_ERR, workflow_id, &err.to_string()),
+        Err(err) => response_mutation_err(USER_ACTION_ROLE_ADD_ERR, workflow_id, &err.to_string()),
     }
 }
 
@@ -1689,7 +1692,9 @@ async fn handle_role_remove(
             workflow_id,
             "Role removed successfully",
         ),
-        Err(err) => response_err(USER_ACTION_ROLE_REMOVE_ERR, workflow_id, &err.to_string()),
+        Err(err) => {
+            response_mutation_err(USER_ACTION_ROLE_REMOVE_ERR, workflow_id, &err.to_string())
+        }
     }
 }
 
@@ -1801,6 +1806,19 @@ async fn validate_change_token_payload(
 
 fn map_blocking_error(err: BlockingError) -> String {
     format!("Password hashing failed: {}", err)
+}
+
+fn response_mutation_err(action_id: u32, workflow_id: u32, message: &str) -> ManagementResponse {
+    if message == USER_MUTATION_QUEUE_FULL_MESSAGE {
+        let error = ManagementError::new(
+            ManagementErrorKind::Busy,
+            Some(USERS_DOMAIN_ID),
+            Some(action_id),
+            message,
+        );
+        log::warn!("{}", error);
+    }
+    response_err(action_id, workflow_id, message)
 }
 
 define_domain_responses!(

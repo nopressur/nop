@@ -11,8 +11,8 @@ use actix_web::dev::{Service, ServiceResponse};
 use actix_web::{http::StatusCode, test};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{EncodingKey, Header, encode};
-use nop::iam::derive_front_end_hash;
 use nop::iam::jwt::Claims;
+use nop::iam::{build_password_provider_block, derive_front_end_hash};
 use nop::login::types::{
     LoginBootstrapRequest, LoginBootstrapResponse, LoginErrorResponse, LoginSuccessResponse,
     PasswordEmailRequest, PasswordEmailResponse, PasswordLoginRequest,
@@ -128,6 +128,69 @@ async fn login_success_sets_cookie_and_returns_path() {
     let body = test::read_body(resp).await;
     let json: LoginSuccessResponse = serde_json::from_slice(&body).expect("login response");
     assert_eq!(json.return_path, "/admin");
+}
+
+#[actix_web::test]
+async fn roleless_user_authenticates_but_is_not_admin() {
+    let harness = common::TestHarness::new().await;
+    let app = test::init_service(common::build_test_app(harness.app_bundle())).await;
+
+    let roleless_email = "roleless@example.com";
+    let roleless_password = "roleless-pass";
+    let password_params = harness
+        .config
+        .users
+        .local()
+        .expect("local auth config")
+        .password
+        .clone();
+    let password_block =
+        build_password_provider_block(roleless_password, &password_params).expect("password block");
+    harness
+        .user_services
+        .add_user(roleless_email, "Roleless User", password_block, Vec::new())
+        .await
+        .expect("add user");
+
+    let bootstrap = login_bootstrap(&app, Some("/admin")).await;
+    let salt = password_email(&app, &bootstrap.login_session_id, roleless_email).await;
+    let front_end_hash = derive_front_end_hash(
+        roleless_password,
+        &salt.front_end_salt,
+        &password_params.front_end,
+    )
+    .expect("front end hash");
+
+    let resp = password_login(
+        &app,
+        &bootstrap.login_session_id,
+        roleless_email,
+        &front_end_hash,
+    )
+    .await;
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let cookie = {
+        let cookie = resp.response().cookies().next().expect("auth cookie");
+        actix_web::cookie::Cookie::new(cookie.name().to_string(), cookie.value().to_string())
+    };
+    let body = test::read_body(resp).await;
+    let json: LoginSuccessResponse = serde_json::from_slice(&body).expect("login response");
+    assert_eq!(json.return_path, "/");
+
+    let admin_req = test::TestRequest::get()
+        .uri("/admin")
+        .cookie(cookie)
+        .to_request();
+    let admin_resp = test::call_service(&app, admin_req).await;
+    assert_eq!(admin_resp.status(), StatusCode::FOUND);
+    let location = admin_resp
+        .headers()
+        .get("Location")
+        .expect("location")
+        .to_str()
+        .expect("location str");
+    assert_eq!(location, "/");
 }
 
 #[actix_web::test]

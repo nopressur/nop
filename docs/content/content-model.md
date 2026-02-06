@@ -100,6 +100,8 @@ The public pipeline reads metadata from RON sidecar files.
 - Output HTML is sanitized by `ammonia` (`HTML_CLEANER`) and then post-processed:
   - External anchors open in a new tab with safe `rel` attributes.
   - Eligible local file links become download links.
+  - Inline `style` attributes are preserved on `img`, `figure`, `figcaption`, `p`, and `h1`-`h6` tags.
+    Style properties are not filtered.
 
 ### Shortcodes
 

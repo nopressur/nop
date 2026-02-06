@@ -61,11 +61,8 @@ pub(super) fn generate_html(
         cache: request.cache,
         user: request.user,
     };
-    let shortcode_result = process_text_with_shortcodes(
-        request.markdown,
-        request.shortcode_registry,
-        &shortcode_ctx,
-    );
+    let shortcode_result =
+        process_text_with_shortcodes(request.markdown, request.shortcode_registry, &shortcode_ctx);
 
     let use_compact_width = should_use_compact_width(
         &shortcode_result.processed_text,
@@ -1097,6 +1094,15 @@ User content with dangerous HTML: <script>alert('xss')</script>
 
 Also dangerous: <iframe src="evil.com"></iframe>
 
+<figure style="float:right; margin: 0 0 1rem 1rem;">
+  <img style="float:right; margin: 0 0 1rem 1rem; max-width: 40%;" src="/id/abcdef">
+  <figcaption style="text-align: center;">Caption</figcaption>
+</figure>
+
+<p style="clear: both;">Paragraph after figure.</p>
+
+<h2 style="text-align: center;">Styled heading</h2>
+
 Video shortcode: ((video src="safe.mp4" width="640"))
 
 More user content: <object data="bad.swf"></object>
@@ -1137,6 +1143,12 @@ JavaScript in user content: <a href="javascript:alert('bad')">bad link</a>"#;
         assert!(html.contains("<h1>Security Test</h1>"));
         assert!(html.contains("User content with dangerous HTML"));
         assert!(html.contains("More user content"));
+        assert!(html.contains(r#"<figure style="float:right"#));
+        assert!(html.contains(r#"<img style="float:right"#));
+        assert!(html.contains(r#"max-width: 40%"#));
+        assert!(html.contains(r#"<figcaption style="text-align: center;">Caption</figcaption>"#));
+        assert!(html.contains(r#"<p style="clear: both;">Paragraph after figure.</p>"#));
+        assert!(html.contains(r#"<h2 style="text-align: center;">Styled heading</h2>"#));
         assert!(!rendered.contains_dynamic_shortcodes);
     }
 

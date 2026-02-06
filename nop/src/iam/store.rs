@@ -6,8 +6,10 @@
 use super::types::{
     DEFAULT_PASSWORD_VERSION, IamError, PasswordRecord, UsersData, YamlUser, YamlUsersData,
 };
+use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 #[cfg(test)]
 use super::types::User;
@@ -17,6 +19,12 @@ use std::sync::{Arc, RwLock};
 pub trait UserStore: Send + Sync {
     fn load(&self) -> Result<UsersData, IamError>;
     fn save(&self, users: &UsersData) -> Result<(), IamError>;
+    fn save_async<'a>(
+        &'a self,
+        users: &'a UsersData,
+    ) -> Pin<Box<dyn Future<Output = Result<(), IamError>> + Send + 'a>> {
+        Box::pin(async move { self.save(users) })
+    }
 }
 
 pub struct FileUserStore {
@@ -137,6 +145,66 @@ impl FileUserStore {
 
         Ok(())
     }
+
+    async fn write_users_file_async(&self, content: &str) -> Result<(), IamError> {
+        use tokio::io::AsyncWriteExt;
+
+        let parent = self.users_file.parent().ok_or_else(|| {
+            IamError::FileError("Users file path has no parent directory".to_string())
+        })?;
+        let file_name = self
+            .users_file
+            .file_name()
+            .ok_or_else(|| IamError::FileError("Users file path has no file name".to_string()))?;
+        let (mut file, temp_path) = create_temp_file_async(parent, file_name).await?;
+
+        if let Ok(metadata) = tokio::fs::metadata(&self.users_file).await {
+            #[cfg(unix)]
+            {
+                if let Err(err) =
+                    tokio::fs::set_permissions(&temp_path, metadata.permissions()).await
+                {
+                    let _ = tokio::fs::remove_file(&temp_path).await;
+                    return Err(IamError::FileError(format!(
+                        "Failed to set temp users file permissions: {}",
+                        err
+                    )));
+                }
+            }
+        }
+
+        if let Err(err) = file.write_all(content.as_bytes()).await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return Err(IamError::FileError(format!(
+                "Failed to write users temp file: {}",
+                err
+            )));
+        }
+        if let Err(err) = file.sync_all().await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return Err(IamError::FileError(format!(
+                "Failed to sync users temp file: {}",
+                err
+            )));
+        }
+
+        if let Err(err) = tokio::fs::rename(&temp_path, &self.users_file).await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return Err(IamError::FileError(format!(
+                "Failed to replace users file: {}",
+                err
+            )));
+        }
+
+        #[cfg(unix)]
+        {
+            if let Err(err) = sync_parent_dir_async(parent).await {
+                log::warn!("Users directory sync failed: {}", err);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn create_temp_file(
@@ -177,6 +245,46 @@ fn sync_parent_dir(parent: &Path) -> Result<(), IamError> {
         .map_err(|err| IamError::FileError(format!("Failed to sync users directory: {}", err)))
 }
 
+async fn create_temp_file_async(
+    dir: &Path,
+    file_name: &std::ffi::OsStr,
+) -> Result<(tokio::fs::File, PathBuf), IamError> {
+    use tokio::fs::OpenOptions;
+    const MAX_ATTEMPTS: u32 = 100;
+    let base = file_name.to_string_lossy();
+    for attempt in 0..MAX_ATTEMPTS {
+        let candidate = dir.join(format!(".{}.tmp.{}.{}", base, std::process::id(), attempt));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+            .await
+        {
+            Ok(file) => return Ok((file, candidate)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(IamError::FileError(format!(
+                    "Failed to create temp users file: {}",
+                    err
+                )));
+            }
+        }
+    }
+    Err(IamError::FileError(
+        "Failed to create temp users file after repeated attempts".to_string(),
+    ))
+}
+
+#[cfg(unix)]
+async fn sync_parent_dir_async(parent: &Path) -> Result<(), IamError> {
+    let dir = tokio::fs::File::open(parent).await.map_err(|err| {
+        IamError::FileError(format!("Failed to open users directory for sync: {}", err))
+    })?;
+    dir.sync_all()
+        .await
+        .map_err(|err| IamError::FileError(format!("Failed to sync users directory: {}", err)))
+}
+
 impl UserStore for FileUserStore {
     fn load(&self) -> Result<UsersData, IamError> {
         let content = self.read_users_file()?;
@@ -197,6 +305,17 @@ impl UserStore for FileUserStore {
     fn save(&self, users: &UsersData) -> Result<(), IamError> {
         let content = Self::serialize_users(users)?;
         self.write_users_file(&content)
+    }
+
+    fn save_async<'a>(
+        &'a self,
+        users: &'a UsersData,
+    ) -> Pin<Box<dyn Future<Output = Result<(), IamError>> + Send + 'a>> {
+        let content = Self::serialize_users(users);
+        Box::pin(async move {
+            let content = content?;
+            self.write_users_file_async(&content).await
+        })
     }
 }
 
@@ -247,6 +366,13 @@ impl UserStore for MemoryUserStore {
                 Ok(())
             }
         }
+    }
+
+    fn save_async<'a>(
+        &'a self,
+        users: &'a UsersData,
+    ) -> Pin<Box<dyn Future<Output = Result<(), IamError>> + Send + 'a>> {
+        Box::pin(async move { self.save(users) })
     }
 }
 

@@ -17,6 +17,7 @@ pub struct JwtService {
     expiration_hours: u64,
     cookie_name: String,
     is_localhost: bool,
+    force_secure_cookie: bool,
     disable_refresh: bool,
     refresh_threshold_percentage: u32,
     refresh_threshold_hours: u64,
@@ -43,6 +44,7 @@ impl JwtService {
             expiration_hours: jwt_config.expiration_hours,
             cookie_name: jwt_config.cookie_name.clone(),
             is_localhost,
+            force_secure_cookie: jwt_config.force_secure_cookie,
             disable_refresh: jwt_config.disable_refresh,
             refresh_threshold_percentage: jwt_config.refresh_threshold_percentage,
             refresh_threshold_hours: jwt_config.refresh_threshold_hours,
@@ -105,27 +107,33 @@ impl JwtService {
                     "Failed to convert expiration timestamp for auth cookie: {}",
                     e
                 );
-                // Set a fallback expiration far in the future
-                actix_web::cookie::time::OffsetDateTime::UNIX_EPOCH
+                actix_web::cookie::time::OffsetDateTime::now_utc()
+                    + actix_web::cookie::time::Duration::hours(self.expiration_hours as i64)
             }
         };
 
-        if self.is_localhost {
+        let secure_cookie = if self.force_secure_cookie {
+            true
+        } else {
+            !self.is_localhost
+        };
+
+        if secure_cookie {
+            // Secure cookie settings
+            actix_web::cookie::Cookie::build(self.cookie_name.clone(), token.to_string())
+                .path("/")
+                .secure(true)
+                .http_only(true)
+                .same_site(actix_web::cookie::SameSite::Lax)
+                .expires(expires)
+                .finish()
+        } else {
             // Localhost: Safari-friendly settings
             actix_web::cookie::Cookie::build(self.cookie_name.clone(), token.to_string())
                 .path("/")
                 .secure(false) // Allow HTTP on localhost
                 .http_only(true)
                 .same_site(actix_web::cookie::SameSite::Lax) // Less strict for Safari
-                .expires(expires)
-                .finish()
-        } else {
-            // Production: HTTPS + Lax same-site
-            actix_web::cookie::Cookie::build(self.cookie_name.clone(), token.to_string())
-                .path("/")
-                .secure(true) // Enforce HTTPS for secure transmission
-                .http_only(true)
-                .same_site(actix_web::cookie::SameSite::Lax)
                 .expires(expires)
                 .finish()
         }
@@ -133,23 +141,29 @@ impl JwtService {
 
     /// Create a cookie for logout (removes the JWT)
     pub fn create_logout_cookie<'a>(&self) -> actix_web::cookie::Cookie<'a> {
-        if self.is_localhost {
+        let secure_cookie = if self.force_secure_cookie {
+            true
+        } else {
+            !self.is_localhost
+        };
+
+        if secure_cookie {
+            // Secure cookie settings
+            actix_web::cookie::Cookie::build(self.cookie_name.clone(), "")
+                .path("/")
+                .secure(true)
+                .http_only(true)
+                .same_site(actix_web::cookie::SameSite::Lax)
+                .max_age(actix_web::cookie::time::Duration::seconds(0))
+                .expires(actix_web::cookie::time::OffsetDateTime::UNIX_EPOCH)
+                .finish()
+        } else {
             // Localhost: Safari-friendly settings
             actix_web::cookie::Cookie::build(self.cookie_name.clone(), "")
                 .path("/")
                 .secure(false) // Allow HTTP on localhost
                 .http_only(true)
                 .same_site(actix_web::cookie::SameSite::Lax) // Less strict for Safari
-                .max_age(actix_web::cookie::time::Duration::seconds(0))
-                .expires(actix_web::cookie::time::OffsetDateTime::UNIX_EPOCH)
-                .finish()
-        } else {
-            // Production: HTTPS + Lax same-site
-            actix_web::cookie::Cookie::build(self.cookie_name.clone(), "")
-                .path("/")
-                .secure(true) // Enforce HTTPS for secure transmission
-                .http_only(true)
-                .same_site(actix_web::cookie::SameSite::Lax)
                 .max_age(actix_web::cookie::time::Duration::seconds(0))
                 .expires(actix_web::cookie::time::OffsetDateTime::UNIX_EPOCH)
                 .finish()
@@ -228,6 +242,7 @@ mod tests {
             audience: "test-audience".to_string(),
             expiration_hours,
             cookie_name: "test_auth".to_string(),
+            force_secure_cookie: false,
             disable_refresh: false,
             refresh_threshold_percentage: refresh_percentage,
             refresh_threshold_hours: refresh_hours,
@@ -240,6 +255,7 @@ mod tests {
             expiration_hours: jwt_config.expiration_hours,
             cookie_name: jwt_config.cookie_name,
             is_localhost: true,
+            force_secure_cookie: jwt_config.force_secure_cookie,
             disable_refresh: jwt_config.disable_refresh,
             refresh_threshold_percentage: jwt_config.refresh_threshold_percentage,
             refresh_threshold_hours: jwt_config.refresh_threshold_hours,
@@ -347,6 +363,7 @@ mod tests {
             audience: "test-audience".to_string(),
             expiration_hours: 2,
             cookie_name: "test_auth".to_string(),
+            force_secure_cookie: false,
             disable_refresh: true, // Refresh disabled
             refresh_threshold_percentage: 10,
             refresh_threshold_hours: 24,
@@ -359,6 +376,7 @@ mod tests {
             expiration_hours: jwt_config.expiration_hours,
             cookie_name: jwt_config.cookie_name,
             is_localhost: true,
+            force_secure_cookie: jwt_config.force_secure_cookie,
             disable_refresh: jwt_config.disable_refresh,
             refresh_threshold_percentage: jwt_config.refresh_threshold_percentage,
             refresh_threshold_hours: jwt_config.refresh_threshold_hours,
@@ -371,5 +389,28 @@ mod tests {
         // Both should return false since refresh is disabled
         assert!(!service.should_refresh_token(&claims_short));
         assert!(!service.should_refresh_token(&claims_long));
+    }
+
+    #[test]
+    fn test_localhost_auth_cookie_not_secure_by_default() {
+        let service = create_test_jwt_service(12, 10, 24);
+        let cookie = service.create_auth_cookie("token");
+        assert_eq!(cookie.secure().unwrap_or(false), false);
+    }
+
+    #[test]
+    fn test_force_secure_cookie_overrides_localhost() {
+        let mut service = create_test_jwt_service(12, 10, 24);
+        service.force_secure_cookie = true;
+        let cookie = service.create_auth_cookie("token");
+        assert_eq!(cookie.secure().unwrap_or(false), true);
+    }
+
+    #[test]
+    fn test_non_localhost_auth_cookie_is_secure() {
+        let mut service = create_test_jwt_service(12, 10, 24);
+        service.is_localhost = false;
+        let cookie = service.create_auth_cookie("token");
+        assert_eq!(cookie.secure().unwrap_or(false), true);
     }
 }

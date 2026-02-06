@@ -7,6 +7,10 @@ import { writable } from "svelte/store";
 import { createListRowNavigation } from "../components/listRowNavigation";
 import { confirmDialog } from "../stores/confirmDialog";
 import { pushNotification } from "../stores/notifications";
+import {
+  isQueueFullError,
+  USER_MUTATION_QUEUE_FULL_MESSAGE,
+} from "../services/response";
 
 type DeleteOutcome = { message: string; tone?: "success" | "error" };
 
@@ -48,6 +52,27 @@ export function useListViewLogic(params: { onOpen: (index: number) => void }) {
     }
   }
 
+  async function runWithQueueRetry<T>(action: () => Promise<T>): Promise<T> {
+    while (true) {
+      try {
+        return await action();
+      } catch (error) {
+        if (!isQueueFullError(error)) {
+          throw error;
+        }
+        const retry = await confirmDialog({
+          title: "System Busy",
+          message: USER_MUTATION_QUEUE_FULL_MESSAGE,
+          confirmLabel: "Retry",
+          cancelLabel: "Cancel",
+        });
+        if (!retry) {
+          throw error;
+        }
+      }
+    }
+  }
+
   async function confirmAndDelete(params: DeleteFlow): Promise<void> {
     const confirmed = await confirmDialog({
       title: "Delete",
@@ -59,7 +84,7 @@ export function useListViewLogic(params: { onOpen: (index: number) => void }) {
       return;
     }
     try {
-      const outcome = await params.onDelete();
+      const outcome = await runWithQueueRetry(params.onDelete);
       if (params.successMessage) {
         pushNotification(params.successMessage, "success");
       } else if (outcome?.message) {

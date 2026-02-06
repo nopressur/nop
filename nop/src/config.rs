@@ -548,6 +548,8 @@ pub struct JwtConfig {
     pub expiration_hours: u64,
     #[serde(default = "default_jwt_cookie_name")]
     pub cookie_name: String,
+    #[serde(default = "default_jwt_force_secure_cookie")]
+    pub force_secure_cookie: bool,
     #[serde(default = "default_jwt_disable_refresh")]
     pub disable_refresh: bool,
     #[serde(default = "default_jwt_refresh_threshold_percentage")]
@@ -610,6 +612,10 @@ fn default_jwt_expiration_hours() -> u64 {
 
 fn default_jwt_cookie_name() -> String {
     "nop_auth".to_string()
+}
+
+fn default_jwt_force_secure_cookie() -> bool {
+    false
 }
 
 fn default_jwt_disable_refresh() -> bool {
@@ -807,6 +813,7 @@ pub fn test_local_users_config() -> ValidatedUsersConfig {
             audience: default_jwt_audience(),
             expiration_hours: default_jwt_expiration_hours(),
             cookie_name: default_jwt_cookie_name(),
+            force_secure_cookie: default_jwt_force_secure_cookie(),
             disable_refresh: default_jwt_disable_refresh(),
             refresh_threshold_percentage: default_jwt_refresh_threshold_percentage(),
             refresh_threshold_hours: default_jwt_refresh_threshold_hours(),

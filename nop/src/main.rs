@@ -855,8 +855,7 @@ mod tests {
             .with_single_cert(vec![cert_der.clone()], key_der)
             .expect("build rustls server config");
 
-        let listener =
-            std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind TLS listener");
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind TLS listener");
         let addr = listener.local_addr().expect("resolve TLS listener address");
 
         let server = actix_web::HttpServer::new(|| {

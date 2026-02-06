@@ -4,7 +4,7 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use super::IamService;
-use super::jwt::JwtService;
+use super::jwt::{Claims, JwtService};
 use super::password::{PasswordError, build_password_provider_block, verify_front_end_hash};
 use super::password_tokens::PasswordChangeStore;
 use super::store::{FileUserStore, UserStore};
@@ -189,44 +189,26 @@ impl UserServices {
         Ok(valid && has_password)
     }
 
-    /// Validate a JWT token and return user roles if valid
-    /// Returns Some(roles) if the token is valid and user exists, None otherwise
-    pub async fn validate_jwt(&self, token: &str) -> Option<User> {
-        match self.auth_method {
-            AuthMethod::Local => {
-                // For local authentication, use JWT service to verify token
-                if let (Some(jwt_service), Some(iam_service)) =
-                    (&self.jwt_service, &self.iam_service)
-                {
-                    // First verify the JWT token itself
-                    match jwt_service.verify_token(token) {
-                        Ok(claims) => {
-                            // Token is valid, now check if user still exists and has roles
-                            let user: Option<User> =
-                                iam_service.get_user(&claims.sub).unwrap_or_default();
-                            if let Some(user) = user {
-                                if user.password_version != claims.password_version {
-                                    log::warn!(
-                                        "JWT password version mismatch for user {}",
-                                        claims.sub
-                                    );
-                                    return None;
-                                }
-                                return Some(user);
-                            }
-                            None
-                        }
-                        Err(_) => None, // Invalid token
-                    }
-                } else {
-                    None // Service not properly initialized
-                }
+    pub fn validate_jwt_claims(&self, claims: &Claims) -> Option<User> {
+        let iam_service = self.iam_service.as_ref()?;
+        self.validate_jwt_claims_with_service(iam_service, claims)
+    }
+
+    fn validate_jwt_claims_with_service(
+        &self,
+        iam_service: &IamService,
+        claims: &Claims,
+    ) -> Option<User> {
+        // Token is valid, now check if user still exists and has roles
+        let user: Option<User> = iam_service.get_user(&claims.sub).unwrap_or_default();
+        if let Some(user) = user {
+            if user.password_version != claims.password_version {
+                log::warn!("JWT password version mismatch for user {}", claims.sub);
+                return None;
             }
-            AuthMethod::Oidc => {
-                // TODO: Implement OIDC token validation
-                None
-            }
+            return Some(user);
         }
+        None
     }
 
     /// List all users (only for local auth)
@@ -381,6 +363,7 @@ mod tests {
                 audience: "nopressure-users".to_string(),
                 expiration_hours: 12,
                 cookie_name: "nop_auth".to_string(),
+                force_secure_cookie: false,
                 disable_refresh: false,
                 refresh_threshold_percentage: 10,
                 refresh_threshold_hours: 24,
@@ -505,8 +488,9 @@ mod tests {
         let token = jwt_service
             .create_token(&user.email, &user)
             .expect("create token");
+        let claims = jwt_service.verify_token(&token).expect("verify token");
 
-        let validated = services.validate_jwt(&token).await;
+        let validated = services.validate_jwt_claims(&claims);
         assert_eq!(validated.map(|user| user.email), Some(user.email));
     }
 
@@ -530,8 +514,9 @@ mod tests {
             .update_user_complete(&user.email, None, Some(build_password_block()), None)
             .await
             .expect("update user");
+        let claims = jwt_service.verify_token(&token).expect("verify token");
 
-        let validated = services.validate_jwt(&token).await;
+        let validated = services.validate_jwt_claims(&claims);
         assert!(validated.is_none());
     }
 

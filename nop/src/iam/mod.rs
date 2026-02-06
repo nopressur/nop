@@ -21,5 +21,8 @@ pub use password::{
 pub use service::IamService;
 #[cfg(test)]
 pub use store::MemoryUserStore;
-pub use types::{PasswordProviderBlock, User};
+#[allow(unused_imports)]
+pub use store::{FileUserStore, UserStore};
+#[allow(unused_imports)]
+pub use types::{IamError, PasswordProviderBlock, User, UsersData};
 pub use user_services::UserServices;

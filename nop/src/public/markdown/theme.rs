@@ -39,8 +39,7 @@ pub(super) async fn load_theme_content(
         Ok(canonical_theme_path) => {
             match fs::read_to_string(&canonical_theme_path).await {
                 Ok(content) => {
-                    let theme_content =
-                        build_theme_content(&content, theme_name_str, release_hex);
+                    let theme_content = build_theme_content(&content, theme_name_str, release_hex);
                     debug!(
                         "Successfully loaded theme '{}': {} ({} bytes) at {:?}",
                         theme_name_str,
@@ -100,8 +99,7 @@ pub(super) async fn load_theme_content(
     match security::canonical_path_checks(&default_theme_path, &themes_dir_str, None) {
         Ok(canonical_default_path) => match fs::read_to_string(&canonical_default_path).await {
             Ok(content) => {
-                let theme_content =
-                    build_theme_content(&content, "default", release_hex);
+                let theme_content = build_theme_content(&content, "default", release_hex);
                 debug!(
                     "Successfully loaded default theme: {} ({} bytes) at {:?}",
                     canonical_default_path.display(),

@@ -9,13 +9,6 @@ This catalog highlights repo-provided tooling that speeds up development, testin
   - Works with any cargo subcommand (build, check, test, fmt, clippy, run, etc.).
   - Resolves the crate automatically (uses `nop/` when invoked from repo root).
 
-## Versioning Utilities
-
-- `scripts/bump-version.sh`
-  - Updates the NoPressure package version in `nop/Cargo.toml`.
-  - Bumps the `[package]` version field (patch by default, or `minor`/`major` on request).
-  - Usage: `scripts/bump-version.sh`, `scripts/bump-version.sh minor`, `scripts/bump-version.sh major`
-
 ## Asset Utilities
 
 - `scripts/update-bulma.sh`

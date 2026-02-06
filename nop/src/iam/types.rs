@@ -65,6 +65,7 @@ impl YamlUser {
 pub enum IamError {
     UserNotFound(String),
     ServiceNotInitialized,
+    Busy(String),
     ConfigurationError(String),
     FileError(String),
     ParseError(String),
@@ -75,6 +76,7 @@ impl std::fmt::Display for IamError {
         match self {
             IamError::UserNotFound(email) => write!(f, "User not found: {}", email),
             IamError::ServiceNotInitialized => write!(f, "IAM service not initialized"),
+            IamError::Busy(message) => write!(f, "{}", message),
             IamError::ConfigurationError(msg) => write!(f, "Configuration error: {}", msg),
             IamError::FileError(msg) => write!(f, "File error: {}", msg),
             IamError::ParseError(msg) => write!(f, "Parse error: {}", msg),

@@ -8,6 +8,9 @@ use nop::config::{
     LoggingRotationConfig, NavigationConfig, OidcConfig, PasswordHashingConfig, RenderingConfig,
     SecurityConfig, ServerConfig, ShortcodeConfig, StreamingConfig, UploadConfig, UsersConfig,
 };
+use nop::iam::{
+    FileUserStore, IamError, UserServices, UserStore, UsersData, build_password_provider_block,
+};
 use nop::management::socket::ManagementSocket;
 use nop::management::{AccessRule, ManagementBus, ManagementContext, build_default_registry};
 use nop::runtime_paths::RuntimePaths;
@@ -17,6 +20,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Notify;
+use tokio::time::{Duration, timeout};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct PasswordProviderFixture {
@@ -48,6 +54,60 @@ struct YamlTag {
     access_rule: Option<AccessRule>,
 }
 
+const MUTATION_QUEUE_DEPTH: usize = 128;
+const MUTATION_QUEUE_FULL_MESSAGE: &str = "User mutation queue is full; retry.";
+
+struct BlockingUserStore {
+    inner: FileUserStore,
+    started: Arc<Notify>,
+    gate: Arc<Notify>,
+    open: Arc<AtomicBool>,
+}
+
+impl BlockingUserStore {
+    fn new(
+        inner: FileUserStore,
+        started: Arc<Notify>,
+        gate: Arc<Notify>,
+        open: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            inner,
+            started,
+            gate,
+            open,
+        }
+    }
+}
+
+impl UserStore for BlockingUserStore {
+    fn load(&self) -> Result<UsersData, IamError> {
+        self.inner.load()
+    }
+
+    fn save(&self, users: &UsersData) -> Result<(), IamError> {
+        self.inner.save(users)
+    }
+
+    fn save_async<'a>(
+        &'a self,
+        users: &'a UsersData,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), IamError>> + Send + 'a>>
+    {
+        let started = self.started.clone();
+        let gate = self.gate.clone();
+        let open = self.open.clone();
+        let inner = &self.inner;
+        Box::pin(async move {
+            started.notify_one();
+            while !open.load(Ordering::Acquire) {
+                gate.notified().await;
+            }
+            inner.save_async(users).await
+        })
+    }
+}
+
 fn write_local_config(root: &Path) {
     let config = Config {
         server: ServerConfig {
@@ -68,6 +128,7 @@ fn write_local_config(root: &Path) {
                     audience: "nopressure-users".to_string(),
                     expiration_hours: 12,
                     cookie_name: "nop_auth".to_string(),
+                    force_secure_cookie: false,
                     disable_refresh: false,
                     refresh_threshold_percentage: 10,
                     refresh_threshold_hours: 24,
@@ -448,6 +509,110 @@ fn cli_user_lifecycle() {
     assert!(output.status.success());
     let users = read_users(fixture.path());
     assert!(!users.contains_key("user@example.com"));
+}
+
+#[test]
+fn cli_user_queue_full_returns_retryable_error() {
+    let temp = tempfile::Builder::new()
+        .prefix("cli-queue")
+        .tempdir_in("/tmp")
+        .expect("tempdir");
+    let root = temp.path();
+    write_local_config(root);
+
+    let validated_config = Config::load_and_validate(root).expect("validate config");
+    let runtime_paths = RuntimePaths::from_root(root, &validated_config).expect("runtime paths");
+    let registry = build_default_registry().expect("registry");
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = runtime.enter();
+
+    let started = Arc::new(Notify::new());
+    let gate = Arc::new(Notify::new());
+    let open = Arc::new(AtomicBool::new(false));
+    let inner = FileUserStore::new(runtime_paths.users_file.clone()).expect("users store");
+    let store = Arc::new(BlockingUserStore::new(
+        inner,
+        started.clone(),
+        gate.clone(),
+        open.clone(),
+    ));
+    let password_params = validated_config
+        .users
+        .local()
+        .expect("local auth config")
+        .password
+        .clone();
+    let user_services =
+        UserServices::new_with_store(&validated_config, store).expect("user services");
+    let user_services = Arc::new(user_services);
+
+    let context = ManagementContext::from_components_with_user_services(
+        runtime_paths.root.clone(),
+        Arc::new(validated_config),
+        runtime_paths.clone(),
+        Some(user_services.clone()),
+    )
+    .expect("context");
+
+    let bus = ManagementBus::start(registry, context);
+    let _socket = runtime
+        .block_on(async { ManagementSocket::start(&runtime_paths, bus.clone()).await })
+        .expect("socket");
+
+    let password_block =
+        build_password_provider_block("busy-pass", &password_params).expect("password block");
+
+    let blocker_services = user_services.clone();
+    let blocker_block = password_block.clone();
+    runtime.block_on(async move {
+        tokio::spawn(async move {
+            let _ = blocker_services
+                .add_user("blocker@example.com", "Blocker", blocker_block, Vec::new())
+                .await;
+        });
+
+        started.notified().await;
+
+        let busy = Arc::new(Notify::new());
+        for idx in 0..(MUTATION_QUEUE_DEPTH + 4) {
+            let services = user_services.clone();
+            let block = password_block.clone();
+            let busy_notify = busy.clone();
+            tokio::spawn(async move {
+                let email = format!("queued{}@example.com", idx);
+                let result = services.add_user(&email, "Queued", block, Vec::new()).await;
+                if let Err(err) = result {
+                    if err.to_string() == MUTATION_QUEUE_FULL_MESSAGE {
+                        busy_notify.notify_one();
+                    }
+                }
+            });
+        }
+
+        timeout(Duration::from_secs(2), busy.notified())
+            .await
+            .expect("queue full");
+    });
+
+    let output = run_cli(
+        root,
+        &[
+            "user",
+            "add",
+            "busy@example.com",
+            "--name",
+            "Busy User",
+            "--password",
+            "secret",
+        ],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(MUTATION_QUEUE_FULL_MESSAGE));
+
+    open.store(true, Ordering::Release);
+    gate.notify_waiters();
 }
 
 #[test]

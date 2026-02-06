@@ -277,8 +277,9 @@ Password helper responses:
   - Display inline errors based on response actions.
 - Password changes in the UI:
   - Call `users.password_salt` to receive the current front-end salt, a new front-end salt, and a change token.
-  - Compute `current_front_end_hash` and `new_front_end_hash` using the standard Argon2id defaults.
-  - Submit `users.password_update` with the hashes and `new_front_end_salt`.
+  - Compute `new_front_end_hash` using the standard Argon2id defaults and `next_front_end_salt`.
+  - Submit `users.password_set` with `{ front_end_hash, front_end_salt }` and the `change_token`.
+  - `users.password_update` remains reserved for profile flows that validate the current password.
 - Role changes:
   - Compute deltas in the UI.
   - Send `role_add`/`role_remove` per change to avoid replacing role lists.
@@ -340,6 +341,7 @@ Notes:
 - `docs/admin/ui.md`
 - `docs/iam/authz-authn.md`
 - `docs/iam/auth-middleware.md`
+- `docs/iam/user-store.md`
 - `docs/infrastructure/csrf-protection.md`
 - `docs/management/architecture.md`
 - `docs/management/connector-socket.md`

@@ -60,7 +60,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 ### DevOps & Platform
 - `docs/devops/build-and-release.md` - Build modes, asset embedding, multi-target release process.
 - `docs/devops/configuration.md` - Config schema, defaults, validation, secrets handling.
-- `docs/devops/tooling.md` - Helper scripts (`scripts/cargo.sh`, `scripts/bump-version.sh`) plus Bulma (`scripts/update-bulma.sh`) and Ace (`scripts/update-ace.sh`) updaters.
+- `docs/devops/tooling.md` - Helper scripts (`scripts/cargo.sh`) plus Bulma (`scripts/update-bulma.sh`) and Ace (`scripts/update-ace.sh`) updaters.
 
 ### Infrastructure Support Modules
 - `docs/infrastructure/csrf-protection.md` - CSRF protection architecture and behavior.
@@ -73,6 +73,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 ### IAM
 - `docs/iam/authz-authn.md` - Login flow, provider overview, role aggregation, config knobs.
 - `docs/iam/auth-middleware.md` - JWT issuance, cookie rules, and request-time auth behavior.
+- `docs/iam/user-store.md` - Users.yaml storage format, persistence, and mutation backpressure.
 - `docs/iam/modular-login.md` - Modular login SPA architecture and provider framework.
 - `docs/iam/modular-profile.md` - Modular profile SPA architecture and provider modules.
 - `docs/iam/password-login.md` - Argon2id password login flow requirements.

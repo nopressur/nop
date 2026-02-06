@@ -171,10 +171,7 @@ fn main() {
             }
         }
     }
-    println!(
-        "cargo:rerun-if-changed={}",
-        theme_preset_source.display()
-    );
+    println!("cargo:rerun-if-changed={}", theme_preset_source.display());
 
     ensure_bulma_css(&bulma_script, &bulma_version, &bulma_css, &manifest_dir);
     ensure_ace_assets(
@@ -288,10 +285,10 @@ fn ensure_theme_preset(theme_preset_source: &Path, theme_preset_css: &Path) {
         );
     }
 
-    if let Some(parent) = theme_preset_css.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).unwrap();
-        }
+    if let Some(parent) = theme_preset_css.parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent).unwrap();
     }
 
     if theme_preset_css.is_file() {
