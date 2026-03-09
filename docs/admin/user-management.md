@@ -52,6 +52,12 @@ Status: Developed
 - Confirm fields (password confirmation, delete confirmation) are UI/CLI workflows only and are not
   part of the management bus payloads.
 
+### Password Complexity Policy
+
+- The admin user editor must enforce the policy defined in `docs/iam/password-complexity.md` for user creation and password resets.
+- UI validation must block submit until the policy is satisfied and confirmation matches.
+- The runtime config supplies the policy; disabling is allowed only in debug builds.
+
 ### UI Field Controls (End State)
 
 - `email`

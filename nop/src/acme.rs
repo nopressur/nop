@@ -2087,6 +2087,7 @@ mod tests {
                         refresh_threshold_hours: 24,
                     },
                     password: crate::config::PasswordHashingParams::default(),
+                    password_complexity_enabled: true,
                 },
             ),
             navigation: NavigationConfig {
@@ -2130,6 +2131,7 @@ mod tests {
             streaming: StreamingConfig { enabled: true },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }

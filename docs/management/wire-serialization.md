@@ -10,6 +10,7 @@ Status: Developed
 - Define a deterministic optional-field bitset shared by Rust and TypeScript.
 - Keep Rust and TypeScript encoders/decoders aligned with shared fixtures and tests.
 - Require per-action fixtures and cross-language vector tests for every management domain.
+- Maintain the canonical registry of all management domain/action IDs in this document.
 
 ## Technical Details
 
@@ -116,12 +117,23 @@ Rules:
 - Alias fields become optional metadata fields; absence of an alias must be valid.
 - Action IDs and payload shapes should be extended as needed to support ID-first requests while
   keeping legacy alias-based flows in a documented deprecation path.
+- `content.read` includes an optional `stream_content` flag. When true for non-markdown content,
+  the response includes stream metadata and binary bytes are streamed via connector
+  `StreamChunk`/`Ack` frames. Markdown content remains available via `content.read` and always
+  returns the markdown body.
 
 #### Roles (domain 13)
 
 - Requests: `Add` (1), `Change` (2), `Delete` (3), `List` (4), `Show` (5)
 - Responses: `AddOk` (101), `AddErr` (102), `ChangeOk` (201), `ChangeErr` (202), `DeleteOk` (301),
   `DeleteErr` (302), `ListOk` (401), `ListErr` (402), `ShowOk` (501), `ShowErr` (502)
+
+#### Search (domain 21)
+
+- Requests: `Find` (1), `Invalidate` (2), `Reset` (3)
+- Responses: `FindOk` (101), `FindErr` (102), `InvalidateOk` (201), `InvalidateErr` (202),
+  `ResetOk` (301), `ResetErr` (302)
+- Payloads: search management request/response payloads are defined in `docs/management/search.md`.
 
 ### Scope
 

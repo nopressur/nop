@@ -16,6 +16,8 @@ This document defines the public RBAC model for flat, ID-based storage with opti
 tags only. Content objects do not store roles directly. Role storage and lifecycle are defined in
 `docs/content/role-management.md`.
 
+Role IDs follow the lowercase-only policy defined in `docs/content/role-management.md`.
+
 ### Tag Role Model
 
 - Each tag can define `roles` and an optional `access_rule`.
@@ -41,7 +43,8 @@ When evaluating a content object with one or more tags:
 ### Access Outcomes
 
 - If an object has no tags, it is public.
-- If at least one tag contributes roles and role resolution yields an empty role set, the object is inaccessible to all users.
+- If at least one tag contributes roles and role resolution yields an empty role set, the object is inaccessible to non-admin users (admins retain access).
+- Invalid role IDs in tags are ignored; if all declared roles are invalid, the object is treated as `Deny` (admin-only access).
 - If role resolution yields roles, access is granted when the user has at least one of those roles.
 - Anonymous users without access are redirected to `/login?return_path=...`.
 - Authenticated users without access receive a 404.
@@ -68,7 +71,7 @@ Tags:
 - `finance` roles: `finance` access_rule: `intersect`
 - `confidential` roles: `legal` access_rule: (none)
 
-Result: intersect applies; resolved roles are the intersection of `finance` and `legal` (empty). The object is inaccessible.
+Result: intersect applies; resolved roles are the intersection of `finance` and `legal` (empty). The object is inaccessible to non-admin users (admins retain access).
 
 **No tags**
 

@@ -125,6 +125,9 @@ users:
       # refresh_threshold_percentage: 10  # Percentage of token lifetime before refresh (10-90, defaults to 10)
       # refresh_threshold_hours: 24       # Hours before refresh for long-lived tokens (minimum 1, defaults to 24)
 
+    # Password complexity (debug builds only; ignored in release builds)
+    # password_complexity_disabled: false
+
     # Argon2id parameters for local passwords (front-end + back-end phases)
     password:
       front_end:
@@ -155,6 +158,10 @@ navigation:
 
 rendering:
   short_paragraph_length: 256  # Paragraph length (chars) to count as "short" (0 disables compact width)
+
+search:
+  max_memory_mb: 128  # Maximum memory budget (MiB) for Tantivy search indexing operations
+  worker_count: 1     # Number of partitioned search ingestion workers (default: 1, max effective: 16; higher values clamp to 16 with warning)
 
 security:
   max_violations: 2        # Maximum path traversal violations before blocking IP

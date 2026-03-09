@@ -1,6 +1,6 @@
 # TLS Modes and Well-Known Routing
 
-Status: In Progress
+Status: Developed
 
 ## Objectives
 
@@ -11,15 +11,6 @@ Status: In Progress
 - Support TLS material sources: self-signed, user-provided, and ACME (in-house implementation).
 - Keep TLS material under `state/sys/tls/` with no ACME subdirectories.
 - Document reverse-proxy expectations and configuration implications.
-
-## Action Plan
-
-- [x] Update TLS documentation to reflect the in-house ACME implementation, Cloudflare-only DNS-01, and storage rooted in `state/sys/tls/`.
-- [x] Add an ACME Caravaggio document for implementation details and scoped action plan.
-- [x] Remove the acmex crate + vendor patching and replace ACME logic with the in-house implementation described in `docs/infrastructure/acme.md`.
-- [x] Update TLS storage layout to remove any `state/sys/tls/cache/` usage while keeping existing TLS state files stable.
-- [x] Run targeted ACME coverage (unit + Pebble HTTP-01/DNS-01) and confirm config validation rules for ACME.
-- [ ] Confirm readiness and switch status to `Developed` once approved.
 
 ## Technical Details
 

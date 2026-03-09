@@ -5,7 +5,7 @@
 
 use super::{BootstrapError, log_action, log_warning};
 use crate::config::ValidatedConfig;
-use crate::iam::build_password_provider_block;
+use crate::iam::{build_password_provider_block, validate_password_complexity};
 use getrandom::fill;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
@@ -15,6 +15,9 @@ const ADMIN_EMAIL: &str = "admin@example.com";
 const ADMIN_NAME: &str = "Administrator";
 const ADMIN_ROLE: &str = "admin";
 const ADMIN_PASSWORD_LENGTH: usize = 16;
+const UPPER_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const LOWER_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
+const NUMBER_CHARS: &[u8] = b"0123456789";
 const PASSWORD_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 pub fn ensure_users(root: &Path, config: &ValidatedConfig) -> Result<bool, BootstrapError> {
@@ -32,6 +35,10 @@ pub fn ensure_users(root: &Path, config: &ValidatedConfig) -> Result<bool, Boots
         .users
         .local()
         .ok_or_else(|| BootstrapError::Io(io::Error::other("Missing local auth config")))?;
+    if password_params.password_complexity_enabled {
+        validate_password_complexity(&password)
+            .map_err(|err| BootstrapError::Io(io::Error::other(err)))?;
+    }
     let password_block = build_password_provider_block(&password, &password_params.password)
         .map_err(|err| BootstrapError::Io(io::Error::other(err.to_string())))?;
 
@@ -78,20 +85,40 @@ fn users_path(root: &Path) -> Result<PathBuf, BootstrapError> {
 }
 
 fn generate_password() -> Result<String, BootstrapError> {
-    let mut bytes = [0u8; ADMIN_PASSWORD_LENGTH];
-    fill(&mut bytes).map_err(|err| {
+    let mut chars = Vec::with_capacity(ADMIN_PASSWORD_LENGTH);
+    chars.push(random_char(UPPER_CHARS)?);
+    chars.push(random_char(LOWER_CHARS)?);
+    chars.push(random_char(NUMBER_CHARS)?);
+    while chars.len() < ADMIN_PASSWORD_LENGTH {
+        chars.push(random_char(PASSWORD_CHARS)?);
+    }
+
+    let mut shuffle_bytes = vec![0u8; chars.len()];
+    fill(&mut shuffle_bytes).map_err(|err| {
         BootstrapError::Io(io::Error::other(format!(
             "Failed to generate admin password: {}",
             err
         )))
     })?;
 
-    let mut password = String::with_capacity(ADMIN_PASSWORD_LENGTH);
-    for byte in bytes {
-        let idx = (byte as usize) % PASSWORD_CHARS.len();
-        password.push(PASSWORD_CHARS[idx] as char);
+    for i in (1..chars.len()).rev() {
+        let idx = (shuffle_bytes[i] as usize) % (i + 1);
+        chars.swap(i, idx);
     }
-    Ok(password)
+
+    Ok(chars.into_iter().collect())
+}
+
+fn random_char(pool: &[u8]) -> Result<char, BootstrapError> {
+    let mut byte = [0u8; 1];
+    fill(&mut byte).map_err(|err| {
+        BootstrapError::Io(io::Error::other(format!(
+            "Failed to generate admin password: {}",
+            err
+        )))
+    })?;
+    let idx = (byte[0] as usize) % pool.len();
+    Ok(pool[idx] as char)
 }
 
 #[cfg(test)]
@@ -103,5 +130,8 @@ mod tests {
         let password = generate_password().expect("password generation should succeed");
         assert_eq!(password.len(), ADMIN_PASSWORD_LENGTH);
         assert!(password.chars().all(|ch| ch.is_ascii_alphanumeric()));
+        assert!(password.chars().any(|ch| ch.is_ascii_uppercase()));
+        assert!(password.chars().any(|ch| ch.is_ascii_lowercase()));
+        assert!(password.chars().any(|ch| ch.is_ascii_digit()));
     }
 }

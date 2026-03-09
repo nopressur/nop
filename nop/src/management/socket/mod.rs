@@ -259,6 +259,7 @@ mod tests {
             streaming: StreamingConfig { enabled: false },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }

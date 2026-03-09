@@ -8,10 +8,9 @@ use crate::content::flat_storage::{
     ContentId, ContentVersion, blob_path, content_id_hex, content_shard, normalize_optional_alias,
     read_sidecar,
 };
-use crate::management::AccessRule;
+use crate::iam::roles::{ResolvedRoleSet, TagRoleRecord, resolve_roles_for_tags};
 use crate::util::is_temp_upload_name;
 use log::{debug, error, warn};
-use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet, hash_map::Entry};
 use std::fs;
 use std::path::Path;
@@ -98,24 +97,14 @@ impl PageMetaCache {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TagRecord {
-    #[allow(dead_code)]
-    name: String,
-    #[serde(default)]
-    roles: Vec<String>,
-    access_rule: Option<AccessRule>,
-}
-
-fn load_tag_map(state_sys_dir: &Path) -> BTreeMap<String, TagRecord> {
+fn load_tag_map(state_sys_dir: &Path) -> BTreeMap<String, TagRoleRecord> {
     let tags_file = state_sys_dir.join("tags.yaml");
     if !tags_file.exists() {
         return BTreeMap::new();
     }
 
     match fs::read_to_string(&tags_file) {
-        Ok(content) => match serde_yaml::from_str::<BTreeMap<String, TagRecord>>(&content) {
+        Ok(content) => match serde_yaml::from_str::<BTreeMap<String, TagRoleRecord>>(&content) {
             Ok(map) => map,
             Err(err) => {
                 warn!("Failed to parse tags file {}: {}", tags_file.display(), err);
@@ -129,7 +118,7 @@ fn load_tag_map(state_sys_dir: &Path) -> BTreeMap<String, TagRecord> {
     }
 }
 
-fn collect_unique_roles(tag_map: &BTreeMap<String, TagRecord>) -> HashSet<String> {
+fn collect_unique_roles(tag_map: &BTreeMap<String, TagRoleRecord>) -> HashSet<String> {
     let mut roles = HashSet::new();
     for record in tag_map.values() {
         for role in &record.roles {
@@ -141,7 +130,7 @@ fn collect_unique_roles(tag_map: &BTreeMap<String, TagRecord>) -> HashSet<String
 
 fn scan_content_root(
     content_dir: &Path,
-    tag_map: &BTreeMap<String, TagRecord>,
+    tag_map: &BTreeMap<String, TagRoleRecord>,
     cleanup_temp_uploads: bool,
     latest_by_id: &mut HashMap<ContentId, CachedObject>,
     reserved_paths: &crate::content::reserved_paths::ReservedPaths,
@@ -361,50 +350,12 @@ fn read_modified_time(path: &Path) -> SystemTime {
     }
 }
 
-fn resolve_roles(tags: &[String], tag_map: &BTreeMap<String, TagRecord>) -> ResolvedRoles {
-    if tags.is_empty() {
-        return ResolvedRoles::Public;
+fn resolve_roles(tags: &[String], tag_map: &BTreeMap<String, TagRoleRecord>) -> ResolvedRoles {
+    match resolve_roles_for_tags(tags, tag_map) {
+        ResolvedRoleSet::Public => ResolvedRoles::Public,
+        ResolvedRoleSet::Deny => ResolvedRoles::Deny,
+        ResolvedRoleSet::Restricted(roles) => ResolvedRoles::Restricted(roles),
     }
-
-    let mut role_sets: Vec<HashSet<String>> = Vec::new();
-    let mut any_union = false;
-    let mut any_intersect = false;
-    let mut has_roles = false;
-
-    for tag in tags {
-        if let Some(record) = tag_map.get(tag) {
-            if record.access_rule == Some(AccessRule::Union) {
-                any_union = true;
-            }
-            if record.access_rule == Some(AccessRule::Intersect) {
-                any_intersect = true;
-            }
-            if !record.roles.is_empty() {
-                has_roles = true;
-                role_sets.push(record.roles.iter().cloned().collect());
-            }
-        }
-    }
-
-    if !has_roles {
-        return ResolvedRoles::Public;
-    }
-
-    let resolved = if any_intersect {
-        intersect_role_sets(&role_sets)
-    } else if any_union {
-        union_role_sets(&role_sets)
-    } else {
-        intersect_role_sets(&role_sets)
-    };
-
-    if resolved.is_empty() {
-        return ResolvedRoles::Deny;
-    }
-
-    let mut roles: Vec<String> = resolved.into_iter().collect();
-    roles.sort();
-    ResolvedRoles::Restricted(roles)
 }
 
 fn normalize_nav_title(value: &Option<String>) -> Option<String> {
@@ -429,29 +380,6 @@ fn normalize_nav_parent_id(raw: &Option<String>, has_nav_title: bool) -> Option<
         return None;
     }
     Some(value.to_ascii_lowercase())
-}
-
-fn union_role_sets(sets: &[HashSet<String>]) -> HashSet<String> {
-    let mut union = HashSet::new();
-    for set in sets {
-        for role in set {
-            union.insert(role.clone());
-        }
-    }
-    union
-}
-
-fn intersect_role_sets(sets: &[HashSet<String>]) -> HashSet<String> {
-    let mut iter = sets.iter();
-    let Some(first) = iter.next() else {
-        return HashSet::new();
-    };
-
-    let mut intersection = first.clone();
-    for set in iter {
-        intersection.retain(|role| set.contains(role));
-    }
-    intersection
 }
 
 #[cfg(test)]

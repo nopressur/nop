@@ -16,6 +16,7 @@ Status: Developed
 ### Admin UX refinements
 
 - Content list search should update rows in place without clearing the table while fetching.
+- Content list search auto-focuses on entry; Escape clears the active query.
 - The top-right header link switches to `View Page` when a markdown editor has a saved content ID and targets `/id/<id>`; otherwise it stays `View Site`.
 - Editor UX:
   - Provide a Close/Cancel action plus Escape behavior that opens an unsaved-changes modal when edits exist.
@@ -57,6 +58,19 @@ Status: Developed
   - Enter uploads a single item; "Save all" uploads sequentially; the modal closes when all succeed.
   - When the page alias is valid, editor uploads default to `<page-alias>/<filename>` instead of the
     type-based alias prefixes.
+
+### Search Domain Integration
+
+- Replace content list search with the management search domain (`search.find`) instead of the content list query filter.
+- Search results must still render the full list table (title, alias, tags, mime, nav) without changing the visible list layout.
+- Enforce query length bounds (`3..=256`) and avoid issuing requests for shorter input.
+- Apply the selected tags filter to search results using the same all-of matching rules as the current list filter.
+- Admin search results use the same `128`-hit cap as the search domain.
+- Title matches are prioritized first; additional results follow relevance order with a title + ID tiebreak.
+- Apply the selected column sort to the returned results (the domain returns title-priority +
+  relevance ordering, but the UI sort determines the final list order).
+- Do not add per-row search invalidation actions in the content list; the admin UI does not expose invalidate in this update.
+- System settings gains a new Search section with a `Reset` button that triggers `search.reset`.
 
 ### Navbar Fields
 

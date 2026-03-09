@@ -410,11 +410,18 @@ impl TagStore {
     pub fn new(state_sys_dir: PathBuf) -> Result<Self, TagStoreError> {
         let tags_file = security::validate_new_file_path(TAGS_FILE_NAME, &state_sys_dir)
             .map_err(|err| TagStoreError::new(format!("Invalid tag storage path: {}", err)))?;
-        let tags = Self::load_from_disk(&tags_file)?;
-        Ok(Self {
+        let (tags, should_persist) = Self::load_from_disk(&tags_file)?;
+        let store = Self {
             tags_file,
             tags: RwLock::new(tags),
-        })
+        };
+        if should_persist {
+            let snapshot = store
+                .snapshot()
+                .map_err(|err| TagStoreError::new(format!("Failed to load tags: {}", err)))?;
+            store.persist(snapshot)?;
+        }
+        Ok(store)
     }
 
     pub fn snapshot(&self) -> Result<BTreeMap<String, TagRecord>, TagStoreError> {
@@ -434,16 +441,18 @@ impl TagStore {
         Ok(())
     }
 
-    fn load_from_disk(tags_file: &Path) -> Result<BTreeMap<String, TagRecord>, TagStoreError> {
+    fn load_from_disk(
+        tags_file: &Path,
+    ) -> Result<(BTreeMap<String, TagRecord>, bool), TagStoreError> {
         let raw: Option<BTreeMap<String, TagRecord>> =
             yaml_store::read_yaml_file(tags_file, "tags")
                 .map_err(|err| TagStoreError::new(err.to_string()))?;
         let raw = match raw {
             Some(raw) => raw,
-            None => return Ok(BTreeMap::new()),
+            None => return Ok((BTreeMap::new(), false)),
         };
-        let normalized = normalize_tag_map(raw)?;
-        Ok(normalized)
+        let (normalized, should_persist) = normalize_tag_map(raw)?;
+        Ok((normalized, should_persist))
     }
 
     fn write_tags_file(
@@ -1016,7 +1025,7 @@ fn normalize_roles(roles: &[String]) -> Result<Vec<String>, TagValidationError> 
 
 fn normalize_tag_map(
     tags: BTreeMap<String, TagRecord>,
-) -> Result<BTreeMap<String, TagRecord>, TagStoreError> {
+) -> Result<(BTreeMap<String, TagRecord>, bool), TagStoreError> {
     if tags.len() > MAX_TAG_COUNT {
         return Err(TagStoreError::new(format!(
             "Tags must be at most {} entries",
@@ -1024,11 +1033,15 @@ fn normalize_tag_map(
         )));
     }
     let mut normalized = BTreeMap::new();
+    let mut should_persist = false;
     for (id, record) in tags {
         validate_tag_id(&id).map_err(|err| TagStoreError::new(err.to_string()))?;
         validate_tag_name(&record.name).map_err(|err| TagStoreError::new(err.to_string()))?;
         let roles =
             normalize_roles(&record.roles).map_err(|err| TagStoreError::new(err.to_string()))?;
+        if roles != record.roles {
+            should_persist = true;
+        }
         normalized.insert(
             id,
             TagRecord {
@@ -1038,7 +1051,7 @@ fn normalize_tag_map(
             },
         );
     }
-    Ok(normalized)
+    Ok((normalized, should_persist))
 }
 
 fn tag_add_field_values(request: &TagAddRequest) -> FieldValues {
@@ -1297,6 +1310,7 @@ mod tests {
                         refresh_threshold_hours: 24,
                     },
                     password: PasswordHashingConfig::default(),
+                    password_complexity_disabled: false,
                 }),
                 oidc: None,
             },
@@ -1329,6 +1343,7 @@ mod tests {
             streaming: StreamingConfig { enabled: false },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         };
         let content = serde_yaml::to_string(&config).expect("serialize config");

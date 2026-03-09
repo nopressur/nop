@@ -6,7 +6,9 @@
 pub mod jwt;
 pub mod middleware;
 mod password;
+mod password_complexity;
 pub mod password_tokens;
+pub mod roles;
 mod service;
 mod store;
 pub(crate) mod types;
@@ -18,6 +20,7 @@ pub(crate) use password::validate_hex_field;
 pub use password::{
     build_password_provider_block, derive_back_end_hash, derive_front_end_hash, generate_salt_hex,
 };
+pub use password_complexity::validate_password_complexity;
 pub use service::IamService;
 #[cfg(test)]
 pub use store::MemoryUserStore;

@@ -35,6 +35,7 @@ fn main() {
     tag_entries(&mut entries);
     role_entries(&mut entries);
     content_entries(&mut entries);
+    search_entries(&mut entries);
 
     let file = VectorFile {
         version: 1,
@@ -985,6 +986,17 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         CONTENT_ACTION_READ,
         ContentReadRequest {
             id: "0000000000000001".to_string(),
+            stream_content: None,
+        },
+    );
+    push_request(
+        entries,
+        "content.read.stream.request",
+        CONTENT_DOMAIN_ID,
+        CONTENT_ACTION_READ,
+        ContentReadRequest {
+            id: "0000000000000004".to_string(),
+            stream_content: Some(true),
         },
     );
     push_request(
@@ -1167,6 +1179,31 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             original_filename: Some("intro.md".to_string()),
             theme: Some("default".to_string()),
             content: Some("# Intro".to_string()),
+            stream_id: None,
+            chunk_bytes: None,
+            size_bytes: None,
+        },
+    );
+    push_response(
+        entries,
+        "content.read_stream_ok.response",
+        CONTENT_DOMAIN_ID,
+        CONTENT_ACTION_READ_OK,
+        ContentReadResponse {
+            id: "4".to_string(),
+            alias: "assets/sample.bin".to_string(),
+            title: None,
+            mime: "application/octet-stream".to_string(),
+            tags: Vec::new(),
+            nav_title: None,
+            nav_parent_id: None,
+            nav_order: None,
+            original_filename: Some("sample.bin".to_string()),
+            theme: None,
+            content: None,
+            stream_id: Some(42),
+            chunk_bytes: Some(nop::management::ws::WS_MAX_STREAM_CHUNK_BYTES as u32),
+            size_bytes: Some(64),
         },
     );
     push_response(
@@ -1400,6 +1437,110 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR,
         management::MessageResponse {
             message: "update stream commit failed".to_string(),
+        },
+    );
+}
+
+fn search_entries(entries: &mut Vec<VectorEntry>) {
+    use management::{
+        ContentSummary, MessageResponse, SEARCH_ACTION_FIND, SEARCH_ACTION_FIND_ERR,
+        SEARCH_ACTION_FIND_OK, SEARCH_ACTION_INVALIDATE, SEARCH_ACTION_INVALIDATE_ERR,
+        SEARCH_ACTION_INVALIDATE_OK, SEARCH_ACTION_RESET, SEARCH_ACTION_RESET_ERR,
+        SEARCH_ACTION_RESET_OK, SEARCH_DOMAIN_ID, SearchFindRequest, SearchFindResponse,
+        SearchInvalidateRequest, SearchResetRequest,
+    };
+
+    push_request(
+        entries,
+        "search.find.request",
+        SEARCH_DOMAIN_ID,
+        SEARCH_ACTION_FIND,
+        SearchFindRequest {
+            query: "alpha docs".to_string(),
+            tags: Some(vec!["guide".to_string(), "intro".to_string()]),
+            markdown_only: true,
+        },
+    );
+    push_request(
+        entries,
+        "search.invalidate.request",
+        SEARCH_DOMAIN_ID,
+        SEARCH_ACTION_INVALIDATE,
+        SearchInvalidateRequest {
+            id: "0123456789abcdef".to_string(),
+        },
+    );
+    push_request(
+        entries,
+        "search.reset.request",
+        SEARCH_DOMAIN_ID,
+        SEARCH_ACTION_RESET,
+        SearchResetRequest {},
+    );
+
+    push_response(
+        entries,
+        "search.find_ok.response",
+        SEARCH_DOMAIN_ID,
+        SEARCH_ACTION_FIND_OK,
+        SearchFindResponse {
+            hits: vec![ContentSummary {
+                id: "1".to_string(),
+                alias: "docs/intro".to_string(),
+                title: Some("Intro".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: vec!["guide".to_string()],
+                nav_title: Some("Intro".to_string()),
+                nav_parent_id: None,
+                nav_order: Some(1),
+                original_filename: Some("intro.md".to_string()),
+                is_markdown: true,
+            }],
+        },
+    );
+    push_response(
+        entries,
+        "search.find_err.response",
+        SEARCH_DOMAIN_ID,
+        SEARCH_ACTION_FIND_ERR,
+        MessageResponse {
+            message: "search find error".to_string(),
+        },
+    );
+    push_response(
+        entries,
+        "search.invalidate_ok.response",
+        SEARCH_DOMAIN_ID,
+        SEARCH_ACTION_INVALIDATE_OK,
+        MessageResponse {
+            message: "search invalidated".to_string(),
+        },
+    );
+    push_response(
+        entries,
+        "search.invalidate_err.response",
+        SEARCH_DOMAIN_ID,
+        SEARCH_ACTION_INVALIDATE_ERR,
+        MessageResponse {
+            message: "search invalidate error".to_string(),
+        },
+    );
+    push_response(
+        entries,
+        "search.reset_ok.response",
+        SEARCH_DOMAIN_ID,
+        SEARCH_ACTION_RESET_OK,
+        MessageResponse {
+            message: "search reset ok".to_string(),
+        },
+    );
+    push_response(
+        entries,
+        "search.reset_err.response",
+        SEARCH_DOMAIN_ID,
+        SEARCH_ACTION_RESET_ERR,
+        MessageResponse {
+            message: "search reset error".to_string(),
         },
     );
 }

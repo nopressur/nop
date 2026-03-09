@@ -10,7 +10,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 describe('user menu', () => {
   beforeEach(() => {
     document.body.innerHTML =
-      '<div class="navbar-end" data-site-content-id="0000000000000001"><div data-site-user-menu></div></div>';
+      '<div class="navbar-end" data-site-content-id="0000000000000001"><button type="button" class="site-search-trigger site-search-trigger--desktop" data-site-search-button>Search</button><div data-site-user-menu></div></div>';
   });
 
   afterEach(() => {
@@ -30,6 +30,8 @@ describe('user menu', () => {
     expect(root?.children.length).toBe(0);
     const editButton = document.querySelector('[data-site-edit-button]');
     expect(editButton).toBeNull();
+    const adminButton = document.querySelector('[data-site-admin-button]');
+    expect(adminButton).toBeNull();
   });
 
   it('renders menu items when authenticated', async () => {
@@ -65,15 +67,27 @@ describe('user menu', () => {
     expect(editWrapper).not.toBeNull();
     const editLink = editWrapper?.querySelector('a');
     expect(editLink?.getAttribute('href')).toBe('/admin/pages/edit/0000000000000001');
-    expect(editLink?.getAttribute('target')).toBe('_blank');
-    expect(editLink?.getAttribute('rel')).toBe('noopener');
+    expect(editLink?.getAttribute('target')).toBeNull();
+    expect(editLink?.getAttribute('rel')).toBeNull();
+
+    const adminWrapper = document.querySelector('[data-site-admin-button]');
+    expect(adminWrapper).not.toBeNull();
+    const adminLink = adminWrapper?.querySelector('a');
+    expect(adminLink?.getAttribute('href')).toBe('/admin');
+
     const parent = root?.parentElement;
     expect(parent?.firstElementChild).toBe(editWrapper);
+    expect(parent?.children[1]).toBe(adminWrapper);
+    expect(
+      (parent?.children[2] as HTMLElement | undefined)?.classList.contains(
+        'site-search-trigger--desktop'
+      )
+    ).toBe(true);
   });
 
   it('skips the edit button when content id is missing', async () => {
     document.body.innerHTML =
-      '<div class="navbar-end"><div data-site-user-menu></div></div>';
+      '<div class="navbar-end"><button type="button" class="site-search-trigger site-search-trigger--desktop" data-site-search-button>Search</button><div data-site-user-menu></div></div>';
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -92,5 +106,10 @@ describe('user menu', () => {
 
     const editButton = document.querySelector('[data-site-edit-button]');
     expect(editButton).toBeNull();
+
+    const adminButton = document.querySelector('[data-site-admin-button]');
+    expect(adminButton).not.toBeNull();
+    const adminLink = adminButton?.querySelector('a');
+    expect(adminLink?.getAttribute('href')).toBe('/admin');
   });
 });

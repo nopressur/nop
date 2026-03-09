@@ -13,6 +13,7 @@ use crate::management::system::{SYSTEM_DOMAIN_ID, SystemCommand};
 use crate::management::tags::TagStore;
 use crate::public::page_meta_cache::PageMetaCache;
 use crate::runtime_paths::RuntimePaths;
+use crate::search::SearchService;
 use crate::util::ReleaseTracker;
 use crate::util::log_rotation::{
     DEFAULT_LOG_FILE_NAME, LogController, LogRotationSettings, LogRunMode,
@@ -121,6 +122,7 @@ pub struct ManagementContext {
     pub page_cache: Option<Arc<PageMetaCache>>,
     pub upload_registry: Arc<UploadRegistry>,
     pub release_tracker: Option<Arc<ReleaseTracker>>,
+    pub search_service: Option<Arc<SearchService>>,
     pub(crate) tag_store: Arc<TagStore>,
     pub(crate) role_store: Arc<RoleStore>,
 }
@@ -206,6 +208,7 @@ impl ManagementContext {
             page_cache,
             upload_registry: Arc::new(UploadRegistry::new()),
             release_tracker: None,
+            search_service: None,
             tag_store,
             role_store,
         })
@@ -254,6 +257,11 @@ impl ManagementContext {
         self.release_tracker = Some(release_tracker);
         self
     }
+
+    pub fn with_search_service(mut self, search_service: Arc<SearchService>) -> Self {
+        self.search_service = Some(search_service);
+        self
+    }
 }
 
 fn default_log_controller(runtime_paths: &RuntimePaths, config: &ValidatedConfig) -> LogController {
@@ -277,6 +285,7 @@ pub enum ManagementCommand {
     Tags(crate::management::tags::TagCommand),
     Roles(crate::management::roles::RoleCommand),
     Content(crate::management::content::ContentCommand),
+    Search(crate::management::search::SearchCommand),
 }
 
 impl ManagementCommand {
@@ -287,6 +296,7 @@ impl ManagementCommand {
             ManagementCommand::Tags(_) => crate::management::tags::TAGS_DOMAIN_ID,
             ManagementCommand::Roles(_) => crate::management::roles::ROLES_DOMAIN_ID,
             ManagementCommand::Content(_) => crate::management::content::CONTENT_DOMAIN_ID,
+            ManagementCommand::Search(_) => crate::management::search::SEARCH_DOMAIN_ID,
         }
     }
 
@@ -297,6 +307,7 @@ impl ManagementCommand {
             ManagementCommand::Tags(command) => command.action_id(),
             ManagementCommand::Roles(command) => command.action_id(),
             ManagementCommand::Content(command) => command.action_id(),
+            ManagementCommand::Search(command) => command.action_id(),
         }
     }
 }
@@ -364,6 +375,7 @@ pub enum ResponsePayload {
     ContentUpload(crate::management::content::ContentUploadResponse),
     ContentBinaryPrevalidate(crate::management::content::BinaryPrevalidateResponse),
     ContentUploadStreamInit(crate::management::content::UploadStreamInitResponse),
+    SearchFind(crate::management::search::SearchFindResponse),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

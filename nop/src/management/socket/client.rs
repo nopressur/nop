@@ -3,7 +3,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use super::protocol::{RequestEnvelope, ResponseEnvelope, read_envelope, write_envelope};
+use super::protocol::{
+    RequestEnvelope, ResponseEnvelope, read_envelope, read_stream_frame, write_envelope,
+    write_stream_frame,
+};
 use super::{SocketError, SocketErrorKind, SocketResult};
 use crate::management::codec::{CodecError, decode_payload, encode_payload};
 use crate::management::core::{ManagementCommand, ManagementRequest, ManagementResponse};
@@ -12,6 +15,7 @@ use crate::management::system::{
     PingRequest, PongErrorResponse, PongResponse, SYSTEM_ACTION_PING, SYSTEM_ACTION_PONG,
     SYSTEM_ACTION_PONG_ERROR, SYSTEM_DOMAIN_ID,
 };
+use crate::management::ws::WsFrame;
 use crate::management::{VersionInfo, WorkflowCounter, next_connection_id};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -102,6 +106,14 @@ impl SocketClient {
         }
 
         self.decode_response(response)
+    }
+
+    pub async fn read_stream_frame(&mut self) -> SocketResult<WsFrame> {
+        read_stream_frame(&mut self.stream).await
+    }
+
+    pub async fn write_stream_frame(&mut self, frame: &WsFrame) -> SocketResult<()> {
+        write_stream_frame(&mut self.stream, frame).await
     }
 
     async fn handshake(&mut self) -> SocketResult<HandshakeResult> {

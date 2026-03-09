@@ -98,6 +98,7 @@ fn parse_add(args: &[String]) -> Result<CliCommand, CliError> {
             access_rule,
         })),
         success_actions: vec![DomainActionKey::new(TAGS_DOMAIN_ID, TAG_ACTION_ADD_OK)],
+        stream_target: None,
     })
 }
 
@@ -203,6 +204,7 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
             clear_access,
         })),
         success_actions: vec![DomainActionKey::new(TAGS_DOMAIN_ID, TAG_ACTION_CHANGE_OK)],
+        stream_target: None,
     })
 }
 
@@ -215,6 +217,7 @@ fn parse_delete(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Tags(TagCommand::Delete(TagDeleteRequest { id })),
         success_actions: vec![DomainActionKey::new(TAGS_DOMAIN_ID, TAG_ACTION_DELETE_OK)],
+        stream_target: None,
     })
 }
 
@@ -226,6 +229,7 @@ fn parse_list(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Tags(TagCommand::List(TagListRequest {})),
         success_actions: vec![DomainActionKey::new(TAGS_DOMAIN_ID, TAG_ACTION_LIST_OK)],
+        stream_target: None,
     })
 }
 
@@ -238,6 +242,7 @@ fn parse_show(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Tags(TagCommand::Show(TagShowRequest { id })),
         success_actions: vec![DomainActionKey::new(TAGS_DOMAIN_ID, TAG_ACTION_SHOW_OK)],
+        stream_target: None,
     })
 }
 

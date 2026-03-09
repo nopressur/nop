@@ -87,7 +87,7 @@ The public pipeline reads metadata from RON sidecar files.
 - Roles are defined on tags, not on content objects.
 - Tag access rules determine the resolved role set for each object (see `docs/content/public-rbac.md`).
 - Role storage and validation are defined in `docs/content/role-management.md`.
-- If the resolved role set is empty, the object is inaccessible to all users.
+- If the resolved role set is empty, the object is inaccessible to non-admin users (admins retain access).
 - Objects with no tags are public.
 
 ### Markdown Rendering
@@ -123,10 +123,11 @@ container is not affected.
 
 - Markdown pages render `data-site-content-id` (hex) in `public/templates/main_layout.html` for frontend use.
 - The site menu script (`nop/ts/site/src/userMenu.ts`) calls `/api/profile`; when the response includes the
-  admin menu item and a content ID is present, it inserts an `Edit` button immediately to the left of the
-  profile dropdown.
-- The edit button opens a new tab to `<admin_path>/pages/edit/<content_id>`. Admin access is treated as
-  all-or-nothing; if the profile payload reports the admin menu item, the button is shown.
+  admin menu item, it inserts an `Admin` button immediately to the left of the profile dropdown.
+- When a content ID is present, it also inserts an `Edit` button to the left of the admin button.
+- The `Admin` button uses the admin menu item `href` from the profile payload to avoid leaking the path.
+- The edit button opens to `<admin_path>/pages/edit/<content_id>` in the same tab. Admin access is treated as
+  all-or-nothing; if the profile payload reports the admin menu item, the buttons are shown.
 
 ### Navigation
 
@@ -159,6 +160,15 @@ container is not affected.
 - New shortcodes should register in `create_default_registry_with_config` and ship templates under `public/shortcode/templates/`.
 - New public endpoints must be registered in `public::configure` and should respect the same cache and security checks.
 - For content-derived routes, use `PageMetaCache` to validate existence and permissions before touching the filesystem.
+
+### Public Search Integration
+
+- Public search UX and API contract live in `docs/content/search-ux.md`.
+- Public endpoint `GET /api/search` returns search hits for the site bundle with payload fields:
+  `id`, `alias`, and `title`.
+- Public site search behavior is implemented in the existing TypeScript bundle (`nop/ts/site/src/search.ts`)
+  and initialized from `nop/ts/site/src/main.ts`.
+- The navbar search trigger remains always visible and outside the hamburger menu across breakpoints.
 
 <!--
 This file is part of the product NoPressure.

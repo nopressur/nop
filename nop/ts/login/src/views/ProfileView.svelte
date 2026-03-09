@@ -8,6 +8,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 <script lang="ts">
   import { deriveFrontEndHash } from '../argon';
   import { clearCsrfCache, csrfFetch, postJson } from '../api';
+  import { evaluatePasswordComplexity } from '../password_complexity';
   import type {
     LoginErrorResponse,
     LoginRuntimeConfig,
@@ -36,6 +37,17 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
   let saltResponse: ProfilePasswordSaltResponse | null = null;
   let saltExpiresAt = 0;
+  const passwordComplexityEnabled = config.passwordComplexityEnabled;
+
+  $: passwordComplexity = evaluatePasswordComplexity(newPassword);
+  $: passwordNote =
+    passwordComplexityEnabled &&
+    passwordComplexity.length > 3 &&
+    !passwordComplexity.valid
+      ? passwordComplexity.message
+      : '';
+  $: passwordRequirementsMet =
+    !passwordComplexityEnabled || passwordComplexity.valid;
 
   function resetPasswordFields() {
     currentPassword = '';
@@ -139,6 +151,12 @@ The code and documentation in this repository is licensed under the GNU Affero G
     }
     if (newPassword !== confirmPassword) {
       passwordMessage = 'New passwords do not match.';
+      passwordSuccess = false;
+      resetPasswordFields();
+      return;
+    }
+    if (passwordComplexityEnabled && !passwordComplexity.valid) {
+      passwordMessage = passwordComplexity.message;
       passwordSuccess = false;
       resetPasswordFields();
       return;
@@ -280,6 +298,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
             autocomplete="new-password"
           />
         </label>
+        {#if passwordNote}
+          <p class="field-note">{passwordNote}</p>
+        {/if}
         <label class="field">
           <span>Confirm new password</span>
           <input
@@ -293,7 +314,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           <button type="button" class="button button-secondary" on:click={cancelPasswordChange}>
             Cancel
           </button>
-          <button type="submit" class="button" disabled={passwordBusy}>
+          <button type="submit" class="button" disabled={passwordBusy || !passwordRequirementsMet}>
             {passwordBusy ? 'Updating…' : 'Update password'}
           </button>
         </div>

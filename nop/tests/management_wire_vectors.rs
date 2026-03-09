@@ -32,11 +32,15 @@ use nop::management::{
     ROLE_ACTION_DELETE_ERR, ROLE_ACTION_DELETE_OK, ROLE_ACTION_LIST, ROLE_ACTION_LIST_ERR,
     ROLE_ACTION_LIST_OK, ROLE_ACTION_SHOW, ROLE_ACTION_SHOW_ERR, ROLE_ACTION_SHOW_OK,
     ROLES_DOMAIN_ID, RoleAddRequest, RoleChangeRequest, RoleDeleteRequest, RoleListRequest,
-    RoleListResponse, RoleShowRequest, RoleShowResponse, SYSTEM_ACTION_LOGGING_CLEAR,
+    RoleListResponse, RoleShowRequest, RoleShowResponse, SEARCH_ACTION_FIND,
+    SEARCH_ACTION_FIND_ERR, SEARCH_ACTION_FIND_OK, SEARCH_ACTION_INVALIDATE,
+    SEARCH_ACTION_INVALIDATE_ERR, SEARCH_ACTION_INVALIDATE_OK, SEARCH_ACTION_RESET,
+    SEARCH_ACTION_RESET_ERR, SEARCH_ACTION_RESET_OK, SEARCH_DOMAIN_ID, SYSTEM_ACTION_LOGGING_CLEAR,
     SYSTEM_ACTION_LOGGING_CLEAR_ERR, SYSTEM_ACTION_LOGGING_CLEAR_OK, SYSTEM_ACTION_LOGGING_GET,
     SYSTEM_ACTION_LOGGING_GET_ERR, SYSTEM_ACTION_LOGGING_GET_OK, SYSTEM_ACTION_LOGGING_SET,
     SYSTEM_ACTION_LOGGING_SET_ERR, SYSTEM_ACTION_LOGGING_SET_OK, SYSTEM_ACTION_PING,
-    SYSTEM_ACTION_PONG, SYSTEM_ACTION_PONG_ERROR, SYSTEM_DOMAIN_ID, SetLoggingConfigRequest,
+    SYSTEM_ACTION_PONG, SYSTEM_ACTION_PONG_ERROR, SYSTEM_DOMAIN_ID, SearchFindRequest,
+    SearchFindResponse, SearchInvalidateRequest, SearchResetRequest, SetLoggingConfigRequest,
     TAG_ACTION_ADD, TAG_ACTION_ADD_ERR, TAG_ACTION_ADD_OK, TAG_ACTION_CHANGE,
     TAG_ACTION_CHANGE_ERR, TAG_ACTION_CHANGE_OK, TAG_ACTION_DELETE, TAG_ACTION_DELETE_ERR,
     TAG_ACTION_DELETE_OK, TAG_ACTION_LIST, TAG_ACTION_LIST_ERR, TAG_ACTION_LIST_OK,
@@ -444,12 +448,56 @@ fn wire_vectors_match_payloads() {
             ("response", CONTENT_DOMAIN_ID, CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR) => {
                 assert_vector::<MessageResponse>(&vector, &bytes)
             }
+            ("request", SEARCH_DOMAIN_ID, SEARCH_ACTION_FIND) => {
+                assert_vector::<SearchFindRequest>(&vector, &bytes)
+            }
+            ("request", SEARCH_DOMAIN_ID, SEARCH_ACTION_INVALIDATE) => {
+                assert_vector::<SearchInvalidateRequest>(&vector, &bytes)
+            }
+            ("request", SEARCH_DOMAIN_ID, SEARCH_ACTION_RESET) => {
+                assert_vector::<SearchResetRequest>(&vector, &bytes)
+            }
+            ("response", SEARCH_DOMAIN_ID, SEARCH_ACTION_FIND_OK) => {
+                assert_vector::<SearchFindResponse>(&vector, &bytes)
+            }
+            ("response", SEARCH_DOMAIN_ID, SEARCH_ACTION_FIND_ERR) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
+            ("response", SEARCH_DOMAIN_ID, SEARCH_ACTION_INVALIDATE_OK) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
+            ("response", SEARCH_DOMAIN_ID, SEARCH_ACTION_INVALIDATE_ERR) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
+            ("response", SEARCH_DOMAIN_ID, SEARCH_ACTION_RESET_OK) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
+            ("response", SEARCH_DOMAIN_ID, SEARCH_ACTION_RESET_ERR) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
             _ => panic!(
                 "Unhandled vector {} ({} {} {})",
                 vector.name, vector.direction, vector.domain_id, vector.action_id
             ),
         }
     }
+}
+
+#[test]
+fn search_find_request_decode_rejects_truncated_payload() {
+    let request = SearchFindRequest {
+        query: "search term".to_string(),
+        tags: Some(vec!["alpha".to_string()]),
+        markdown_only: false,
+    };
+    let mut writer = WireWriter::new();
+    request.encode(&mut writer).expect("encode request");
+    let mut bytes = writer.into_bytes();
+    bytes.pop();
+
+    let mut reader = WireReader::new(&bytes);
+    let decoded = SearchFindRequest::decode(&mut reader);
+    assert!(decoded.is_err());
 }
 
 fn assert_vector<T>(vector: &VectorEntry, bytes: &[u8])

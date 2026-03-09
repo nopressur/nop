@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
+pub mod content;
 pub(crate) mod parse_utils;
 pub mod roles;
+pub mod search;
 pub mod system;
 pub mod tags;
 pub mod users;
@@ -166,6 +168,8 @@ pub fn build_registry() -> Result<CliRegistry, CliError> {
     registry.register_domain(users::domain())?;
     registry.register_domain(roles::domain())?;
     registry.register_domain(tags::domain())?;
+    registry.register_domain(content::domain())?;
+    registry.register_domain(search::domain())?;
     Ok(registry)
 }
 

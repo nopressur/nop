@@ -26,6 +26,7 @@ persisted. It also defines scalability and performance requirements for user mut
     - legacy hash string
   - `roles` (array of strings)
   - `password_version` (u32; optional in YAML, defaulted to 1)
+- Role IDs are normalized to lowercase on load and persisted if normalization changes are applied.
 - In-memory records are stored as `User` with optional `PasswordProviderBlock` and
   `legacy_password_hash` fields.
 

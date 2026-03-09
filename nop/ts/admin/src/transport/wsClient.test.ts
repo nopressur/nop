@@ -61,6 +61,7 @@ describe("AdminWsClient", () => {
         outputLen: 1,
         saltLen: 1,
       },
+      passwordComplexityEnabled: true,
     });
   });
 

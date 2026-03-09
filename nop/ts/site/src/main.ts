@@ -5,6 +5,7 @@
 
 import { initSiteNavigation } from './navigation';
 import type { SiteNavigationController } from './navigation';
+import { initSearchOverlay } from './search';
 import { initUserMenu } from './userMenu';
 
 const stateKey = '__nopSiteNavigationInit' as const;
@@ -19,6 +20,7 @@ function start() {
   }
   win[stateKey] = true;
   win[controllerKey] = initSiteNavigation(document);
+  initSearchOverlay(document);
   initUserMenu();
 }
 

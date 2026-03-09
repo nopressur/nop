@@ -665,6 +665,7 @@ mod tests {
                 start_unibox: "https://duckduckgo.com?q=<QUERY>".to_string(),
             },
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }

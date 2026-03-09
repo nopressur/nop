@@ -42,20 +42,28 @@ impl FileUserStore {
         Ok(Self { users_file })
     }
 
-    fn parse_users(content: &str) -> Result<(UsersData, usize), IamError> {
+    fn parse_users(content: &str) -> Result<(UsersData, usize, bool), IamError> {
         let yaml_users: YamlUsersData = serde_yaml::from_str(content)
             .map_err(|e| IamError::ParseError(format!("Failed to parse users file: {}", e)))?;
 
         let mut missing_password_versions = 0;
+        let mut should_persist = false;
         let mut users_data = UsersData::new();
         for (email, yaml_user) in yaml_users {
             if yaml_user.password_version.is_none() {
                 missing_password_versions += 1;
             }
-            users_data.insert(email.clone(), yaml_user.into_user(email));
+            let normalized_roles = crate::roles::normalize_roles(&yaml_user.roles)
+                .map_err(|err| IamError::ParseError(err.to_string()))?;
+            if normalized_roles != yaml_user.roles {
+                should_persist = true;
+            }
+            let mut user = yaml_user.into_user(email.clone());
+            user.roles = normalized_roles;
+            users_data.insert(email.clone(), user);
         }
 
-        Ok((users_data, missing_password_versions))
+        Ok((users_data, missing_password_versions, should_persist))
     }
 
     fn serialize_users(users_data: &UsersData) -> Result<String, IamError> {
@@ -288,7 +296,7 @@ async fn sync_parent_dir_async(parent: &Path) -> Result<(), IamError> {
 impl UserStore for FileUserStore {
     fn load(&self) -> Result<UsersData, IamError> {
         let content = self.read_users_file()?;
-        let (users_data, missing_password_versions) = Self::parse_users(&content)?;
+        let (users_data, missing_password_versions, should_persist) = Self::parse_users(&content)?;
 
         if missing_password_versions > 0 {
             log::warn!(
@@ -296,6 +304,11 @@ impl UserStore for FileUserStore {
                 missing_password_versions,
                 DEFAULT_PASSWORD_VERSION
             );
+        }
+        if should_persist {
+            log::warn!("users.yaml roles normalized to lowercase; persisting updates");
+        }
+        if missing_password_versions > 0 || should_persist {
             self.save(&users_data)?;
         }
 

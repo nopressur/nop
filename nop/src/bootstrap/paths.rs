@@ -31,12 +31,16 @@ pub fn ensure_paths(root: &Path, config: &ValidatedConfig) -> Result<RuntimePath
     let state_dir = root_path.join("state");
     let state_sys_dir = state_dir.join("sys");
     let state_sc_dir = state_dir.join("sc");
+    let state_search_dir = state_sys_dir.join("search");
+    let state_search_index_dir = state_search_dir.join("index");
 
     ensure_dir(&content_dir)?;
     ensure_dir(&themes_dir)?;
     ensure_dir(&state_dir)?;
     ensure_dir(&state_sys_dir)?;
     ensure_dir(&state_sc_dir)?;
+    ensure_dir(&state_search_dir)?;
+    ensure_dir(&state_search_index_dir)?;
 
     if config.is_tls_enabled() {
         let tls_dir = state_sys_dir.join("tls");
@@ -240,8 +244,8 @@ mod tests {
     use crate::config::test_local_users_config;
     use crate::config::{
         AdminConfig, AppConfig, LoggingConfig, LoggingRotationConfig, NavigationConfig,
-        RenderingConfig, SecurityConfig, ServerConfig, ServerListenerConfig, ServerProtocol,
-        ServerRole, ShortcodeConfig, StreamingConfig, UploadConfig,
+        RenderingConfig, SearchConfig, SecurityConfig, ServerConfig, ServerListenerConfig,
+        ServerProtocol, ServerRole, ShortcodeConfig, StreamingConfig, UploadConfig,
     };
     use crate::config::{TlsConfig, TlsMode};
     use crate::content::flat_storage::read_sidecar;
@@ -302,6 +306,7 @@ mod tests {
             streaming: StreamingConfig { enabled: true },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: SearchConfig::default(),
             dev_mode: None,
         }
     }

@@ -44,6 +44,7 @@ const config: LoginRuntimeConfig = {
     outputLen: 32,
     saltLen: 16
   },
+  passwordComplexityEnabled: true,
   returnPath: '/admin',
   user: {
     email: 'alpha@example.com',
@@ -127,8 +128,8 @@ describe('ProfileView', () => {
     await waitFor(() => expect(screen.getByLabelText('Current password')).toBeInTheDocument());
 
     await userEvent.type(screen.getByLabelText('Current password'), 'current');
-    await userEvent.type(screen.getByLabelText('New password'), 'next');
-    await userEvent.type(screen.getByLabelText('Confirm new password'), 'next');
+    await userEvent.type(screen.getByLabelText('New password'), 'Nextpass1');
+    await userEvent.type(screen.getByLabelText('Confirm new password'), 'Nextpass1');
     await userEvent.click(screen.getByRole('button', { name: 'Update password' }));
 
     await waitFor(() => expect(screen.getByText('Updated.')).toBeInTheDocument());

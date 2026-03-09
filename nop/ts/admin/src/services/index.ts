@@ -7,6 +7,7 @@ export * from "./ace";
 export * from "./content";
 export * from "./response";
 export * from "./roles";
+export * from "./search";
 export * from "./system";
 export * from "./tags";
 export * from "./themes";

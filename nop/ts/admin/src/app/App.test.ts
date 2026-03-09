@@ -117,6 +117,7 @@ describe("App header view link", () => {
         outputLen: 32,
         saltLen: 16,
       },
+      passwordComplexityEnabled: true,
     });
     contentEditorViewPagePath.set(null);
   });

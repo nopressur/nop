@@ -1,6 +1,6 @@
 # ACME Automation
 
-Status: In Progress
+Status: Developed
 
 ## Objectives
 
@@ -10,29 +10,6 @@ Status: In Progress
 - Store all ACME state alongside TLS materials under `state/sys/tls/` (no subdirectories).
 - Eliminate OpenSSL usage and rely on OS CSPRNG via `getrandom` for entropy.
 - Define success as passing the Pebble HTTP-01 and DNS-01 test flows.
-
-## Action Plan
-
-Phase 1 — Documentation + Alignment
-- [x] Document the ACME requirements and constraints in this Caravaggio.
-- [x] Update TLS documentation and config examples to remove ACME subdirectories and external crates.
-- [x] Confirm config validation rules in code match the documented shape (Cloudflare-only DNS-01).
-
-Phase 2 — Core ACME Protocol (with unit tests early)
-- [x] Implement ACME directory discovery, nonce handling (including badNonce retry), JWS signing, account creation, order creation, authorization fetch, order finalization, and certificate download.
-- [x] Add unit tests for JWS signing, POST-as-GET behavior, and nonce retry handling.
-- [x] Run `scripts/cargo.sh test acme` to validate the unit coverage before proceeding to integrations.
-
-Phase 3 — Challenge Implementations (with Pebble tests early)
-- [x] Implement HTTP-01 challenge handling using the in-memory well-known registry.
-- [x] Implement DNS-01 using the Cloudflare API with optional propagation checks and resolver overrides.
-- [x] Add ACME integration tests using the Pebble stack (HTTP-01 + DNS-01); skip with a warning when Docker is unavailable.
-
-Phase 4 — TLS Integration + Cleanup
-- [x] Wire the in-house ACME client into TLS issuance/renewal flow and remove the external acmex crate + vendor patching.
-- [x] Update TLS storage to keep ACME state under `state/sys/tls/` with no cache subdirectory.
-- [x] Run `scripts/cargo.sh check` and re-run the targeted ACME tests after the integration changes.
-- [ ] Confirm readiness and mark this document `Developed`.
 
 ## Technical Details
 

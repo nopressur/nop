@@ -83,10 +83,16 @@ configuration.
   for access checks.
 - Available roles are sourced from the role store (`roles.yaml`) and are documented in
   `docs/content/role-management.md`. Admin UI pickers fetch them via the roles management domain.
+- Role identifiers are normalized to lowercase via the IAM roles module. Canonical role IDs must
+  match `^[a-z0-9_-]+$` after trimming; non-matching input is rejected during validation.
+- The IAM roles module is the single source of truth for:
+  - role normalization/validation (lowercase ASCII only, allowed characters, length, and count limits);
+  - tag-to-role resolution rules (union/intersect precedence);
+  - admin bypass semantics for access checks.
 - User role membership is still defined per user in `users.yaml` and is embedded in JWTs.
 - `PageMetaCache::user_has_access` enforces tag-based RBAC:
-  - Resolves effective roles from the object's tags.
-  - Checks if the user has at least one resolved role.
+  - Resolves effective roles from the object's tags using the IAM roles module.
+  - Checks access via IAM roles module helpers (admin bypass included).
 - Public handlers rely on `req.user_info()` for gated navigation; admin handlers use it for
   bootstrap data (for example, current user email) and authorization checks.
 - Admin WebSocket management sessions bind the authenticated user to the connection; server-side
@@ -103,7 +109,8 @@ configuration.
   - If any tag sets `intersect`, intersect rules apply across the full tag set.
   - If no tag sets `intersect` but at least one tag sets `union`, union rules apply.
 - **Resolved roles** are computed per object and stored in `PageMetaCache` for fast checks.
-- **Empty role set** means the object is inaccessible to all users (no public fallback).
+- **Empty role set** means the object is inaccessible to non-admin users (admins retain access).
+- **Invalid role IDs** in tags are ignored; if all declared roles are invalid, the object is treated as admin-only.
 - **No tags** means the object is public.
 - **Operational tips**:
   - Keep role lists short and re-use canonical names (`editors`, `managers`).
@@ -128,7 +135,8 @@ configuration.
   auto-bootstrap generate it).
 - Format, persistence, and migration behavior are documented in `docs/iam/user-store.md`.
 - Password provider block details are documented in `docs/iam/password-login.md`.
-- Role validation rules live in `docs/content/role-management.md`.
+- Role validation rules live in `docs/content/role-management.md`; role IDs are normalized to
+  lowercase on load and persisted when normalization changes are applied.
 
 #### Integration Notes
 
@@ -141,6 +149,8 @@ configuration.
 - Ensure new JSON APIs under admin scope require CSRF tokens (see `docs/infrastructure/csrf-protection.md`).
 - Tests can simulate auth by inserting `Claims` and `User` into request extensions or by using
   `JwtService` to generate real tokens.
+- Search ingestion and public search filtering use the IAM roles module for role resolution and
+  normalization; public access validation is enforced by `PageMetaCache` before returning results.
 
 <!--
 This file is part of the product NoPressure.

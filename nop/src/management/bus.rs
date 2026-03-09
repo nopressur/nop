@@ -17,6 +17,7 @@ const BUS_CHANNEL_DEPTH: usize = 64;
 pub struct ManagementBus {
     sender: mpsc::Sender<BusMessage>,
     registry: Arc<ManagementRegistry>,
+    context: Arc<ManagementContext>,
 }
 
 struct BusMessage {
@@ -30,19 +31,28 @@ impl ManagementBus {
         let registry = Arc::new(registry);
         let registry_for_task = registry.clone();
         let context = Arc::new(context);
+        let context_for_task = context.clone();
 
         tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
-                let result = dispatch(&registry_for_task, &context, message.request).await;
+                let result = dispatch(&registry_for_task, &context_for_task, message.request).await;
                 let _ = message.reply.send(result);
             }
         });
 
-        Self { sender, registry }
+        Self {
+            sender,
+            registry,
+            context,
+        }
     }
 
     pub fn registry(&self) -> Arc<ManagementRegistry> {
         self.registry.clone()
+    }
+
+    pub fn context(&self) -> Arc<ManagementContext> {
+        self.context.clone()
     }
 
     pub async fn send(
@@ -215,6 +225,7 @@ mod tests {
             streaming: StreamingConfig { enabled: false },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }

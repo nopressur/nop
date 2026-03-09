@@ -11,12 +11,14 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import Input from "../components/Input.svelte";
   import type { LoggingConfigResponse } from "../protocol/system";
   import { confirmDialog } from "../stores/confirmDialog";
+  import { resetSearch } from "../services/search";
   import { clearLogs, fetchLoggingConfig, updateLoggingConfig } from "../services/system";
   import { pushNotification } from "../stores/notifications";
 
   let loading = false;
   let saving = false;
   let clearing = false;
+  let resettingSearch = false;
   let loggingConfig: LoggingConfigResponse | null = null;
   let maxSizeMb = "";
   let maxFiles = "";
@@ -117,6 +119,29 @@ The code and documentation in this repository is licensed under the GNU Affero G
       pushNotification(message, "error");
     } finally {
       clearing = false;
+    }
+  }
+
+  async function handleResetSearch(): Promise<void> {
+    const confirmed = await confirmDialog({
+      title: "Reset search",
+      message: "Rebuild the search index from scratch? This may take a while.",
+      confirmLabel: "Reset search",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+    resettingSearch = true;
+    try {
+      const response = await resetSearch();
+      pushNotification(response.message, "success");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to reset search index";
+      pushNotification(message, "error");
+    } finally {
+      resettingSearch = false;
     }
   }
 </script>
@@ -222,5 +247,28 @@ The code and documentation in this repository is licensed under the GNU Affero G
         </Button>
       </div>
     {/if}
+  </div>
+
+  <div class="-mx-6 bg-surface px-4 py-4 md:mx-0 md:rounded-lg md:border md:border-border md:px-5 md:py-5 md:shadow-soft">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <p class="text-[11px] uppercase tracking-[0.3em] text-muted">Search</p>
+        <h3 class="mt-2 text-lg">Reset Index</h3>
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <div class="text-xs text-muted">
+        Rebuild the search index and clear failed ingestion entries.
+      </div>
+      <Button
+        variant="danger"
+        size="sm"
+        on:click={handleResetSearch}
+        disabled={resettingSearch || loading}
+      >
+        {resettingSearch ? "Resetting" : "Reset"}
+      </Button>
+    </div>
   </div>
 </section>

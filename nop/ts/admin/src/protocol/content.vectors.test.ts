@@ -12,6 +12,7 @@ import {
   parseBool,
   parseBytes,
   parseNumber,
+  parseOptionalBool,
   parseOptionalNumber,
   parseOptionalString,
   parseOptionalStringArray,
@@ -130,6 +131,7 @@ function encodeRequest(
     case CONTENT_ACTION_READ:
       return encodeContentReadRequest({
         id: parseString(payload.id, `${name}.id`),
+        streamContent: parseOptionalBool(payload.stream_content, `${name}.stream_content`),
       });
     case CONTENT_ACTION_UPDATE:
       return encodeContentUpdateRequest({
@@ -308,6 +310,9 @@ function normalizeContentReadResponse(response: {
   originalFilename: string | null;
   theme: string | null;
   content: string | null;
+  streamId: number | null;
+  chunkBytes: number | null;
+  sizeBytes: number | null;
 }): unknown {
   return {
     id: response.id,
@@ -321,6 +326,9 @@ function normalizeContentReadResponse(response: {
     original_filename: response.originalFilename,
     theme: response.theme,
     content: response.content,
+    stream_id: response.streamId,
+    chunk_bytes: response.chunkBytes,
+    size_bytes: response.sizeBytes,
   };
 }
 

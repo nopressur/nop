@@ -6,9 +6,13 @@
 import { render, waitFor } from "@testing-library/svelte";
 import { within } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { notificationMocks, routerMocks } from "./listViewTestMocks";
 import ContentListView from "./ContentListView.svelte";
+import {
+  resetContentListState,
+  setContentListState,
+} from "../stores/contentListState";
 
 const contentMocks = vi.hoisted(() => ({
   defaultAliasForFile: vi.fn(),
@@ -34,6 +38,10 @@ const contentMocks = vi.hoisted(() => ({
 const browserMocks = vi.hoisted(() => ({
   getLocationOrigin: vi.fn().mockReturnValue("https://example.test"),
   writeClipboardText: vi.fn().mockResolvedValue(true),
+}));
+
+const searchMocks = vi.hoisted(() => ({
+  findSearch: vi.fn().mockResolvedValue({ hits: [] }),
 }));
 
 vi.mock("../services/browser", async () => {
@@ -64,9 +72,18 @@ vi.mock("../services/tags", () => ({
   listTags: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("../services/search", () => ({
+  findSearch: searchMocks.findSearch,
+}));
+
 describe("ContentListView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContentListState();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("navigates when a row is clicked", async () => {
@@ -131,6 +148,103 @@ describe("ContentListView", () => {
         sortDirection: "desc",
       }),
     );
+  });
+
+  it("uses listContent for short queries", async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const { getAllByPlaceholderText } = render(ContentListView);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalled());
+
+    const input = getAllByPlaceholderText("Search")[0];
+    await user.clear(input);
+    await user.type(input, "ab");
+    await vi.advanceTimersByTimeAsync(450);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalledTimes(2));
+    expect(searchMocks.findSearch).not.toHaveBeenCalled();
+  });
+
+  it("uses findSearch for queries at the search threshold", async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const { getAllByPlaceholderText } = render(ContentListView);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalled());
+
+    const input = getAllByPlaceholderText("Search")[0];
+    await user.clear(input);
+    await user.type(input, "abc");
+    await vi.advanceTimersByTimeAsync(450);
+
+    await waitFor(() => expect(searchMocks.findSearch).toHaveBeenCalledTimes(1));
+    expect(contentMocks.listContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("sorts search results locally after findSearch", async () => {
+    searchMocks.findSearch.mockResolvedValueOnce({
+      hits: [
+        {
+          id: "z-id",
+          alias: "zeta",
+          title: "Zeta",
+          mime: "text/markdown",
+          tags: [],
+          navTitle: null,
+          navParentId: null,
+          navOrder: null,
+          originalFilename: null,
+          isMarkdown: true,
+        },
+        {
+          id: "a-id",
+          alias: "alpha",
+          title: "Alpha",
+          mime: "text/markdown",
+          tags: [],
+          navTitle: null,
+          navParentId: null,
+          navOrder: null,
+          originalFilename: null,
+          isMarkdown: true,
+        },
+      ],
+    });
+
+    setContentListState({
+      query: "alpha",
+      page: 1,
+      pageSize: 25,
+      markdownOnly: false,
+      tags: [],
+      sortField: "title",
+      sortDirection: "asc",
+    });
+
+    const { container } = render(ContentListView);
+
+    await waitFor(() => expect(searchMocks.findSearch).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(container.querySelectorAll('tr[data-row-index]').length).toBe(2);
+    });
+    const rows = container.querySelectorAll('tr[data-row-index]');
+    expect(rows[0].textContent).toContain("Alpha");
+    expect(rows[1].textContent).toContain("Zeta");
+  });
+
+  it("clears the search query on Escape", async () => {
+    const { getAllByPlaceholderText } = render(ContentListView);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalled());
+
+    const input = getAllByPlaceholderText("Search")[0] as HTMLInputElement;
+    await userEvent.clear(input);
+    await userEvent.type(input, "hello");
+    expect(input.value).toBe("hello");
+
+    await userEvent.keyboard("{Escape}");
+    expect(input.value).toBe("");
   });
 
   it("copies the ID URL from the actions", async () => {

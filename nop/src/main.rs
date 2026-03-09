@@ -24,6 +24,7 @@ mod management;
 mod public;
 mod roles;
 mod runtime_paths;
+mod search;
 mod security;
 mod templates;
 mod tls;
@@ -281,6 +282,29 @@ async fn run_server(
         release_tracker.current_hex()
     );
 
+    let search_startup = search::initialize(
+        &runtime_paths,
+        &validated_config.search,
+        crate::content::reserved_paths::ReservedPaths::from_config(&validated_config),
+        false,
+    )
+    .map_err(|error| {
+        eprintln!("❌ Failed to initialize search service: {}", error);
+        std::io::Error::other(error.to_string())
+    })?;
+    if let Some(reason) = search_startup.startup_reindex_reason {
+        info!("Search startup full reindex completed (reason={})", reason);
+    }
+    let search_service = search_startup.service;
+    search_service.warm_searcher();
+    search_service.warm_query_paths();
+    info!(
+        "Search service ready: workers={}, failed_ids={}, failed_ids_file={}",
+        search_service.partition_count(),
+        search_service.failed_ids_snapshot().len(),
+        search_service.failed_ids_file_path().display()
+    );
+
     let management_context =
         match management::ManagementContext::from_components_with_user_services_and_cache_and_logs(
             runtime_paths.root.clone(),
@@ -298,7 +322,8 @@ async fn run_server(
         };
     let management_context = management_context
         .with_upload_registry(upload_registry.clone())
-        .with_release_tracker(release_tracker.clone());
+        .with_release_tracker(release_tracker.clone())
+        .with_search_service(search_service.clone());
     let management_bus = management::ManagementBus::start(management_registry, management_context);
 
     let _management_socket =
@@ -405,6 +430,7 @@ async fn run_server(
         let app_state_for_app = app_state.clone();
         let user_services = user_services.clone();
         let page_cache = page_cache.clone();
+        let search_service_for_app = search_service.clone();
         let shortcode_registry = shortcode_registry.clone();
         let csrf_store = csrf_store.clone();
         let ws_ticket_store = ws_ticket_store.clone();
@@ -423,6 +449,7 @@ async fn run_server(
                 .app_data(web::Data::from(app_state_for_app))
                 .app_data(web::Data::from(user_services.clone()))
                 .app_data(web::Data::from(page_cache.clone()))
+                .app_data(web::Data::from(search_service_for_app.clone()))
                 .app_data(web::Data::from(shortcode_registry.clone()))
                 .app_data(web::Data::from(csrf_store.clone()))
                 .app_data(web::Data::from(ws_ticket_store.clone()))
@@ -603,8 +630,24 @@ fn log_startup_info(config: &ValidatedConfig, runtime_paths: &RuntimePaths) {
         "State sc directory (canonical): {}",
         runtime_paths.state_sc_dir.display()
     );
+    info!(
+        "State search directory (canonical): {}",
+        runtime_paths.state_search_dir.display()
+    );
+    info!(
+        "State search index directory (canonical): {}",
+        runtime_paths.state_search_index_dir.display()
+    );
+    info!(
+        "State search failed IDs file: {}",
+        runtime_paths.state_search_failed_ids_file.display()
+    );
     info!("Config file: {}", runtime_paths.config_file.display());
     info!("Users file: {}", runtime_paths.users_file.display());
+    info!(
+        "Search config: max_memory_mb={}, worker_count={}",
+        config.search.max_memory_mb, config.search.worker_count
+    );
     info!("Runtime root: {}", runtime_paths.root.display());
 
     // Log working directory for context

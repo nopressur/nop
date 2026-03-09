@@ -359,6 +359,7 @@ fn build_config() -> ValidatedConfig {
                 refresh_threshold_hours: 24,
             },
             password: PasswordHashingParams::default(),
+            password_complexity_enabled: true,
         }),
         navigation: NavigationConfig {
             max_dropdown_items: 7,
@@ -395,6 +396,7 @@ fn build_config() -> ValidatedConfig {
         streaming: StreamingConfig { enabled: true },
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
+        search: nop::config::SearchConfig::default(),
         dev_mode: None,
     }
 }

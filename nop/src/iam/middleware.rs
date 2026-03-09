@@ -120,10 +120,7 @@ where
                                         // Create new cookie with refreshed token
                                         refresh_cookie =
                                             Some(jwt_service.create_auth_cookie(&new_token));
-                                        log::debug!(
-                                            "JWT token refreshed for user: {}",
-                                            claims.sub
-                                        );
+                                        log::debug!("JWT token refreshed for user: {}", claims.sub);
                                     }
                                     Err(e) => {
                                         log::error!(

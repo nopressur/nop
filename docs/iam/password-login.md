@@ -156,6 +156,12 @@ password:
 - Failed verification must record a violation via `record_login_failure` and honor lockout behavior
   (see `docs/iam/security.md`).
 
+#### Password Complexity Policy
+
+- The password complexity policy is defined in `docs/iam/password-complexity.md`.
+- Password creation/update flows must apply the policy before hashing whenever plaintext is available.
+- Hash-only flows (admin/profile SPAs) rely on client-side enforcement aligned to the same policy.
+
 #### SPA integration
 
 - The password provider is a module in the login SPA and uses shared UI components for email

@@ -30,9 +30,9 @@ Status: Developed
 ### Validation and Conventions
 
 - Role IDs are trimmed; empty strings are invalid.
-- Allowed characters: `A-Z`, `a-z`, `0-9`, `-`, `_`.
+- Allowed characters: `a-z`, `0-9`, `-`, `_`.
 - Max length: 64 characters.
-- Role IDs are case-sensitive; normalization only trims whitespace.
+- Role IDs are normalized to lowercase during validation and persistence.
 - `admin` is reserved:
   - Must always exist.
   - Cannot be renamed or deleted.
@@ -41,7 +41,8 @@ Status: Developed
 
 - In-memory store backed by `roles.yaml`, using read/write locks and atomic write + rename.
 - Provides snapshot, add, rename, delete, and validate helpers.
-- RoleStore is the single source of truth for available roles.
+- RoleStore uses IAM role normalization/validation, persists lowercase role IDs, and rewrites the
+  on-disk file when normalization changes are applied.
 
 ### Management Domain (Roles)
 
@@ -107,8 +108,10 @@ All requests and responses require a monotonic `workflow_id` per connection and 
 
 ### Integration Points
 
-- Tag and user management must validate roles against RoleStore (unknown roles are rejected).
-- Auth flows continue to use user roles for JWT claims; role availability is sourced from RoleStore.
+- Tag and user management must validate roles against RoleStore (unknown roles are rejected) and
+  store normalized lowercase role IDs.
+- Auth flows continue to use user roles for JWT claims; role availability is sourced from RoleStore
+  and roles are normalized to lowercase before issuance.
 
 ### Testing Scope
 

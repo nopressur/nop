@@ -22,6 +22,7 @@ Choose the home that matches the primary purpose of the document and avoid dupli
 - standards: Coding and testing conventions, style rules, and contribution practices.
 - modules: Self-contained feature modules shared across the system (for example, shortcodes).
 - Do not create a `features` directory at any level. Feature documents live in the owning domain directory.
+- Management domain/action IDs must be recorded in `docs/management/wire-serialization.md`.
 
 ## Module Boundaries
 
@@ -32,6 +33,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 ### Content Storage and Public Model
 - `docs/infrastructure/storage.md` - On-disk content contract, sidecar metadata, and write expectations.
 - `docs/content/content-model.md` - Routing, rendering, navigation, and public access control rules.
+- `docs/content/search-ux.md` - Public search API contract and site TypeScript search overlay behavior.
 - `docs/content/themes.md` - Theme file format, palettes, and public theme rendering pipeline.
 - `docs/modules/shortcodes.md` - Parser syntax, built-in handlers, extension workflow.
 - `docs/content/public-rbac.md` - Public RBAC rules and access outcomes.
@@ -55,6 +57,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 - `docs/management/connector-cli-bypass.md` - CLI connector and bypass details.
 - `docs/management/troubleshooting.md` - Diagnostics, logs, and failure modes.
 - `docs/management/cli-architecture.md` - CLI wiring and auth flow.
+- `docs/management/search.md` - Search domain actions and admin/CLI integration.
 - `docs/admin/user-management.md` - Management bus user operations.
 
 ### DevOps & Platform
@@ -69,6 +72,8 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 - `docs/infrastructure/filesystem-security.md` - Canonical path enforcement and safe file creation.
 - `docs/infrastructure/daemonization.md` - Daemonized startup behavior, PID guards, and logging.
 - `docs/infrastructure/internal-utilities.md` - CSRF store, streaming ranges, MIME detection, logging helpers, color utilities.
+- `docs/infrastructure/search.md` - Infrastructure search architecture and Tantivy integration contract.
+- `docs/infrastructure/search-ingest.md` - Search ingestion requirements, mutation semantics, and retry behavior.
 
 ### IAM
 - `docs/iam/authz-authn.md` - Login flow, provider overview, role aggregation, config knobs.
@@ -76,6 +81,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 - `docs/iam/user-store.md` - Users.yaml storage format, persistence, and mutation backpressure.
 - `docs/iam/modular-login.md` - Modular login SPA architecture and provider framework.
 - `docs/iam/modular-profile.md` - Modular profile SPA architecture and provider modules.
+- `docs/iam/password-complexity.md` - Password complexity policy for admin and profile SPAs.
 - `docs/iam/password-login.md` - Argon2id password login flow requirements.
 - `docs/iam/security.md` - Login lockouts, IP tracking, and return-path validation.
 
@@ -85,7 +91,6 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 - `docs/content/tags.md` - Tag model, access rules, and listing behavior.
 - `docs/infrastructure/tls.md` - TLS feature behavior and validation rules.
 - `docs/infrastructure/acme.md` - ACME issuance, challenges, and provider requirements.
-- `docs/infrastructure/tantivy.md` - Tantivy in-memory directory example and notes.
 
 ### Core Runtime
 - `docs/infrastructure/main.md` - Startup flow, middleware wiring, and failure behavior.

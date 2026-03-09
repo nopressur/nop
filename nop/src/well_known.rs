@@ -225,6 +225,7 @@ mod tests {
             streaming: StreamingConfig { enabled: true },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }

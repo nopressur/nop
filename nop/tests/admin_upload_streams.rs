@@ -316,6 +316,7 @@ async fn markdown_stream_create_and_update() {
             3,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
+                stream_content: None,
             })),
         )
         .await
@@ -387,7 +388,10 @@ async fn markdown_stream_create_and_update() {
         .send(
             nop::management::next_connection_id(),
             6,
-            ManagementCommand::Content(ContentCommand::Read(ContentReadRequest { id: content_id })),
+            ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
+                id: content_id,
+                stream_content: None,
+            })),
         )
         .await
         .expect("read updated response");

@@ -6,7 +6,16 @@
 use actix_web::web;
 
 mod profile;
+mod search;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(web::scope("/api").route("/profile", web::get().to(profile::get_profile)));
+    cfg.service(
+        web::scope("/api")
+            .route("/profile", web::get().to(profile::get_profile))
+            .route("/search", web::get().to(search::search_public))
+            .route(
+                "/internal/search/reindex",
+                web::post().to(search::force_reindex),
+            ),
+    );
 }

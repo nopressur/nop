@@ -372,7 +372,8 @@ async fn handle_system_request(
         ManagementCommand::Users(_)
         | ManagementCommand::Tags(_)
         | ManagementCommand::Content(_)
-        | ManagementCommand::Roles(_) => Err(Box::new(SystemError::InvalidCommand)),
+        | ManagementCommand::Roles(_)
+        | ManagementCommand::Search(_) => Err(Box::new(SystemError::InvalidCommand)),
     }
 }
 
@@ -1130,6 +1131,7 @@ mod tests {
                         refresh_threshold_hours: 24,
                     },
                     password: PasswordHashingConfig::default(),
+                    password_complexity_disabled: false,
                 }),
                 oidc: None,
             },
@@ -1162,6 +1164,7 @@ mod tests {
             streaming: StreamingConfig { enabled: false },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }
@@ -1208,6 +1211,7 @@ mod tests {
             streaming: StreamingConfig { enabled: false },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }

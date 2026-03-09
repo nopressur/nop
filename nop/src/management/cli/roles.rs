@@ -62,6 +62,7 @@ fn parse_add(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Roles(RoleCommand::Add(RoleAddRequest { role })),
         success_actions: vec![DomainActionKey::new(ROLES_DOMAIN_ID, ROLE_ACTION_ADD_OK)],
+        stream_target: None,
     })
 }
 
@@ -93,6 +94,7 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
             new_role,
         })),
         success_actions: vec![DomainActionKey::new(ROLES_DOMAIN_ID, ROLE_ACTION_CHANGE_OK)],
+        stream_target: None,
     })
 }
 
@@ -105,6 +107,7 @@ fn parse_delete(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Roles(RoleCommand::Delete(RoleDeleteRequest { role })),
         success_actions: vec![DomainActionKey::new(ROLES_DOMAIN_ID, ROLE_ACTION_DELETE_OK)],
+        stream_target: None,
     })
 }
 
@@ -116,6 +119,7 @@ fn parse_list(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Roles(RoleCommand::List(RoleListRequest {})),
         success_actions: vec![DomainActionKey::new(ROLES_DOMAIN_ID, ROLE_ACTION_LIST_OK)],
+        stream_target: None,
     })
 }
 
@@ -128,5 +132,6 @@ fn parse_show(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Roles(RoleCommand::Show(RoleShowRequest { role })),
         success_actions: vec![DomainActionKey::new(ROLES_DOMAIN_ID, ROLE_ACTION_SHOW_OK)],
+        stream_target: None,
     })
 }

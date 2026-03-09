@@ -56,6 +56,7 @@ struct LoginSpaRuntimeConfig {
     return_path: Option<String>,
     providers: Vec<LoginProviderConfig>,
     password_front_end: LoginPasswordParams,
+    password_complexity_enabled: bool,
     user: Option<LoginSpaUser>,
 }
 
@@ -154,6 +155,7 @@ fn render_login_shell(
             output_len: local_config.password.front_end.output_len,
             salt_len: local_config.password.front_end.salt_len,
         },
+        password_complexity_enabled: local_config.password_complexity_enabled,
         user,
     };
 

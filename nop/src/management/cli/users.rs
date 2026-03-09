@@ -115,6 +115,7 @@ fn parse_add(args: &[String]) -> Result<CliCommand, CliError> {
             change_token: None,
         })),
         success_actions: vec![DomainActionKey::new(USERS_DOMAIN_ID, USER_ACTION_ADD_OK)],
+        stream_target: None,
     })
 }
 
@@ -180,6 +181,7 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
             roles,
         })),
         success_actions: vec![DomainActionKey::new(USERS_DOMAIN_ID, USER_ACTION_CHANGE_OK)],
+        stream_target: None,
     })
 }
 
@@ -192,6 +194,7 @@ fn parse_delete(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Users(UserCommand::Delete(UserDeleteRequest { email })),
         success_actions: vec![DomainActionKey::new(USERS_DOMAIN_ID, USER_ACTION_DELETE_OK)],
+        stream_target: None,
     })
 }
 
@@ -231,6 +234,7 @@ fn parse_password(args: &[String]) -> Result<CliCommand, CliError> {
             USERS_DOMAIN_ID,
             USER_ACTION_PASSWORD_SET_OK,
         )],
+        stream_target: None,
     })
 }
 
@@ -242,6 +246,7 @@ fn parse_list(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Users(UserCommand::List(UserListRequest {})),
         success_actions: vec![DomainActionKey::new(USERS_DOMAIN_ID, USER_ACTION_LIST_OK)],
+        stream_target: None,
     })
 }
 
@@ -254,6 +259,7 @@ fn parse_show(args: &[String]) -> Result<CliCommand, CliError> {
     Ok(CliCommand {
         command: ManagementCommand::Users(UserCommand::Show(UserShowRequest { email })),
         success_actions: vec![DomainActionKey::new(USERS_DOMAIN_ID, USER_ACTION_SHOW_OK)],
+        stream_target: None,
     })
 }
 

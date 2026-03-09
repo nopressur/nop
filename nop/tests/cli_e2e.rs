@@ -134,6 +134,7 @@ fn write_local_config(root: &Path) {
                     refresh_threshold_hours: 24,
                 },
                 password: PasswordHashingConfig::default(),
+                password_complexity_disabled: false,
             }),
             oidc: None,
         },
@@ -166,6 +167,7 @@ fn write_local_config(root: &Path) {
         streaming: StreamingConfig { enabled: false },
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
+        search: nop::config::SearchConfig::default(),
         dev_mode: None,
     };
 
@@ -233,6 +235,7 @@ fn write_oidc_config(root: &Path) {
         streaming: StreamingConfig { enabled: false },
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
+        search: nop::config::SearchConfig::default(),
         dev_mode: None,
     };
 
@@ -281,6 +284,33 @@ fn run_cli(root: &Path, args: &[&str]) -> std::process::Output {
 fn run_cli_owned(root: &Path, args: &[String]) -> std::process::Output {
     let args_ref: Vec<&str> = args.iter().map(|arg| arg.as_str()).collect();
     run_cli(root, &args_ref)
+}
+
+fn parse_content_id(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("Id: "))
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| {
+            panic!(
+                "Missing content id in CLI output. stdout='{}' stderr='{}'",
+                stdout, stderr
+            )
+        })
+}
+
+fn assert_cli_success(output: &std::process::Output) {
+    if output.status.success() {
+        return;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    panic!(
+        "CLI command failed. stdout='{}' stderr='{}'",
+        stdout, stderr
+    );
 }
 
 #[test]
@@ -430,6 +460,30 @@ fn cli_role_crud_roundtrip() {
 }
 
 #[test]
+fn cli_search_reset_completes() {
+    let fixture = TestFixtureRoot::new_unique("cli-search-reset").unwrap();
+    fixture.init_runtime_layout().unwrap();
+    write_local_config(fixture.path());
+
+    let output = run_cli(fixture.path(), &["search", "reset"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Search reset completed"));
+}
+
+#[test]
+fn cli_search_find_rejects_short_query() {
+    let fixture = TestFixtureRoot::new_unique("cli-search-short").unwrap();
+    fixture.init_runtime_layout().unwrap();
+    write_local_config(fixture.path());
+
+    let output = run_cli(fixture.path(), &["search", "find", "hi"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("search find query must be 3..=256 characters"));
+}
+
+#[test]
 fn cli_user_lifecycle() {
     let fixture = TestFixtureRoot::new_unique("cli-user-lifecycle").unwrap();
     fixture.init_runtime_layout().unwrap();
@@ -446,7 +500,7 @@ fn cli_user_lifecycle() {
             "--roles",
             "admin",
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(output.status.success());
@@ -458,7 +512,7 @@ fn cli_user_lifecycle() {
         PasswordRecordFixture::Provider(block) => &block.stored_hash,
         PasswordRecordFixture::LegacyHash(_) => panic!("expected provider password block"),
     };
-    assert_ne!(stored_hash, "secret");
+    assert_ne!(stored_hash, "Secret123");
     assert!(stored_hash.starts_with("$argon2id$"));
     let original_hash = stored_hash.to_string();
 
@@ -492,7 +546,7 @@ fn cli_user_lifecycle() {
             "password",
             "user@example.com",
             "--password",
-            "new-secret",
+            "NewSecret123",
         ],
     );
     assert!(output.status.success());
@@ -604,7 +658,7 @@ fn cli_user_queue_full_returns_retryable_error() {
             "--name",
             "Busy User",
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(!output.status.success());
@@ -632,7 +686,7 @@ fn cli_user_list_and_show() {
             "--roles",
             "admin",
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(output.status.success());
@@ -670,7 +724,7 @@ fn cli_user_change_clear_roles() {
             "--roles",
             "admin",
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(output.status.success());
@@ -715,7 +769,7 @@ fn cli_user_add_rejects_existing_user() {
             "--roles",
             "admin",
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(!output.status.success());
@@ -751,7 +805,7 @@ fn cli_user_size_limits() {
             "--name",
             "User One",
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(!output.status.success());
@@ -767,7 +821,7 @@ fn cli_user_size_limits() {
             "--name",
             "a",
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(!output.status.success());
@@ -784,7 +838,7 @@ fn cli_user_size_limits() {
             "--name",
             &long_name,
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(!output.status.success());
@@ -798,7 +852,7 @@ fn cli_user_size_limits() {
         "--name".to_string(),
         "User Three".to_string(),
         "--password".to_string(),
-        "secret".to_string(),
+        "Secret123".to_string(),
     ];
     for idx in 0..65 {
         args.push("--roles".to_string());
@@ -821,7 +875,7 @@ fn cli_user_size_limits() {
             "--roles",
             &long_role,
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(!output.status.success());
@@ -859,7 +913,7 @@ fn cli_user_rejects_oidc() {
             "--name",
             "User One",
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(!output.status.success());
@@ -910,7 +964,7 @@ fn cli_user_allows_special_characters() {
             "--roles",
             "role_admin",
             "--password",
-            "secret",
+            "Secret123",
         ],
     );
     assert!(output.status.success());
@@ -941,4 +995,215 @@ fn cli_system_ping_concurrent() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("Version"));
     }
+}
+
+#[test]
+fn cli_content_roundtrip_bypass() {
+    let fixture = TestFixtureRoot::new_unique("cli-content-bypass").unwrap();
+    fixture.init_runtime_layout().unwrap();
+    write_local_config(fixture.path());
+    let input_dir = tempfile::Builder::new()
+        .prefix("cli-content-input")
+        .tempdir()
+        .expect("tempdir");
+
+    let markdown_path = input_dir.path().join("intro.md");
+    std::fs::write(&markdown_path, "Hello from CLI\n").expect("write markdown");
+    let output = run_cli(
+        fixture.path(),
+        &[
+            "content",
+            "store",
+            "--title",
+            "Intro",
+            markdown_path.to_str().expect("path"),
+        ],
+    );
+    assert_cli_success(&output);
+    let markdown_id = parse_content_id(&output);
+
+    let updated_path = input_dir.path().join("intro-updated.md");
+    std::fs::write(&updated_path, "Updated from CLI\n").expect("write markdown update");
+    let output = run_cli_owned(
+        fixture.path(),
+        &vec![
+            "content".to_string(),
+            "change".to_string(),
+            markdown_id.clone(),
+            updated_path.to_str().expect("path").to_string(),
+        ],
+    );
+    assert_cli_success(&output);
+
+    let output = run_cli_owned(
+        fixture.path(),
+        &vec![
+            "content".to_string(),
+            "stream".to_string(),
+            markdown_id.clone(),
+            "-".to_string(),
+        ],
+    );
+    assert_cli_success(&output);
+    assert_eq!(output.stdout, b"Updated from CLI\n");
+
+    let output = run_cli_owned(
+        fixture.path(),
+        &vec![
+            "content".to_string(),
+            "delete".to_string(),
+            markdown_id.clone(),
+        ],
+    );
+    assert_cli_success(&output);
+
+    let output = run_cli_owned(
+        fixture.path(),
+        &vec![
+            "content".to_string(),
+            "stream".to_string(),
+            markdown_id,
+            "-".to_string(),
+        ],
+    );
+    assert!(!output.status.success());
+
+    let binary_path = input_dir.path().join("asset.bin");
+    let binary_bytes = vec![0u8, 3, 8, 42, 255];
+    std::fs::write(&binary_path, &binary_bytes).expect("write binary");
+    let output = run_cli(
+        fixture.path(),
+        &["content", "store", binary_path.to_str().expect("path")],
+    );
+    assert_cli_success(&output);
+    let binary_id = parse_content_id(&output);
+
+    let output_path = input_dir.path().join("asset-copy.bin");
+    let output = run_cli_owned(
+        fixture.path(),
+        &vec![
+            "content".to_string(),
+            "stream".to_string(),
+            binary_id.clone(),
+            output_path.to_str().expect("path").to_string(),
+        ],
+    );
+    assert_cli_success(&output);
+    let streamed = std::fs::read(&output_path).expect("read streamed output");
+    assert_eq!(streamed, binary_bytes);
+
+    let output = run_cli_owned(
+        fixture.path(),
+        &vec!["content".to_string(), "delete".to_string(), binary_id],
+    );
+    assert_cli_success(&output);
+}
+
+#[test]
+fn cli_content_roundtrip_socket() {
+    let temp = tempfile::Builder::new()
+        .prefix("cli-content-sock")
+        .tempdir_in("/tmp")
+        .expect("tempdir");
+    let root = temp.path();
+    write_local_config(root);
+    let input_dir = tempfile::Builder::new()
+        .prefix("cli-content-input")
+        .tempdir()
+        .expect("tempdir");
+
+    let validated_config = Config::load_and_validate(root).expect("validate config");
+    let runtime_paths = RuntimePaths::from_root(root, &validated_config).expect("runtime paths");
+    let registry = build_default_registry().expect("registry");
+    let context = ManagementContext::from_components(
+        runtime_paths.root.clone(),
+        Arc::new(validated_config),
+        runtime_paths.clone(),
+    )
+    .expect("context");
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = runtime.enter();
+    let bus = ManagementBus::start(registry, context);
+    let _socket = runtime
+        .block_on(async { ManagementSocket::start(&runtime_paths, bus.clone()).await })
+        .expect("socket");
+
+    std::fs::write(root.join("config.yaml"), "invalid: [").expect("break config");
+
+    let markdown_path = input_dir.path().join("socket.md");
+    std::fs::write(&markdown_path, "Socket markdown\n").expect("write markdown");
+    let output = run_cli(
+        root,
+        &[
+            "content",
+            "store",
+            "--title",
+            "Socket Intro",
+            markdown_path.to_str().expect("path"),
+        ],
+    );
+    assert_cli_success(&output);
+    let markdown_id = parse_content_id(&output);
+
+    let updated_path = input_dir.path().join("socket-updated.md");
+    std::fs::write(&updated_path, "Socket update\n").expect("write update");
+    let output = run_cli_owned(
+        root,
+        &vec![
+            "content".to_string(),
+            "change".to_string(),
+            markdown_id.clone(),
+            updated_path.to_str().expect("path").to_string(),
+        ],
+    );
+    assert_cli_success(&output);
+
+    let output = run_cli_owned(
+        root,
+        &vec![
+            "content".to_string(),
+            "stream".to_string(),
+            markdown_id.clone(),
+            "-".to_string(),
+        ],
+    );
+    assert_cli_success(&output);
+    assert_eq!(output.stdout, b"Socket update\n");
+
+    let output = run_cli_owned(
+        root,
+        &vec!["content".to_string(), "delete".to_string(), markdown_id],
+    );
+    assert_cli_success(&output);
+
+    let binary_path = input_dir.path().join("socket.bin");
+    let binary_bytes = vec![1u8, 2, 5, 9, 13, 21];
+    std::fs::write(&binary_path, &binary_bytes).expect("write binary");
+    let output = run_cli(
+        root,
+        &["content", "store", binary_path.to_str().expect("path")],
+    );
+    assert_cli_success(&output);
+    let binary_id = parse_content_id(&output);
+
+    let output_path = input_dir.path().join("socket-copy.bin");
+    let output = run_cli_owned(
+        root,
+        &vec![
+            "content".to_string(),
+            "stream".to_string(),
+            binary_id.clone(),
+            output_path.to_str().expect("path").to_string(),
+        ],
+    );
+    assert_cli_success(&output);
+    let streamed = std::fs::read(&output_path).expect("read streamed output");
+    assert_eq!(streamed, binary_bytes);
+
+    let output = run_cli_owned(
+        root,
+        &vec!["content".to_string(), "delete".to_string(), binary_id],
+    );
+    assert_cli_success(&output);
 }

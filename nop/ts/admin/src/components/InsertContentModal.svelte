@@ -11,6 +11,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import SearchInput from "./SearchInput.svelte";
   import Select from "./Select.svelte";
   import { listContent } from "../services/content";
+  import { findSearch } from "../services/search";
   import type { ContentListItem } from "../services/content";
   import {
     clearBrowserTimeout,
@@ -47,6 +48,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let lastSelectedId = "";
 
   const pageSize = 25;
+  const MIN_QUERY_CHARS = 3;
+  const MAX_QUERY_CHARS = 256;
 
   $: if (open && !wasOpen) {
     wasOpen = true;
@@ -142,20 +145,36 @@ The code and documentation in this repository is licensed under the GNU Affero G
       return;
     }
     const selectedId = selectedItem?.id ?? null;
+    const trimmedQuery = query.trim();
+    const hasSearchQuery = trimmedQuery.length >= MIN_QUERY_CHARS;
     loading = true;
     try {
-      const response = await listContent({
-        page,
-        pageSize,
-        sortField: "title",
-        sortDirection: "asc",
-        query: query.trim() ? query.trim() : null,
-        tags: tag ? [tag] : null,
-        markdownOnly: false,
-      });
-      items = response.items;
-      total = response.total;
-      page = response.page;
+      if (hasSearchQuery) {
+        const response = await findSearch({
+          query: trimmedQuery,
+          markdownOnly: false,
+          tags: tag ? [tag] : null,
+        });
+        const hits = response.hits;
+        total = hits.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        page = Math.min(Math.max(1, page), totalPages);
+        const start = (page - 1) * pageSize;
+        items = hits.slice(start, start + pageSize);
+      } else {
+        const response = await listContent({
+          page,
+          pageSize,
+          sortField: "title",
+          sortDirection: "asc",
+          query: null,
+          tags: tag ? [tag] : null,
+          markdownOnly: false,
+        });
+        items = response.items;
+        total = response.total;
+        page = response.page;
+      }
       if (items.length === 0) {
         selectedIndex = -1;
       } else if (selectedId) {
@@ -306,6 +325,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           bind:value={query}
           className="mt-2"
           placeholder="Type to search titles"
+          maxlength={MAX_QUERY_CHARS}
         />
       </div>
       <div>

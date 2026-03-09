@@ -10,6 +10,8 @@ const PROFILE_ENDPOINT = '/api/profile';
 const MENU_ROOT_SELECTOR = '[data-site-user-menu]';
 const CONTENT_ID_SELECTOR = '[data-site-content-id]';
 const EDIT_BUTTON_SELECTOR = '[data-site-edit-button]';
+const ADMIN_BUTTON_SELECTOR = '[data-site-admin-button]';
+const SEARCH_BUTTON_SELECTOR = '[data-site-search-button].site-search-trigger--desktop';
 
 type ProfileMenuItem = {
   key: string;
@@ -85,9 +87,21 @@ function buildEditButton(adminPath: string, contentId: string): HTMLElement {
   const link = document.createElement('a');
   link.className = 'button is-small';
   link.textContent = 'Edit';
-  link.target = '_blank';
-  link.rel = 'noopener';
   link.href = `${adminPath.replace(/\/$/, '')}/pages/edit/${encodeURIComponent(contentId)}`;
+
+  wrapper.appendChild(link);
+  return wrapper;
+}
+
+function buildAdminButton(adminHref: string): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'navbar-item';
+  wrapper.dataset.siteAdminButton = '';
+
+  const link = document.createElement('a');
+  link.className = 'button is-small';
+  link.textContent = 'Admin';
+  link.href = adminHref;
 
   wrapper.appendChild(link);
   return wrapper;
@@ -102,12 +116,14 @@ function getContentId(): string | null {
   return contentId;
 }
 
-function clearEditButton(root: HTMLElement) {
+function clearActionButtons(root: HTMLElement) {
   const parent = root.parentElement;
   if (!parent) {
     return;
   }
-  parent.querySelectorAll(EDIT_BUTTON_SELECTOR).forEach((button) => button.remove());
+  parent
+    .querySelectorAll(`${EDIT_BUTTON_SELECTOR}, ${ADMIN_BUTTON_SELECTOR}`)
+    .forEach((button) => button.remove());
 }
 
 function resetMenuRoot(root: HTMLElement) {
@@ -138,7 +154,7 @@ async function refreshUserMenu() {
   if (!root) {
     return;
   }
-  clearEditButton(root);
+  clearActionButtons(root);
 
   try {
     const response = await fetch(PROFILE_ENDPOINT, {
@@ -164,9 +180,14 @@ async function refreshUserMenu() {
     const adminItem = payload.menu_items.find((item) => item.key === 'admin');
     const contentId = getContentId();
     const parent = menu.parentElement;
-    if (adminItem && adminItem.href && contentId && parent) {
-      const editButton = buildEditButton(adminItem.href, contentId);
-      parent.insertBefore(editButton, menu);
+    if (adminItem && adminItem.href && parent) {
+      const insertionPoint = parent.querySelector<HTMLElement>(SEARCH_BUTTON_SELECTOR) ?? menu;
+      if (contentId) {
+        const editButton = buildEditButton(adminItem.href, contentId);
+        parent.insertBefore(editButton, insertionPoint);
+      }
+      const adminButton = buildAdminButton(adminItem.href);
+      parent.insertBefore(adminButton, insertionPoint);
     }
   } catch (error) {
     console.error('Failed to load profile menu:', error);

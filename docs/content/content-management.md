@@ -45,7 +45,11 @@ The file manager replaces hierarchical browsing with a flat, paginated list.
 #### Listing and Search
 
 - Display a paginated list of files.
-- Support title-only search (no full-text search).
+- Use management search (`search.find`) for queries between 3 and 256 characters (inclusive);
+  shorter queries do not issue search requests and show the unfiltered list.
+- Search results prioritize title matches and then append relevance-ranked hits from the search index;
+  the UI still applies the selected column sort after receiving results.
+- Search results are capped at 128 hits (domain limit) and then paginated client-side.
 - Markdown-only toggle (default view shows all files).
 - Tags filter supports multi-select and matches all selected tags.
 - Tag filter selections persist in-memory across list/editor navigation and must not be cleared while
@@ -127,7 +131,8 @@ Validation:
 #### Selection and Editing
 
 - Clicking a Markdown entry opens the editor with the Markdown body.
-- Clicking a non-Markdown entry opens metadata-only details with a download link.
+- Clicking a non-Markdown entry opens metadata-only details with a download link; images also render
+  an inline preview.
 - Copy URL actions are available next to the editor toolbar buttons (see **Copy URL actions** above).
 - The editor header shows sidecar metadata:
 - Alias (editable).
@@ -219,6 +224,41 @@ Insertion behavior on drop:
 
 - All file CRUD, listing, and metadata edits must flow through the management bus.
 - The admin UI must not perform direct filesystem access or use direct upload endpoints.
+
+### CLI Integration
+
+- CLI file operations must use the content management bus domain and never access the filesystem directly.
+- Command syntax and CLI examples live in `CLI.md`; this section only defines behavior and constraints.
+- `content store` sends `ContentUploadRequest` with ID-first metadata rules (alias optional) and the file bytes as the payload.
+- `content store` derives `mime` from the file contents on the server side (no CLI flag).
+- `content store` passes tags as tag IDs and relies on existing validation/limits.
+- `content store` takes a required positional file argument (last argument). Use `-` to read from standard input.
+- `content store` requires a file extension when a filename is provided and fails when missing.
+- `content store` requires `--title` for markdown content.
+- `content store` sets `original_filename` from the provided file name. When reading from standard input, it generates `cli-store-YYYY-MM-DD-HH-MM-SS.<ext>` where `<ext>` is derived from the detected MIME type (fallback `application/octet-stream` uses `.bin`).
+- `content change` targets content by ID only.
+- `content change` allows metadata-only updates (alias/title/tags/theme/nav fields as applicable).
+- `content change` accepts an optional positional file argument (last argument) for markdown body updates only; when omitted, it performs a metadata-only change. Use `-` to read markdown content from standard input.
+- `content change` rejects content body updates for non-markdown objects (the management bus already enforces this rule).
+- `content change` requires markdown file input (`.md`/`.markdown`) when a file path is supplied and rejects empty file/stdin content.
+- `content stream` reads content by ID and writes to the required file argument; use `-` to write to standard output.
+- `content stream` returns markdown body exactly as `content.read` does today (no change).
+- `content stream` sets `stream_content` on `content.read` so binary bytes are streamed over the management connectors.
+- `content delete` deletes by ID only and returns the management bus response message.
+- CLI execution must work via the socket connector when the daemon is running.
+- CLI execution must work via the CLI bypass connector when no socket is available.
+
+Field applicability:
+
+| Field | Applies To | Notes |
+| --- | --- | --- |
+| Alias | Markdown + non-markdown | Optional; must pass canonicalization and reserved-path rules. |
+| Title | Markdown + non-markdown | Required for markdown; stored in the sidecar for display. |
+| Tags | Markdown + non-markdown | Optional list of tag IDs. |
+| Theme | Markdown | Used by the renderer; omit for non-markdown assets. |
+| Navbar title | Markdown | Required to include a page in navigation. |
+| Navbar parent | Markdown | Only valid when navbar title is set; must reference a root navbar item. |
+| Navbar order | Markdown | Only valid when navbar title is set. |
 
 ### Markdown Create/Update vs Binary Uploads
 

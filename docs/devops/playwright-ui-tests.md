@@ -69,6 +69,12 @@ Status: Developed
   - `humanType()` and `humanClick()` to enforce humanized input rules.
   - `loginAs()` helpers that reuse seeded users instead of ad-hoc data.
 
+### Search Fixtures
+
+`seedFixtureData()` seeds dedicated search fixtures used by E2E suites:
+table and HTML bodies that include visible text plus attribute/URL tokens, tagged with `docs`
+so admin tag filters and insert defaults behave like real content.
+
 ### E2E Coverage (Initial Baseline)
 
 - **00 smoke test**: render a known public page and validate a stable element to prove the harness.

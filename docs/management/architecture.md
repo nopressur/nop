@@ -95,6 +95,9 @@ Status: Developed
 | System | 0 | Core | Reserved for liveness and control |
 | Users | 1 | User management | Initial user operations |
 | Tags | 11 | Tag management | Tag CRUD/list/show |
+| Content | 12 | Content management | List/read/update/delete/upload + streaming + binary uploads |
+| Roles | 13 | Role management | Role CRUD/list/show |
+| Search | 21 | Search management | Search query + reset/invalidate |
 
 #### System Action Table
 

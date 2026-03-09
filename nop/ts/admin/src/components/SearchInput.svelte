@@ -6,7 +6,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 -->
 
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onMount } from "svelte";
 
   export let value = "";
   export let placeholder = "";
@@ -16,6 +16,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   export let id = "";
   export let error = "";
   export let invalid = false;
+  export let autofocus = false;
 
   let hasError = false;
   let isInvalid = false;
@@ -37,6 +38,12 @@ The code and documentation in this repository is licensed under the GNU Affero G
     dispatch("change", value);
     inputRef?.focus();
   }
+
+  onMount(() => {
+    if (autofocus) {
+      inputRef?.focus();
+    }
+  });
 </script>
 
 <div class="w-full">

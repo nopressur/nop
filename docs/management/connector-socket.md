@@ -16,6 +16,8 @@ Status: Developed
 
 - Management requests and responses use the wire serialization defined in
   `docs/management/wire-serialization.md`.
+- Socket protocol streaming extensions for content downloads are specified by the action plan in
+  `docs/content/content-management.md`.
 - Domain/action IDs are encoded as `u32` values; `workflow_id` is a required `u32` for
   request correlation and multi-stage flows.
 - Each connector allocates a sequential `connection_id` (`u32`) per accepted connection and
@@ -180,11 +182,27 @@ Status: Developed
 
 #### Content CRUD (Management Bus)
 
+##### Actions (Content Domain)
+
+- `content_list` (request id `1`)
+  - Response: `content_list_ok` (`101`) or `_err` (`102`)
+- `content_read` (request id `2`)
+  - Response: `content_read_ok` (`201`) or `_err` (`202`)
+- `content_update` (request id `3`)
+  - Response: `content_update_ok` (`301`) or `_err` (`302`)
+- `content_delete` (request id `4`)
+  - Response: `content_delete_ok` (`401`) or `_err` (`402`)
+- `content_upload` (request id `5`)
+  - Response: `content_upload_ok` (`501`) or `_err` (`502`)
+- `content_nav_index` (request id `6`)
+  - Response: `content_nav_index_ok` (`601`) or `_err` (`602`)
+
 Read request payload:
 
 ```
 ContentReadRequest {
   id: String,
+  stream_content: Option<bool>,
 }
 ```
 
@@ -228,6 +246,32 @@ ContentUploadRequest {
   content: Vec<u8>,
 }
 ```
+
+Content read response payload:
+
+```
+ContentReadResponse {
+  id: String,
+  alias: String,
+  title: Option<String>,
+  mime: String,
+  tags: Vec<String>,
+  nav_title: Option<String>,
+  nav_parent_id: Option<String>,
+  nav_order: Option<i32>,
+  original_filename: Option<String>,
+  theme: Option<String>,
+  content: Option<String>,
+  stream_id: Option<u32>,
+  chunk_bytes: Option<u32>,
+  size_bytes: Option<u64>,
+}
+```
+Notes:
+- `stream_content` defaults to `false` when omitted.
+- Markdown content always returns `content` regardless of `stream_content`.
+- When `stream_content` is true for non-markdown content, the response includes `stream_id`,
+  `chunk_bytes`, and `size_bytes`, followed by `StreamChunk` frames over the same connection.
 
 #### Binary Upload Protocol
 

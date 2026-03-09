@@ -6,6 +6,10 @@
 import { cleanup, render, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  clearAdminRuntimeConfig,
+  setAdminRuntimeConfig,
+} from "../config/runtime";
 import UserEditorView from "./UserEditorView.svelte";
 
 type RouteState = {
@@ -81,10 +85,27 @@ describe("UserEditorView", () => {
       query: new URLSearchParams(),
       fullPath: "/admin/users/new",
     });
+    setAdminRuntimeConfig({
+      adminPath: "/admin",
+      appName: "NoPressure",
+      csrfTokenPath: "/admin/csrf-token-api",
+      wsPath: "/admin/ws",
+      wsTicketPath: "/admin/ws-ticket",
+      userManagementEnabled: true,
+      passwordFrontEnd: {
+        memoryKib: 64,
+        iterations: 2,
+        parallelism: 1,
+        outputLen: 32,
+        saltLen: 16,
+      },
+      passwordComplexityEnabled: true,
+    });
   });
 
   afterEach(() => {
     cleanup();
+    clearAdminRuntimeConfig();
   });
 
   it("saves on Enter", async () => {
@@ -97,8 +118,8 @@ describe("UserEditorView", () => {
     const confirmInput = await findByLabelText("Confirm Password");
 
     await userEvent.type(emailInput, "user@example.com");
-    await userEvent.type(passwordInput, "secret123");
-    await userEvent.type(confirmInput, "secret123");
+    await userEvent.type(passwordInput, "Secret123");
+    await userEvent.type(confirmInput, "Secret123");
 
     confirmInput.focus();
     await userEvent.keyboard("{Enter}");
@@ -107,7 +128,7 @@ describe("UserEditorView", () => {
       expect(userMocks.createUser).toHaveBeenCalledWith({
         email: "user@example.com",
         name: "",
-        password: "secret123",
+        password: "Secret123",
         roles: [],
       }),
     );

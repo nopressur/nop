@@ -369,6 +369,7 @@ mod tests {
                 refresh_threshold_hours: 24,
             },
             password: test_password_params(),
+            password_complexity_enabled: true,
         });
         config.security.max_violations = 10;
         config.security.cooldown_seconds = 60;

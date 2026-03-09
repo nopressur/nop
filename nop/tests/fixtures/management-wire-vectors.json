@@ -902,9 +902,21 @@
       "domain_id": 12,
       "action_id": 2,
       "payload": {
-        "id": "0000000000000001"
+        "id": "0000000000000001",
+        "stream_content": null
       },
-      "hex": "1000000030303030303030303030303030303031"
+      "hex": "001000000030303030303030303030303030303031"
+    },
+    {
+      "name": "content.read.stream.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 2,
+      "payload": {
+        "id": "0000000000000004",
+        "stream_content": true
+      },
+      "hex": "01100000003030303030303030303030303030303401"
     },
     {
       "name": "content.update.request",
@@ -1112,6 +1124,7 @@
       "action_id": 201,
       "payload": {
         "alias": "docs/intro",
+        "chunk_bytes": null,
         "content": "# Intro",
         "id": "1",
         "mime": "text/markdown",
@@ -1119,13 +1132,38 @@
         "nav_parent_id": null,
         "nav_title": "Intro",
         "original_filename": "intro.md",
+        "size_bytes": null,
+        "stream_id": null,
         "tags": [
           "guide"
         ],
         "theme": "default",
         "title": "Intro"
       },
-      "hex": "7b01000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d640700000064656661756c74070000002320496e74726f"
+      "hex": "7b0001000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d640700000064656661756c74070000002320496e74726f"
+    },
+    {
+      "name": "content.read_stream_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 201,
+      "payload": {
+        "alias": "assets/sample.bin",
+        "chunk_bytes": 64495,
+        "content": null,
+        "id": "4",
+        "mime": "application/octet-stream",
+        "nav_order": null,
+        "nav_parent_id": null,
+        "nav_title": null,
+        "original_filename": "sample.bin",
+        "size_bytes": 64,
+        "stream_id": 42,
+        "tags": [],
+        "theme": null,
+        "title": null
+      },
+      "hex": "90030100000034110000006173736574732f73616d706c652e62696e180000006170706c69636174696f6e2f6f637465742d73747265616d000000000a00000073616d706c652e62696e2a000000effb00004000000000000000"
     },
     {
       "name": "content.read_err.response",
@@ -1384,6 +1422,114 @@
         "message": "update stream commit failed"
       },
       "hex": "1b0000007570646174652073747265616d20636f6d6d6974206661696c6564"
+    },
+    {
+      "name": "search.find.request",
+      "direction": "request",
+      "domain_id": 21,
+      "action_id": 1,
+      "payload": {
+        "markdown_only": true,
+        "query": "alpha docs",
+        "tags": [
+          "guide",
+          "intro"
+        ]
+      },
+      "hex": "010a000000616c70686120646f6373010200000005000000677569646505000000696e74726f"
+    },
+    {
+      "name": "search.invalidate.request",
+      "direction": "request",
+      "domain_id": 21,
+      "action_id": 2,
+      "payload": {
+        "id": "0123456789abcdef"
+      },
+      "hex": "1000000030313233343536373839616263646566"
+    },
+    {
+      "name": "search.reset.request",
+      "direction": "request",
+      "domain_id": 21,
+      "action_id": 3,
+      "payload": {},
+      "hex": ""
+    },
+    {
+      "name": "search.find_ok.response",
+      "direction": "response",
+      "domain_id": 21,
+      "action_id": 101,
+      "payload": {
+        "hits": [
+          {
+            "alias": "docs/intro",
+            "id": "1",
+            "is_markdown": true,
+            "mime": "text/markdown",
+            "nav_order": 1,
+            "nav_parent_id": null,
+            "nav_title": "Intro",
+            "original_filename": "intro.md",
+            "tags": [
+              "guide"
+            ],
+            "title": "Intro"
+          }
+        ]
+      },
+      "hex": "010000001b01000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d6401"
+    },
+    {
+      "name": "search.find_err.response",
+      "direction": "response",
+      "domain_id": 21,
+      "action_id": 102,
+      "payload": {
+        "message": "search find error"
+      },
+      "hex": "110000007365617263682066696e64206572726f72"
+    },
+    {
+      "name": "search.invalidate_ok.response",
+      "direction": "response",
+      "domain_id": 21,
+      "action_id": 201,
+      "payload": {
+        "message": "search invalidated"
+      },
+      "hex": "1200000073656172636820696e76616c696461746564"
+    },
+    {
+      "name": "search.invalidate_err.response",
+      "direction": "response",
+      "domain_id": 21,
+      "action_id": 202,
+      "payload": {
+        "message": "search invalidate error"
+      },
+      "hex": "1700000073656172636820696e76616c6964617465206572726f72"
+    },
+    {
+      "name": "search.reset_ok.response",
+      "direction": "response",
+      "domain_id": 21,
+      "action_id": 301,
+      "payload": {
+        "message": "search reset ok"
+      },
+      "hex": "0f000000736561726368207265736574206f6b"
+    },
+    {
+      "name": "search.reset_err.response",
+      "direction": "response",
+      "domain_id": 21,
+      "action_id": 302,
+      "payload": {
+        "message": "search reset error"
+      },
+      "hex": "12000000736561726368207265736574206572726f72"
     }
   ]
 }

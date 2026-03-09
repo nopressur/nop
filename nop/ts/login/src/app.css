@@ -122,6 +122,12 @@ textarea {
   color: var(--muted);
 }
 
+.field-note {
+  margin-top: -4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .input {
   width: 100%;
   padding: 12px 14px;

@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
+use crate::content::flat_storage::{blob_path, parse_content_id_hex};
+use crate::content::reserved_paths::ReservedPaths;
 use crate::management::bus::ManagementBus;
 use crate::management::cli::CliError;
 use crate::management::core::{ManagementCommand, ManagementResponse};
@@ -10,18 +12,37 @@ use crate::management::errors::ManagementError;
 use crate::management::registry::DomainActionKey;
 use crate::management::socket::SocketError;
 use crate::management::socket::client::{SocketClient, SocketConnect};
+use crate::management::ws::{StreamAckFrame, WsFrame};
 use crate::management::{
     ManagementContext, ResponsePayload, WorkflowCounter, build_default_registry, next_connection_id,
 };
+use crate::public::page_meta_cache::PageMetaCache;
 use std::path::{Path, PathBuf};
+use tokio::io::AsyncWriteExt;
+
+#[derive(Debug, Clone)]
+pub enum ContentStreamTarget {
+    Stdout,
+    File(PathBuf),
+}
 
 #[derive(Debug)]
 pub struct CliCommand {
     pub command: ManagementCommand,
     pub success_actions: Vec<DomainActionKey>,
+    pub stream_target: Option<ContentStreamTarget>,
 }
 
 pub async fn execute(runtime_root: &Path, cli_command: CliCommand) -> Result<i32, CliError> {
+    let CliCommand {
+        command,
+        success_actions,
+        stream_target,
+    } = cli_command;
+    if let Some(stream_target) = stream_target {
+        return execute_stream(runtime_root, command, &success_actions, stream_target).await;
+    }
+
     let socket_path = socket_path(runtime_root);
     if socket_path.exists() {
         let registry =
@@ -29,8 +50,8 @@ pub async fn execute(runtime_root: &Path, cli_command: CliCommand) -> Result<i32
         let registry = std::sync::Arc::new(registry);
         match SocketClient::connect(&socket_path, registry.clone()).await? {
             SocketConnect::Ready(mut client) => {
-                let response = client.send(cli_command.command).await?;
-                return Ok(output_response(&response, &cli_command.success_actions));
+                let response = client.send(command).await?;
+                return Ok(output_response(&response, &success_actions));
             }
             SocketConnect::Stale => {
                 std::fs::remove_file(&socket_path).map_err(|err| {
@@ -47,8 +68,251 @@ pub async fn execute(runtime_root: &Path, cli_command: CliCommand) -> Result<i32
         }
     }
 
-    let response = send_via_bypass(runtime_root, cli_command.command).await?;
-    Ok(output_response(&response, &cli_command.success_actions))
+    let response = send_via_bypass(runtime_root, command).await?;
+    Ok(output_response(&response, &success_actions))
+}
+
+async fn execute_stream(
+    runtime_root: &Path,
+    command: ManagementCommand,
+    success_actions: &[DomainActionKey],
+    stream_target: ContentStreamTarget,
+) -> Result<i32, CliError> {
+    let socket_path = socket_path(runtime_root);
+    if socket_path.exists() {
+        let registry =
+            build_default_registry().map_err(|err| CliError::connector(err.to_string()))?;
+        let registry = std::sync::Arc::new(registry);
+        match SocketClient::connect(&socket_path, registry.clone()).await? {
+            SocketConnect::Ready(mut client) => {
+                return stream_via_socket(&mut client, command, success_actions, stream_target)
+                    .await;
+            }
+            SocketConnect::Stale => {
+                std::fs::remove_file(&socket_path).map_err(|err| {
+                    CliError::connector(format!(
+                        "Failed to remove stale socket {}: {}",
+                        socket_path.display(),
+                        err
+                    ))
+                })?;
+            }
+            SocketConnect::Incompatible(message) => {
+                return Err(CliError::connector(message));
+            }
+        }
+    }
+
+    stream_via_bypass(runtime_root, command, success_actions, stream_target).await
+}
+
+type StreamWriter = Box<dyn tokio::io::AsyncWrite + Unpin + Send>;
+
+async fn open_stream_writer(target: &ContentStreamTarget) -> Result<StreamWriter, CliError> {
+    match target {
+        ContentStreamTarget::Stdout => Ok(Box::new(tokio::io::stdout())),
+        ContentStreamTarget::File(path) => {
+            let file = tokio::fs::File::create(path).await.map_err(|err| {
+                CliError::connector(format!(
+                    "Failed to create output file {}: {}",
+                    path.display(),
+                    err
+                ))
+            })?;
+            Ok(Box::new(file))
+        }
+    }
+}
+
+async fn stream_via_socket(
+    client: &mut SocketClient,
+    command: ManagementCommand,
+    success_actions: &[DomainActionKey],
+    stream_target: ContentStreamTarget,
+) -> Result<i32, CliError> {
+    let response = client.send(command).await?;
+    let key = DomainActionKey::new(response.domain_id, response.action_id);
+    if !success_actions.contains(&key) {
+        return Ok(output_response(&response, success_actions));
+    }
+
+    let payload = match response.payload {
+        ResponsePayload::ContentRead(payload) => payload,
+        other => {
+            return Err(CliError::connector(format!(
+                "Unexpected content stream response: {:?}",
+                other
+            )));
+        }
+    };
+
+    let mut writer = open_stream_writer(&stream_target).await?;
+    if let Some(content) = payload.content {
+        writer
+            .write_all(content.as_bytes())
+            .await
+            .map_err(|err| CliError::connector(format!("Failed to write content: {}", err)))?;
+        writer
+            .flush()
+            .await
+            .map_err(|err| CliError::connector(format!("Failed to flush output: {}", err)))?;
+        return Ok(0);
+    }
+
+    let stream_id = payload.stream_id.ok_or_else(|| {
+        CliError::connector("Missing stream_id in content stream response".to_string())
+    })?;
+    let chunk_bytes = payload.chunk_bytes.ok_or_else(|| {
+        CliError::connector("Missing chunk_bytes in content stream response".to_string())
+    })?;
+    let expected_size = payload.size_bytes.ok_or_else(|| {
+        CliError::connector("Missing size_bytes in content stream response".to_string())
+    })?;
+
+    let mut received = 0u64;
+    let mut expected_seq = 0u32;
+    loop {
+        let frame = client.read_stream_frame().await?;
+        match frame {
+            WsFrame::StreamChunk(chunk) => {
+                if chunk.stream_id != stream_id {
+                    return Err(CliError::connector(format!(
+                        "Unexpected stream id {} (expected {})",
+                        chunk.stream_id, stream_id
+                    )));
+                }
+                if chunk.seq != expected_seq {
+                    return Err(CliError::connector(format!(
+                        "Unexpected stream sequence {} (expected {})",
+                        chunk.seq, expected_seq
+                    )));
+                }
+                if chunk.payload.len() > chunk_bytes as usize {
+                    return Err(CliError::connector(
+                        "Stream chunk exceeds negotiated size".to_string(),
+                    ));
+                }
+                writer.write_all(&chunk.payload).await.map_err(|err| {
+                    CliError::connector(format!("Failed to write stream chunk: {}", err))
+                })?;
+                received = received.saturating_add(chunk.payload.len() as u64);
+                client
+                    .write_stream_frame(&WsFrame::Ack(StreamAckFrame {
+                        stream_id,
+                        seq: chunk.seq,
+                    }))
+                    .await?;
+                if chunk.is_final() {
+                    break;
+                }
+                expected_seq = expected_seq.saturating_add(1);
+            }
+            other => {
+                return Err(CliError::connector(format!(
+                    "Unexpected stream frame: {:?}",
+                    other
+                )));
+            }
+        }
+    }
+
+    writer
+        .flush()
+        .await
+        .map_err(|err| CliError::connector(format!("Failed to flush output: {}", err)))?;
+    if received != expected_size {
+        return Err(CliError::connector(format!(
+            "Stream size mismatch (expected {}, received {})",
+            expected_size, received
+        )));
+    }
+    Ok(0)
+}
+
+async fn stream_via_bypass(
+    runtime_root: &Path,
+    command: ManagementCommand,
+    success_actions: &[DomainActionKey],
+    stream_target: ContentStreamTarget,
+) -> Result<i32, CliError> {
+    let registry = build_default_registry().map_err(|err| CliError::connector(err.to_string()))?;
+    let context = ManagementContext::from_runtime_root(runtime_root)
+        .map_err(|err| CliError::connector(err.to_string()))?;
+    validate_command(&registry, &command)?;
+    let bus = ManagementBus::start(registry, context.clone());
+    let connection_id = next_connection_id();
+    let workflow_id = WorkflowCounter::new()
+        .next_id()
+        .map_err(|err| CliError::connector(err.to_string()))?;
+    let response = bus
+        .send(connection_id, workflow_id, command)
+        .await
+        .map_err(|err| CliError::connector(err.to_string()))?;
+
+    let key = DomainActionKey::new(response.domain_id, response.action_id);
+    if !success_actions.contains(&key) {
+        return Ok(output_response(&response, success_actions));
+    }
+
+    let payload = match response.payload {
+        ResponsePayload::ContentRead(payload) => payload,
+        other => {
+            return Err(CliError::connector(format!(
+                "Unexpected content stream response: {:?}",
+                other
+            )));
+        }
+    };
+
+    let mut writer = open_stream_writer(&stream_target).await?;
+    if let Some(content) = payload.content {
+        writer
+            .write_all(content.as_bytes())
+            .await
+            .map_err(|err| CliError::connector(format!("Failed to write content: {}", err)))?;
+        writer
+            .flush()
+            .await
+            .map_err(|err| CliError::connector(format!("Failed to flush output: {}", err)))?;
+        return Ok(0);
+    }
+
+    let content_id = parse_content_id_hex(&payload.id)
+        .map_err(|err| CliError::connector(format!("Invalid content id for stream: {}", err)))?;
+    let cache = get_cache_for_stream(&context).await?;
+    let object = cache
+        .get_by_id(content_id)
+        .ok_or_else(|| CliError::connector("Content not found for stream".to_string()))?;
+    let blob_path = blob_path(
+        &context.runtime_paths.content_dir,
+        object.key.id,
+        object.key.version,
+    );
+
+    let mut file = tokio::fs::File::open(&blob_path).await.map_err(|err| {
+        CliError::connector(format!(
+            "Failed to open content blob {}: {}",
+            blob_path.display(),
+            err
+        ))
+    })?;
+    let written = tokio::io::copy(&mut file, &mut *writer)
+        .await
+        .map_err(|err| CliError::connector(format!("Failed to stream content: {}", err)))?;
+    writer
+        .flush()
+        .await
+        .map_err(|err| CliError::connector(format!("Failed to flush output: {}", err)))?;
+    if let Some(expected) = payload.size_bytes
+        && written != expected
+    {
+        return Err(CliError::connector(format!(
+            "Stream size mismatch (expected {}, received {})",
+            expected, written
+        )));
+    }
+
+    Ok(0)
 }
 
 async fn send_via_bypass(
@@ -56,8 +320,18 @@ async fn send_via_bypass(
     command: ManagementCommand,
 ) -> Result<ManagementResponse, CliError> {
     let registry = build_default_registry().map_err(|err| CliError::connector(err.to_string()))?;
-    let context = ManagementContext::from_runtime_root(runtime_root)
+    let mut context = ManagementContext::from_runtime_root(runtime_root)
         .map_err(|err| CliError::connector(err.to_string()))?;
+    if matches!(command, ManagementCommand::Search(_)) {
+        let startup = crate::search::initialize(
+            &context.runtime_paths,
+            &context.config.search,
+            crate::content::reserved_paths::ReservedPaths::from_config(&context.config),
+            false,
+        )
+        .map_err(|err| CliError::connector(err.to_string()))?;
+        context = context.with_search_service(startup.service);
+    }
     validate_command(&registry, &command)?;
     let bus = ManagementBus::start(registry, context);
     let connection_id = next_connection_id();
@@ -249,7 +523,33 @@ fn output_response(response: &ManagementResponse, success_actions: &[DomainActio
                 1
             }
         }
+        ResponsePayload::SearchFind(payload) => {
+            if is_success {
+                print_search_results(payload);
+                0
+            } else {
+                eprintln!("Search failed");
+                1
+            }
+        }
     }
+}
+
+async fn get_cache_for_stream(context: &ManagementContext) -> Result<PageMetaCache, CliError> {
+    if let Some(cache) = context.page_cache.as_ref() {
+        return Ok(cache.as_ref().clone());
+    }
+
+    let cache = PageMetaCache::new(
+        context.runtime_paths.content_dir.clone(),
+        context.runtime_paths.state_sys_dir.clone(),
+        ReservedPaths::from_config(&context.config),
+    );
+    cache
+        .rebuild_cache(true)
+        .await
+        .map_err(|err| CliError::connector(format!("Failed to rebuild cache: {}", err)))?;
+    Ok(cache)
 }
 
 fn print_user_list(payload: &crate::management::users::UserListResponse) {
@@ -373,6 +673,18 @@ fn print_content_read(payload: &crate::management::content::ContentReadResponse)
     }
 }
 
+fn print_search_results(payload: &crate::management::search::SearchFindResponse) {
+    for item in &payload.hits {
+        let alias = if item.alias.is_empty() {
+            "-"
+        } else {
+            item.alias.as_str()
+        };
+        let title = item.title.as_deref().unwrap_or("(untitled)");
+        println!("{} {} {}", item.id, alias, title);
+    }
+}
+
 fn print_content_upload(payload: &crate::management::content::ContentUploadResponse) {
     println!("Id: {}", payload.id);
     println!("Alias: {}", payload.alias);
@@ -475,6 +787,7 @@ mod tests {
                         refresh_threshold_hours: 24,
                     },
                     password: PasswordHashingConfig::default(),
+                    password_complexity_disabled: false,
                 }),
                 oidc: None,
             },
@@ -507,6 +820,7 @@ mod tests {
             streaming: StreamingConfig { enabled: false },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         };
 

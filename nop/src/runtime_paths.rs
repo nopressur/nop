@@ -18,6 +18,9 @@ pub struct RuntimePaths {
     pub state_dir: PathBuf,
     pub state_sys_dir: PathBuf,
     pub state_sc_dir: PathBuf,
+    pub state_search_dir: PathBuf,
+    pub state_search_index_dir: PathBuf,
+    pub state_search_failed_ids_file: PathBuf,
     pub logs_dir: PathBuf,
 }
 
@@ -60,6 +63,9 @@ impl RuntimePaths {
         let state_dir = root_canonical.join("state");
         let state_sys_dir = state_dir.join("sys");
         let state_sc_dir = state_dir.join("sc");
+        let state_search_dir = state_sys_dir.join("search");
+        let state_search_index_dir = state_search_dir.join("index");
+        let state_search_failed_ids_file = state_search_dir.join("failed-ids.yaml");
         let logs_dir = root_canonical.join("logs");
 
         ensure_dir_exists(&content_dir)?;
@@ -67,6 +73,8 @@ impl RuntimePaths {
         ensure_dir_exists(&state_dir)?;
         ensure_dir_exists(&state_sys_dir)?;
         ensure_dir_exists(&state_sc_dir)?;
+        ensure_dir_exists(&state_search_dir)?;
+        ensure_dir_exists(&state_search_index_dir)?;
 
         if config.is_tls_enabled() {
             let tls_dir = state_sys_dir.join("tls");
@@ -108,6 +116,20 @@ impl RuntimePaths {
                 e
             ))
         })?;
+        let state_search_dir = state_search_dir.canonicalize().map_err(|e| {
+            ConfigError::ValidationError(format!(
+                "Failed to canonicalize state/sys/search directory '{}': {}",
+                state_search_dir.display(),
+                e
+            ))
+        })?;
+        let state_search_index_dir = state_search_index_dir.canonicalize().map_err(|e| {
+            ConfigError::ValidationError(format!(
+                "Failed to canonicalize state/sys/search/index directory '{}': {}",
+                state_search_index_dir.display(),
+                e
+            ))
+        })?;
 
         Ok(Self {
             root: root_canonical,
@@ -118,6 +140,9 @@ impl RuntimePaths {
             state_dir,
             state_sys_dir,
             state_sc_dir,
+            state_search_dir,
+            state_search_index_dir,
+            state_search_failed_ids_file,
             logs_dir,
         })
     }
@@ -204,4 +229,33 @@ fn ensure_file_writable(path: &Path, context: &str) -> Result<(), ConfigError> {
         .map_err(|err| {
             ConfigError::ValidationError(format!("{} ({}): {}", context, path.display(), err))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::test_config::test_config;
+    use crate::util::test_fixtures::TestFixtureRoot;
+    use std::fs;
+
+    #[test]
+    fn from_root_creates_search_directories() {
+        let fixture = TestFixtureRoot::new_unique("runtime-paths-search").unwrap();
+        fixture.init_runtime_layout().unwrap();
+        fs::write(fixture.path().join("config.yaml"), "stub").unwrap();
+        fs::write(fixture.path().join("users.yaml"), "stub").unwrap();
+
+        let config = test_config();
+        let runtime_paths =
+            RuntimePaths::from_root(fixture.path(), &config).expect("runtime paths");
+
+        assert!(runtime_paths.state_search_dir.exists());
+        assert!(runtime_paths.state_search_dir.is_dir());
+        assert!(runtime_paths.state_search_index_dir.exists());
+        assert!(runtime_paths.state_search_index_dir.is_dir());
+        assert_eq!(
+            runtime_paths.state_search_failed_ids_file,
+            runtime_paths.state_search_dir.join("failed-ids.yaml")
+        );
+    }
 }

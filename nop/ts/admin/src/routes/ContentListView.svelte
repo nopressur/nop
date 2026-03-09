@@ -6,7 +6,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 -->
 
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import Button from "../components/Button.svelte";
   import CompactMultiSelect from "../components/CompactMultiSelect.svelte";
   import Pagination from "../components/Pagination.svelte";
@@ -17,8 +17,15 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import { contentListState, setContentListState } from "../stores/contentListState";
   import { pushNotification } from "../stores/notifications";
   import { useListViewLogic } from "./useListViewLogic";
-  import { clearBrowserTimeout, setBrowserTimeout, writeClipboardText } from "../services/browser";
-  import type { ContentSortField } from "../protocol/content";
+  import { confirmDialogState } from "../stores/confirmDialog";
+  import {
+    addWindowListener,
+    clearBrowserTimeout,
+    removeWindowListener,
+    setBrowserTimeout,
+    writeClipboardText,
+  } from "../services/browser";
+  import type { ContentSortDirection, ContentSortField } from "../protocol/content";
   import {
     buildContentPublicUrl,
     defaultAliasForFile,
@@ -26,6 +33,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     listContent,
     prevalidateBinaryUpload,
   } from "../services/content";
+  import { findSearch } from "../services/search";
   import { listTags } from "../services/tags";
   import { navigate } from "../stores/router";
   import type { UploadItem } from "../types/uploads";
@@ -47,6 +55,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let initialLoad = true;
   let lastQuery = query;
   let lastTagSignature = selectedTags.join("|");
+  const MIN_QUERY_CHARS = 3;
+  const MAX_QUERY_CHARS = 256;
 
   let uploadOverlayOpen = false;
   let uploadModalOpen = false;
@@ -71,6 +81,11 @@ The code and documentation in this repository is licensed under the GNU Affero G
     ready = true;
     void loadPage(page);
     void loadTags();
+    addWindowListener("keydown", handleKeydown, { capture: true });
+  });
+
+  onDestroy(() => {
+    removeWindowListener("keydown", handleKeydown, { capture: true });
   });
 
   $: if (ready && query !== lastQuery) {
@@ -95,23 +110,46 @@ The code and documentation in this repository is licensed under the GNU Affero G
   async function loadPage(nextPage: number): Promise<void> {
     const current = ++requestId;
     loading.set(true);
+    const trimmedQuery = query.trim();
+    const hasSearchQuery = trimmedQuery.length >= MIN_QUERY_CHARS;
     try {
-      const response = await listContent({
-        page: nextPage,
-        pageSize,
-        sortField,
-        sortDirection,
-        query: query.trim() || null,
-        markdownOnly,
-        tags: selectedTags.length > 0 ? selectedTags : null,
-      });
-      if (current !== requestId) {
-        return;
+      if (hasSearchQuery) {
+        const response = await findSearch({
+          query: trimmedQuery,
+          markdownOnly,
+          tags: selectedTags.length > 0 ? selectedTags : null,
+        });
+        if (current !== requestId) {
+          return;
+        }
+        const sortedItems = sortContentItems(
+          response.hits,
+          sortField,
+          sortDirection,
+        );
+        total = sortedItems.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        page = Math.min(Math.max(1, nextPage), totalPages);
+        const start = (page - 1) * pageSize;
+        items = sortedItems.slice(start, start + pageSize);
+      } else {
+        const response = await listContent({
+          page: nextPage,
+          pageSize,
+          sortField,
+          sortDirection,
+          query: null,
+          markdownOnly,
+          tags: selectedTags.length > 0 ? selectedTags : null,
+        });
+        if (current !== requestId) {
+          return;
+        }
+        items = response.items;
+        total = response.total;
+        page = response.page;
+        pageSize = response.pageSize;
       }
-      items = response.items;
-      total = response.total;
-      page = response.page;
-      pageSize = response.pageSize;
       setContentListState({
         query,
         page,
@@ -134,6 +172,19 @@ The code and documentation in this repository is licensed under the GNU Affero G
         }
       }
     }
+  }
+
+  function handleKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Escape") {
+      return;
+    }
+    if (uploadOverlayOpen || uploadModalOpen || $confirmDialogState) {
+      return;
+    }
+    if (!query) {
+      return;
+    }
+    query = "";
   }
 
   function toggleMarkdownOnly(): void {
@@ -326,6 +377,63 @@ The code and documentation in this repository is licensed under the GNU Affero G
     });
   }
 
+  function sortContentItems(
+    list: Awaited<ReturnType<typeof listContent>>["items"],
+    field: ContentSortField,
+    direction: ContentSortDirection,
+  ): typeof list {
+    const items = [...list];
+    items.sort((left, right) => {
+      const ordering = (() => {
+        switch (field) {
+          case "title":
+            return compareOptional(left.title, right.title, direction);
+          case "alias":
+            return compareOptional(left.alias, right.alias, direction);
+          case "tags": {
+            const leftTags = tagsSortValue(left.tags);
+            const rightTags = tagsSortValue(right.tags);
+            return compareOptional(leftTags, rightTags, direction);
+          }
+          case "mime":
+            return compareOptional(left.mime, right.mime, direction);
+          case "nav_title":
+            return compareOptional(left.navTitle, right.navTitle, direction);
+        }
+      })();
+      if (ordering !== 0) {
+        return ordering;
+      }
+      return left.id.localeCompare(right.id);
+    });
+    return items;
+  }
+
+  function tagsSortValue(tags: string[]): string | null {
+    if (tags.length === 0) {
+      return null;
+    }
+    return tags.join(", ");
+  }
+
+  function compareOptional(
+    left: string | null | undefined,
+    right: string | null | undefined,
+    direction: ContentSortDirection,
+  ): number {
+    if (!left && !right) {
+      return 0;
+    }
+    if (!left) {
+      return 1;
+    }
+    if (!right) {
+      return -1;
+    }
+    const ordering = left.localeCompare(right);
+    return direction === "asc" ? ordering : -ordering;
+  }
+
   function sortAria(field: ContentSortField): "ascending" | "descending" | "none" {
     if (sortField !== field) {
       return "none";
@@ -353,7 +461,12 @@ The code and documentation in this repository is licensed under the GNU Affero G
   <div class="-mx-6 bg-surface px-4 py-4 md:mx-0 md:rounded-lg md:border md:border-border md:shadow-soft">
     <div class="flex flex-wrap items-end gap-3">
       <div class="flex-1 min-w-[220px]">
-        <SearchInput bind:value={query} placeholder="Search titles" />
+        <SearchInput
+          bind:value={query}
+          placeholder="Search"
+          maxlength={MAX_QUERY_CHARS}
+          autofocus
+        />
       </div>
       <div class="min-w-[200px]">
         <label

@@ -6,7 +6,7 @@
 use crate::config::{Argon2Params, ValidatedUsersConfig};
 use crate::iam::{
     PasswordProviderBlock, UserServices, build_password_provider_block, derive_back_end_hash,
-    generate_salt_hex,
+    generate_salt_hex, validate_password_complexity,
 };
 use crate::management::blocking::BlockingError;
 use crate::management::codec::{FieldLimit, FieldLimits, FieldValues};
@@ -1740,6 +1740,11 @@ async fn build_password_block(
     let params = user_services.password_params().clone();
     match payload {
         PasswordPayload::Plaintext { plaintext } => {
+            if let Some(local) = context.config.users.local()
+                && local.password_complexity_enabled
+            {
+                validate_password_complexity(&plaintext).map_err(|err| err.to_string())?;
+            }
             let params = params.clone();
             context
                 .blocking_pool
@@ -2656,6 +2661,7 @@ mod tests {
             streaming: StreamingConfig { enabled: false },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }

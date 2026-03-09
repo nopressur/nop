@@ -19,11 +19,14 @@ pub fn short_runtime_paths(prefix: &str) -> (TempDir, RuntimePaths) {
     let state_dir = root.join("state");
     let state_sys_dir = state_dir.join("sys");
     let state_sc_dir = state_dir.join("sc");
+    let state_search_dir = state_sys_dir.join("search");
+    let state_search_index_dir = state_search_dir.join("index");
 
     std::fs::create_dir_all(&content_dir).expect("content dir");
     std::fs::create_dir_all(&themes_dir).expect("themes dir");
     std::fs::create_dir_all(&state_sys_dir).expect("state/sys dir");
     std::fs::create_dir_all(&state_sc_dir).expect("state/sc dir");
+    std::fs::create_dir_all(&state_search_index_dir).expect("state/sys/search/index dir");
 
     let runtime_paths = RuntimePaths {
         root: root.clone(),
@@ -34,6 +37,13 @@ pub fn short_runtime_paths(prefix: &str) -> (TempDir, RuntimePaths) {
         state_dir: state_dir.canonicalize().expect("state canonical"),
         state_sys_dir: state_sys_dir.canonicalize().expect("state/sys canonical"),
         state_sc_dir: state_sc_dir.canonicalize().expect("state/sc canonical"),
+        state_search_dir: state_search_dir
+            .canonicalize()
+            .expect("state/sys/search canonical"),
+        state_search_index_dir: state_search_index_dir
+            .canonicalize()
+            .expect("state/sys/search/index canonical"),
+        state_search_failed_ids_file: state_search_dir.join("failed-ids.yaml"),
         logs_dir: root.join("logs"),
     };
 

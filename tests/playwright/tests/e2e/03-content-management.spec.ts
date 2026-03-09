@@ -61,6 +61,16 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
       count = await closeButtons.count();
     }
   };
+  const openContentByTitle = async (title: string) => {
+    const mobileButton = page.getByRole("button", { name: title }).first();
+    if (await mobileButton.isVisible()) {
+      await humanClick(mobileButton, rng);
+      return;
+    }
+    const row = page.locator("tbody tr", { hasText: title }).first();
+    await expect(row).toBeVisible();
+    await humanClick(row, rng);
+  };
 
   const tagsToCreate = [
     { id: "docs", name: "Docs" },
@@ -124,7 +134,6 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await expect(page.getByText("Content saved").last()).toBeVisible();
   await dismissNotifications();
 
-  const adminEditUrl = page.url();
   const publicUrl = new URL(`/${pageAlias}`, harness.baseUrl).toString();
   await page.goto(publicUrl);
   await expect(page.getByRole("heading", { name: "UI Test" })).toBeVisible();
@@ -132,20 +141,9 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
 
   const editLink = page.getByRole("link", { name: "Edit" });
   await expect(editLink).toBeVisible();
-  await expect(editLink).toHaveAttribute("target", "_blank");
-  await expect(editLink).toHaveAttribute("rel", "noopener");
   await expect(editLink).toHaveAttribute("href", /\/admin\/pages\/edit\//);
 
-  const [editorPage] = await Promise.all([
-    page.waitForEvent("popup"),
-    humanClick(editLink, rng),
-  ]);
-  await expect(editorPage).toHaveURL(/\/admin\/pages\/edit\//);
-  await expect(editorPage.getByRole("heading", { name: "Edit Content" })).toBeVisible();
-  const popupEditUrl = editorPage.url();
-  await editorPage.close();
-
-  await page.goto(popupEditUrl || adminEditUrl);
+  await Promise.all([page.waitForURL(/\/admin\/pages\/edit\//), humanClick(editLink, rng)]);
   await expect(page.getByRole("heading", { name: "Edit Content" })).toBeVisible();
 
   await humanClick(page.getByRole("button", { name: "Upload", exact: true }), rng);
@@ -458,33 +456,32 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await dismissNotifications();
 
   await humanClearAndType(
-    page.getByPlaceholder("Search titles"),
+    page.getByPlaceholder("Search"),
     "list-upload",
     rng
   );
   await expect(page.locator("tr", { hasText: "list-upload" })).toBeVisible();
 
   await humanClearAndType(
-    page.getByPlaceholder("Search titles"),
+    page.getByPlaceholder("Search"),
     "list-multi-one",
     rng
   );
   await expect(page.locator("tr", { hasText: "list-multi-one" })).toBeVisible();
 
   await humanClearAndType(
-    page.getByPlaceholder("Search titles"),
+    page.getByPlaceholder("Search"),
     "list-multi-two",
     rng
   );
   await expect(page.locator("tr", { hasText: "list-multi-two" })).toBeVisible();
 
   await humanClearAndType(
-    page.getByPlaceholder("Search titles"),
+    page.getByPlaceholder("Search"),
     "UI Test",
     rng
   );
-  await expect(page.locator("tr", { hasText: "UI Test" })).toBeVisible();
-  await humanClick(page.locator("tr", { hasText: "UI Test" }).getByText("docs/ui-test"), rng);
+  await openContentByTitle("UI Test");
   await expect(page.getByRole("heading", { name: "Edit Content" })).toBeVisible();
 
   const navMenuButtonAfterEdit = page.getByRole("button", { name: "Menu" });
@@ -495,7 +492,7 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await expect(page.getByRole("heading", { name: "Content Library" })).toBeVisible();
   await expect(page.locator("#content-tags-filter")).toContainText("featured");
 
-  await humanClick(page.locator("tr", { hasText: "UI Test" }).getByText("docs/ui-test"), rng);
+  await openContentByTitle("UI Test");
   await expect(page.getByRole("heading", { name: "Edit Content" })).toBeVisible();
   await humanClearAndType(page.locator("#content-title"), "UI Test Draft", rng);
 
@@ -504,7 +501,7 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await expect(discardModal).toBeVisible();
   await humanClick(discardModal.getByRole("button", { name: "Discard" }), rng);
   await expect(page.getByRole("heading", { name: "Content Library" })).toBeVisible();
-  await expect(page.getByPlaceholder("Search titles")).toHaveValue("UI Test");
+  await expect(page.getByPlaceholder("Search")).toHaveValue("UI Test");
 });
 
 test("content editor unsaved changes modal", async ({ page, harness, rng }) => {
@@ -564,7 +561,7 @@ test("content editor unsaved changes modal", async ({ page, harness, rng }) => {
   await expect(page.getByRole("heading", { name: "Content Library" })).toBeVisible();
 
   await humanClearAndType(
-    page.getByPlaceholder("Search titles"),
+    page.getByPlaceholder("Search"),
     "Unsaved Close Test",
     rng
   );
@@ -582,7 +579,7 @@ test("content editor unsaved changes modal", async ({ page, harness, rng }) => {
   await expect(page.getByRole("heading", { name: "Content Library" })).toBeVisible();
 
   await humanClearAndType(
-    page.getByPlaceholder("Search titles"),
+    page.getByPlaceholder("Search"),
     "Unsaved Close Test Saved",
     rng
   );
@@ -741,12 +738,12 @@ test("content list sorting", async ({ page, harness, rng }) => {
   });
 
   await goToContentList();
-  const searchInput = page.locator('input[placeholder="Search titles"]');
+  const searchInput = page.locator('input[placeholder="Search"]');
   await humanClearAndType(searchInput, "Sort Base", rng);
 
   const table = page.locator("table");
   const rows = table.locator("tbody tr");
-  await expect(rows).toHaveCount(4);
+  await expect(rows).toHaveCount(6);
 
   const normalizeText = (value: string) => value.replace(/\s+/g, " ").trim();
   const getColumnTexts = async (index: number) => {
@@ -755,6 +752,17 @@ test("content list sorting", async ({ page, harness, rng }) => {
     for (let i = 0; i < count; i += 1) {
       const text = await rows.nth(i).locator("td").nth(index).innerText();
       values.push(normalizeText(text));
+    }
+    return values;
+  };
+  const getRowData = async () => {
+    const count = await rows.count();
+    const values = [];
+    for (let i = 0; i < count; i += 1) {
+      const cells = rows.nth(i).locator("td");
+      const title = normalizeText(await cells.nth(0).innerText());
+      const alias = normalizeText(await cells.nth(1).innerText());
+      values.push({ title, alias });
     }
     return values;
   };
@@ -781,11 +789,15 @@ test("content list sorting", async ({ page, harness, rng }) => {
     "Sort Base Beta",
     "Sort Base Empty",
     "Sort Base Image",
+    "Sort Tie",
+    "Sort Tie",
   ]);
 
   const titleButton = table.locator("thead").getByRole("button", { name: "Title" });
   await humanClick(titleButton, rng);
   await expectColumnOrder(0, [
+    "Sort Tie",
+    "Sort Tie",
     "Sort Base Image",
     "Sort Base Empty",
     "Sort Base Beta",
@@ -800,8 +812,12 @@ test("content list sorting", async ({ page, harness, rng }) => {
       "/sort-base-alpha",
       "/sort-base-beta",
       "/sort-base-empty",
+      "/sort-tie-a",
+      "/sort-tie-b",
     ],
     [
+      "/sort-tie-b",
+      "/sort-tie-a",
       "/sort-base-empty",
       "/sort-base-beta",
       "/sort-base-alpha",
@@ -812,8 +828,8 @@ test("content list sorting", async ({ page, harness, rng }) => {
   await sortAndExpect(
     "Tags",
     2,
-    ["alpha", "beta", "gamma", "—"],
-    ["gamma", "beta", "alpha", "—"],
+    ["alpha", "alpha", "alpha", "beta", "gamma", "—"],
+    ["gamma", "beta", "alpha", "alpha", "alpha", "—"],
   );
 
   const typeButton = table.locator("thead").getByRole("button", { name: "Type" });
@@ -832,12 +848,12 @@ test("content list sorting", async ({ page, harness, rng }) => {
   await sortAndExpect(
     "Nav",
     4,
-    ["Nav Alpha", "Nav Beta", "—", "—"],
-    ["Nav Beta", "Nav Alpha", "—", "—"],
+    ["Nav Alpha", "Nav Beta", "—", "—", "—", "—"],
+    ["Nav Beta", "Nav Alpha", "—", "—", "—", "—"],
   );
 
   await humanClearAndType(searchInput, "Sort Tie", rng);
-  await expect(rows).toHaveCount(2);
+  await expect(rows).toHaveCount(5);
   await humanClick(titleButton, rng);
 
   const expectedTieAliases = Object.entries(tieIds)
@@ -845,8 +861,10 @@ test("content list sorting", async ({ page, harness, rng }) => {
     .map(([alias]) => alias);
   await expect
     .poll(async () => {
-      const aliases = await getColumnTexts(1);
-      return aliases.map((alias) => alias.replace(/^\//, ""));
+      const rowsData = await getRowData();
+      return rowsData
+        .filter((row) => row.title === "Sort Tie")
+        .map((row) => row.alias.replace(/^\//, ""));
     })
     .toEqual(expectedTieAliases);
 });

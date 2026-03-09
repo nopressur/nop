@@ -13,6 +13,7 @@ export type AdminRuntimeConfig = {
   wsTicketPath: string;
   userManagementEnabled: boolean;
   passwordFrontEnd: PasswordFrontEndParams;
+  passwordComplexityEnabled: boolean;
 };
 
 type RuntimeOwner = {

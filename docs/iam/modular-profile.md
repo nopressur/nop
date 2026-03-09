@@ -86,10 +86,16 @@ Status: Developed
 - The client computes `current_front_end_hash` and `new_front_end_hash` using the Phase 1 hashing
   described in `docs/iam/password-login.md` and the SPA-configured
   `config.users.local.password.front_end` parameters.
-  - The backend verifies the current hash and then stores the new password using the Phase 2 hashing helpers described in `docs/iam/password-login.md`.
+- The backend verifies the current hash and then stores the new password using the Phase 2 hashing helpers described in `docs/iam/password-login.md`.
   - The backend validates the `change_token` and that `new_front_end_salt` matches the preflight
     response, generates a new back-end salt, and stores both salts with the updated hash.
   - On success, the auth cookie is refreshed so `password_version` is up to date.
+
+### Password Complexity Policy
+
+- The profile password module must enforce the policy defined in `docs/iam/password-complexity.md`.
+- UI validation must block submission until the new password satisfies the policy and the confirm field matches.
+- The policy configuration is supplied by the login/profile SPA runtime config; disablement is allowed only in debug builds.
 
 ### Back navigation
 

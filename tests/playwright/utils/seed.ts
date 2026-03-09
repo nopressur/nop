@@ -81,6 +81,54 @@ export async function seedFixtureData(
     body: indexMd,
   });
 
+  await writeFlatMarkdown({
+    contentDir,
+    alias: "docs/search-alpha",
+    title: "Search Alpha",
+    navTitle: null,
+    navParentId: null,
+    navOrder: null,
+    originalFilename: "search-alpha.md",
+    body: "# Search Alpha\n\nAlpha search result entry.",
+  });
+
+  await writeFlatMarkdown({
+    contentDir,
+    alias: "docs/search-beta",
+    title: "Search Beta",
+    navTitle: null,
+    navParentId: null,
+    navOrder: null,
+    originalFilename: "search-beta.md",
+    body: "# Search Beta\n\nBeta search result entry.",
+  });
+
+  await writeFlatMarkdown({
+    contentDir,
+    alias: "docs/search-table-fixture",
+    title: "Search Table Fixture",
+    navTitle: null,
+    navParentId: null,
+    navOrder: null,
+    originalFilename: "search-table-fixture.md",
+    tags: ["docs"],
+    body: `| Nimbus | Orion | Orion Quartz |
+|--------|-------|--------------|`,
+  });
+
+  await writeFlatMarkdown({
+    contentDir,
+    alias: "docs/search-html-fixture",
+    title: "Search HTML Fixture",
+    navTitle: null,
+    navParentId: null,
+    navOrder: null,
+    originalFilename: "search-html-fixture.md",
+    tags: ["docs"],
+    body: `<p data-kind="zzattrtoken">Nimbus <strong>Orion</strong></p>
+<a href="https://zzurltoken.example/path">Orion Quartz</a>`,
+  });
+
   const seededUsers = buildSeededUsers();
 
   return {
@@ -163,6 +211,7 @@ async function writeFlatMarkdown(options: {
   navOrder: number | null;
   originalFilename: string;
   body: string;
+  tags?: string[];
 }): Promise<void> {
   const { idHex, shard } = generateContentId();
   const version = 0;
@@ -177,7 +226,7 @@ async function writeFlatMarkdown(options: {
     alias: options.alias,
     title: options.title,
     mime: "text/markdown",
-    tags: [],
+    tags: options.tags ?? [],
     navTitle: options.navTitle,
     navParentId: options.navParentId,
     navOrder: options.navOrder,

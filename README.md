@@ -38,6 +38,7 @@ Check out the [CLI](CLI.md) documentation for administering the system from the 
 
 - We are just starting, so no contributions for now, apologies!
 - Please bear with us...
+- Management domain/action IDs must be recorded in `docs/management/wire-serialization.md`.
 
 *The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.*
 

@@ -225,9 +225,10 @@ test("user creation missing password shows error", async ({ page, harness, rng }
 
   await humanType(page.locator("#user-email"), "missing.password@example.com", rng);
   await humanType(page.locator("#user-name"), "Missing Password", rng);
-  await humanClick(page.getByRole("button", { name: "Save" }), rng);
-
-  await expect(page.getByText("Password is required")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(
+    page.getByText("Password needs to be at least 8 long with"),
+  ).not.toBeVisible();
   await expect(page.getByRole("heading", { name: "Create User" })).toBeVisible();
 });
 

@@ -43,7 +43,18 @@ describe("content protocol decode", () => {
 
   it("decodes content read response with camelCase fields", () => {
     const writer = new WireWriter();
-    OptionMap.write(writer, [true, true, true, true, true, true, true]);
+    OptionMap.write(writer, [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
     writer.writeString("id-2");
     writer.writeString("docs/setup");
     writer.writeString("Setup");
@@ -63,5 +74,8 @@ describe("content protocol decode", () => {
     expect(decoded.originalFilename).toBe("setup.md");
     expect(decoded.theme).toBe("default");
     expect(decoded.content).toBe("# Setup\n");
+    expect(decoded.streamId).toBeNull();
+    expect(decoded.chunkBytes).toBeNull();
+    expect(decoded.sizeBytes).toBeNull();
   });
 });

@@ -27,6 +27,7 @@ NoPressure reads `config.yaml` at startup and validates it through `Config::load
 | `streaming` | Range streaming toggle | `public::assets` |
 | `shortcodes` | Dynamic shortcode defaults | `public::shortcode` |
 | `rendering` | Public markdown layout heuristics | `public::markdown` |
+| `search` | Tantivy search subsystem limits | Search infrastructure services |
 | `dev_mode` | Debug-only bypass controls (ignored in release builds) | Middleware (security + IAM) |
 
 Note: the `server` block is authoritative. TLS is enabled by the presence of the top-level `tls`
@@ -46,11 +47,24 @@ block; when TLS is enabled, the HTTP port is provided by `server.http_port`.
   - Defaults:
     - Front-end: `memory_kib=65536`, `iterations=2`, `parallelism=1`, `output_len=32`, `salt_len=16`
     - Back-end: `memory_kib=131072`, `iterations=3`, `parallelism=2`, `output_len=32`, `salt_len=16`
+- **Password complexity (local auth)**:
+  - `users.local.password_complexity_disabled` is a debug-only flag to disable password complexity
+    checks for testing.
+  - Release builds ignore the flag and log an info message if it is set to `true`.
 - **OIDC auth** requires `users.oidc` to be present when `auth_method: oidc`.
 - **Shortcodes**: `shortcodes.start_unibox` must contain `<QUERY>` and start with `http(s)://`; enforced by `validate_shortcodes`.
 - **Dev mode**: optional `dev_mode: localhost` or `dangerous`. `dangerous` bypasses access control entirely and logs loud warnings. Dev mode is honored only in debug builds; release builds ignore it and log a warning. Never use in production.
 - **Upload config**: defaults include broad file extensions (images, docs, archive, video, audio, web, markdown). `max_file_size_mb` defaults to 100; `0` disables the cap with no hidden safety limit. Upload limits apply to binary uploads and stream-backed Markdown create/update.
 - **Rendering**: `rendering.short_paragraph_length` defaults to 256 characters. Set to `0` to disable compact-width detection entirely.
+- **Search**:
+  - `search.max_memory_mb` configures the maximum memory budget in MiB for Tantivy search write/index operations.
+  - `search.worker_count` configures the number of partitioned search ingestion workers.
+  - `max_memory_mb` must be a positive integer greater than `0`.
+  - `worker_count` must be a positive integer greater than `0`.
+  - `worker_count` has a hard maximum of `16`.
+  - If `worker_count` is configured above `16`, startup clamps the effective value to `16` and logs a warning.
+  - Current default: `128`.
+  - Current `worker_count` default: `1`.
 - **Streaming**: default `enabled: true`. Even when disabled, non-Markdown assets respond to HTTP range requests when the feature flag remains true.
 - **Security**:
   - `max_violations` (default 2) and `cooldown_seconds` (default 30) power the IP throttler in `security::`.

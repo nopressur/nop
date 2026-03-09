@@ -3,14 +3,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use super::protocol::{RequestEnvelope, ResponseEnvelope, read_envelope, write_envelope};
+use super::protocol::{
+    RequestEnvelope, ResponseEnvelope, read_envelope, read_stream_frame, write_envelope,
+    write_stream_frame,
+};
 use super::{SocketError, SocketErrorKind, SocketResult, peer};
-use crate::management::core::{ManagementRequest, ManagementResponse, MessageResponse};
+use crate::content::flat_storage::{blob_path, parse_content_id_hex};
+use crate::content::reserved_paths::ReservedPaths;
+use crate::management::core::{
+    ManagementRequest, ManagementResponse, MessageResponse, ResponsePayload,
+};
 use crate::management::registry::{DomainActionKey, ManagementRegistry};
 use crate::management::system::{SYSTEM_ACTION_PING, SYSTEM_ACTION_PONG_ERROR, SYSTEM_DOMAIN_ID};
+use crate::management::ws::WS_MAX_STREAM_CHUNK_BYTES;
+use crate::management::ws::protocol::{STREAM_FLAG_FINAL, StreamAckFrame, StreamChunkFrame};
 use crate::management::{ManagementBus, WorkflowTracker, next_connection_id};
+use crate::public::page_meta_cache::PageMetaCache;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::io::AsyncReadExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot;
 use tokio::time::{Duration, timeout};
@@ -121,6 +132,7 @@ async fn handle_connection(
     peer::validate_peer_uid(&stream, expected_uid)?;
 
     let mut workflow_tracker = WorkflowTracker::new();
+    let context = bus.context();
     let handshake_ok = handle_handshake(
         &mut stream,
         &bus,
@@ -146,13 +158,19 @@ async fn handle_connection(
             };
 
         if let Err(err) = validate_workflow_id(&mut workflow_tracker, envelope.workflow_id) {
-            let response = error_response(envelope.workflow_id, &err.to_string(), &registry)?;
-            write_envelope(&mut stream, &response).await?;
+            let response = error_response(envelope.workflow_id, &err.to_string())?;
+            let envelope = encode_response(&response, &registry)?;
+            write_envelope(&mut stream, &envelope).await?;
             return Err(err);
         }
 
         let response = handle_request(envelope, &bus, &registry, connection_id).await?;
-        write_envelope(&mut stream, &response).await?;
+        let stream_plan = content_stream_plan(&response);
+        let envelope = encode_response(&response, &registry)?;
+        write_envelope(&mut stream, &envelope).await?;
+        if let Some(plan) = stream_plan {
+            stream_binary_content(&mut stream, context.as_ref(), &plan).await?;
+        }
     }
 
     Ok(())
@@ -176,17 +194,15 @@ async fn handle_handshake(
             }
         };
     if let Err(err) = validate_workflow_id(workflow_tracker, envelope.workflow_id) {
-        let response = error_response(envelope.workflow_id, &err.to_string(), registry)?;
-        write_envelope(stream, &response).await?;
+        let response = error_response(envelope.workflow_id, &err.to_string())?;
+        let envelope = encode_response(&response, registry)?;
+        write_envelope(stream, &envelope).await?;
         return Err(err);
     }
     if envelope.domain != SYSTEM_DOMAIN_ID || envelope.action != SYSTEM_ACTION_PING {
-        let response = error_response(
-            envelope.workflow_id,
-            "First request must be system Ping",
-            registry,
-        )?;
-        write_envelope(stream, &response).await?;
+        let response = error_response(envelope.workflow_id, "First request must be system Ping")?;
+        let envelope = encode_response(&response, registry)?;
+        write_envelope(stream, &envelope).await?;
         return Err(SocketError::new(
             SocketErrorKind::Protocol,
             "Handshake required system Ping",
@@ -194,9 +210,10 @@ async fn handle_handshake(
     }
 
     let response = handle_request(envelope, bus, registry, connection_id).await?;
-    write_envelope(stream, &response).await?;
+    let envelope = encode_response(&response, registry)?;
+    write_envelope(stream, &envelope).await?;
 
-    Ok(response.action != SYSTEM_ACTION_PONG_ERROR)
+    Ok(response.action_id != SYSTEM_ACTION_PONG_ERROR)
 }
 
 async fn handle_request(
@@ -204,7 +221,7 @@ async fn handle_request(
     bus: &ManagementBus,
     registry: &Arc<ManagementRegistry>,
     connection_id: u32,
-) -> SocketResult<ResponseEnvelope> {
+) -> SocketResult<ManagementResponse> {
     let request = match decode_request(
         envelope.domain,
         envelope.action,
@@ -215,19 +232,19 @@ async fn handle_request(
     ) {
         Ok(request) => request,
         Err(err) => {
-            return error_response(envelope.workflow_id, &format!("{}", err), registry);
+            return error_response(envelope.workflow_id, &format!("{}", err));
         }
     };
     let response = match bus.send_request(request).await {
         Ok(response) => response,
         Err(err) => {
             let message = format!("{}", err);
-            let error_response = error_response(envelope.workflow_id, &message, registry)?;
+            let error_response = error_response(envelope.workflow_id, &message)?;
             return Ok(error_response);
         }
     };
 
-    encode_response(&response, registry)
+    Ok(response)
 }
 
 async fn read_envelope_with_timeout(
@@ -327,13 +344,9 @@ fn encode_response(
     })
 }
 
-fn error_response(
-    workflow_id: u32,
-    message: &str,
-    registry: &ManagementRegistry,
-) -> SocketResult<ResponseEnvelope> {
+fn error_response(workflow_id: u32, message: &str) -> SocketResult<ManagementResponse> {
     let message = truncate_message(message);
-    let response = ManagementResponse {
+    Ok(ManagementResponse {
         domain_id: SYSTEM_DOMAIN_ID,
         action_id: SYSTEM_ACTION_PONG_ERROR,
         workflow_id,
@@ -345,8 +358,7 @@ fn error_response(
                 )
             })?,
         ),
-    };
-    encode_response(&response, registry)
+    })
 }
 
 fn truncate_message(message: &str) -> String {
@@ -355,6 +367,211 @@ fn truncate_message(message: &str) -> String {
         return message.to_string();
     }
     message.chars().take(MAX_CHARS).collect()
+}
+
+struct ContentStreamPlan {
+    content_id: String,
+    stream_id: u32,
+    chunk_bytes: u32,
+    size_bytes: u64,
+}
+
+fn content_stream_plan(response: &ManagementResponse) -> Option<ContentStreamPlan> {
+    match &response.payload {
+        ResponsePayload::ContentRead(payload) => {
+            if payload.content.is_some() {
+                return None;
+            }
+            Some(ContentStreamPlan {
+                content_id: payload.id.clone(),
+                stream_id: payload.stream_id?,
+                chunk_bytes: payload.chunk_bytes?,
+                size_bytes: payload.size_bytes?,
+            })
+        }
+        _ => None,
+    }
+}
+
+async fn stream_binary_content(
+    stream: &mut UnixStream,
+    context: &crate::management::core::ManagementContext,
+    plan: &ContentStreamPlan,
+) -> SocketResult<()> {
+    if plan.chunk_bytes == 0 || plan.chunk_bytes as usize > WS_MAX_STREAM_CHUNK_BYTES {
+        return Err(SocketError::new(
+            SocketErrorKind::Protocol,
+            "Stream chunk size exceeds supported limits",
+        ));
+    }
+
+    let content_id = parse_content_id_hex(&plan.content_id).map_err(|err| {
+        SocketError::new(
+            SocketErrorKind::Protocol,
+            format!("Invalid content id for streaming: {}", err),
+        )
+    })?;
+    let cache = get_cache_for_stream(context).await?;
+    let object = cache.get_by_id(content_id).ok_or_else(|| {
+        SocketError::new(SocketErrorKind::Protocol, "Content not found for streaming")
+    })?;
+    let blob_path = blob_path(
+        &context.runtime_paths.content_dir,
+        object.key.id,
+        object.key.version,
+    );
+    let metadata = tokio::fs::metadata(&blob_path).await.map_err(|err| {
+        SocketError::new(
+            SocketErrorKind::Io,
+            format!("Failed to stat content blob: {}", err),
+        )
+    })?;
+    if metadata.len() != plan.size_bytes {
+        return Err(SocketError::new(
+            SocketErrorKind::Protocol,
+            format!(
+                "Content size mismatch for streaming (expected {}, got {})",
+                plan.size_bytes,
+                metadata.len()
+            ),
+        ));
+    }
+
+    let mut file = tokio::fs::File::open(&blob_path).await.map_err(|err| {
+        SocketError::new(
+            SocketErrorKind::Io,
+            format!("Failed to open content blob: {}", err),
+        )
+    })?;
+
+    if plan.size_bytes == 0 {
+        let frame = StreamChunkFrame {
+            stream_id: plan.stream_id,
+            seq: 0,
+            flags: STREAM_FLAG_FINAL,
+            payload: Vec::new(),
+        };
+        write_stream_frame(stream, &crate::management::ws::WsFrame::StreamChunk(frame)).await?;
+        let ack = read_stream_frame_with_timeout(stream, IDLE_TIMEOUT).await?;
+        match ack {
+            crate::management::ws::WsFrame::Ack(StreamAckFrame { stream_id, seq })
+                if stream_id == plan.stream_id && seq == 0 => {}
+            crate::management::ws::WsFrame::Ack(ack) => {
+                return Err(SocketError::new(
+                    SocketErrorKind::Protocol,
+                    format!("Unexpected ack stream {} seq {}", ack.stream_id, ack.seq),
+                ));
+            }
+            other => {
+                return Err(SocketError::new(
+                    SocketErrorKind::Protocol,
+                    format!("Unexpected stream frame: {:?}", other),
+                ));
+            }
+        }
+        return Ok(());
+    }
+
+    let mut seq = 0u32;
+    let mut bytes_sent = 0u64;
+    let mut buffer = vec![0u8; plan.chunk_bytes as usize];
+    loop {
+        let read = file.read(&mut buffer).await.map_err(|err| {
+            SocketError::new(
+                SocketErrorKind::Io,
+                format!("Failed to read content blob: {}", err),
+            )
+        })?;
+        if read == 0 {
+            if bytes_sent != plan.size_bytes {
+                return Err(SocketError::new(
+                    SocketErrorKind::Protocol,
+                    format!(
+                        "Content stream ended early (sent {}, expected {})",
+                        bytes_sent, plan.size_bytes
+                    ),
+                ));
+            }
+            break;
+        }
+
+        bytes_sent = bytes_sent.saturating_add(read as u64);
+        let mut flags = 0u8;
+        if bytes_sent >= plan.size_bytes {
+            flags |= STREAM_FLAG_FINAL;
+        }
+        let frame = StreamChunkFrame {
+            stream_id: plan.stream_id,
+            seq,
+            flags,
+            payload: buffer[..read].to_vec(),
+        };
+        write_stream_frame(stream, &crate::management::ws::WsFrame::StreamChunk(frame)).await?;
+
+        let ack = read_stream_frame_with_timeout(stream, IDLE_TIMEOUT).await?;
+        match ack {
+            crate::management::ws::WsFrame::Ack(StreamAckFrame {
+                stream_id,
+                seq: ack_seq,
+            }) if stream_id == plan.stream_id && ack_seq == seq => {}
+            crate::management::ws::WsFrame::Ack(ack) => {
+                return Err(SocketError::new(
+                    SocketErrorKind::Protocol,
+                    format!("Unexpected ack stream {} seq {}", ack.stream_id, ack.seq),
+                ));
+            }
+            other => {
+                return Err(SocketError::new(
+                    SocketErrorKind::Protocol,
+                    format!("Unexpected stream frame: {:?}", other),
+                ));
+            }
+        }
+
+        if flags & STREAM_FLAG_FINAL != 0 {
+            break;
+        }
+        seq = seq.saturating_add(1);
+    }
+
+    Ok(())
+}
+
+async fn get_cache_for_stream(
+    context: &crate::management::core::ManagementContext,
+) -> SocketResult<PageMetaCache> {
+    if let Some(cache) = context.page_cache.as_ref() {
+        return Ok(cache.as_ref().clone());
+    }
+
+    let cache = PageMetaCache::new(
+        context.runtime_paths.content_dir.clone(),
+        context.runtime_paths.state_sys_dir.clone(),
+        ReservedPaths::from_config(&context.config),
+    );
+    cache.rebuild_cache(true).await.map_err(|err| {
+        SocketError::new(
+            SocketErrorKind::Protocol,
+            format!("Failed to rebuild cache: {}", err),
+        )
+    })?;
+    Ok(cache)
+}
+
+async fn read_stream_frame_with_timeout(
+    stream: &mut UnixStream,
+    timeout_duration: Duration,
+) -> SocketResult<crate::management::ws::WsFrame> {
+    match timeout(timeout_duration, read_stream_frame(stream)).await {
+        Ok(result) => result,
+        Err(_) => Err(SocketError::new(
+            SocketErrorKind::Timeout,
+            format!(
+                "Stream read timed out after {}ms",
+                timeout_duration.as_millis()
+            ),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -414,6 +631,7 @@ mod tests {
             streaming: StreamingConfig { enabled: false },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }

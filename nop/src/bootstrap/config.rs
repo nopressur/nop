@@ -89,7 +89,7 @@ fn generate_jwt_secret() -> Result<String, BootstrapError> {
 
 fn default_config_yaml(jwt_secret: &str) -> String {
     format!(
-        "server:\n  host: \"0.0.0.0\"\n  port: {https_port}\n  http_port: {http_port}\n  workers: {workers}\n\nadmin:\n  path: \"/admin\"\n\ntls:\n  mode: \"self-signed\"\n  domains:\n    - \"localhost\"\n\nusers:\n  auth_method: \"local\"\n  local:\n    jwt:\n      secret: \"{jwt_secret}\"\n\nnavigation:\n  max_dropdown_items: 7\n\nrendering:\n  short_paragraph_length: 256\n\nlogging:\n  level: \"info\"\n  rotation:\n    max_size_mb: 16\n    max_files: 10\n\nsecurity:\n  max_violations: 2\n  cooldown_seconds: 30\n  use_forwarded_for: false\n  hsts_enabled: false\n  hsts_max_age: 31536000\n  hsts_include_subdomains: true\n  hsts_preload: false\n\napp:\n  name: \"NoPressure\"\n  description: \"A lightweight web content management system\"\n\nupload:\n  max_file_size_mb: 100\n",
+        "server:\n  host: \"0.0.0.0\"\n  port: {https_port}\n  http_port: {http_port}\n  workers: {workers}\n\nadmin:\n  path: \"/admin\"\n\ntls:\n  mode: \"self-signed\"\n  domains:\n    - \"localhost\"\n\nusers:\n  auth_method: \"local\"\n  local:\n    jwt:\n      secret: \"{jwt_secret}\"\n\nnavigation:\n  max_dropdown_items: 7\n\nrendering:\n  short_paragraph_length: 256\n\nsearch:\n  max_memory_mb: 128\n  worker_count: 1\n\nlogging:\n  level: \"info\"\n  rotation:\n    max_size_mb: 16\n    max_files: 10\n\nsecurity:\n  max_violations: 2\n  cooldown_seconds: 30\n  use_forwarded_for: false\n  hsts_enabled: false\n  hsts_max_age: 31536000\n  hsts_include_subdomains: true\n  hsts_preload: false\n\napp:\n  name: \"NoPressure\"\n  description: \"A lightweight web content management system\"\n\nupload:\n  max_file_size_mb: 100\n",
         http_port = DEFAULT_HTTP_PORT,
         https_port = DEFAULT_HTTPS_PORT,
         workers = DEFAULT_WORKERS,
@@ -106,5 +106,8 @@ mod tests {
         let yaml = default_config_yaml("secret");
         assert!(yaml.contains("http_port: 7080"));
         assert!(yaml.contains("port: 7443"));
+        assert!(yaml.contains("search:"));
+        assert!(yaml.contains("max_memory_mb: 128"));
+        assert!(yaml.contains("worker_count: 1"));
     }
 }

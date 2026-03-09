@@ -168,7 +168,8 @@ Notes:
 - If any tag explicitly specifies `intersect`, intersect rules apply to the full tag set.
 - If no tag explicitly specifies `intersect` but at least one tag specifies `union`, union rules apply to the full tag set.
 - Tags without roles do not participate in role resolution when at least one tag contributes roles.
-- If tag resolution yields an empty role set, the object is inaccessible to all users.
+- If tag resolution yields an empty role set, the object is inaccessible to non-admin users (admins retain access).
+- Invalid role IDs in tags are ignored; if all declared roles are invalid, the object is treated as `Deny` (admin-only access).
 - The tag-list shortcode will use tag IDs and the tag registry to build filtered listings.
 
 <!--

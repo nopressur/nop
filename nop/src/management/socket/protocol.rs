@@ -5,6 +5,9 @@
 
 use super::{SocketError, SocketErrorKind, SocketResult};
 use crate::management::wire::{WireReader, WireWriter};
+use crate::management::ws::protocol::{
+    WsFrame, decode_frame as decode_ws_frame, encode_frame as encode_ws_frame,
+};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -149,6 +152,29 @@ pub(super) async fn write_envelope<T: EnvelopeWrite>(
     write_frame(stream, &writer.into_bytes()).await
 }
 
+pub(super) async fn write_stream_frame(
+    stream: &mut UnixStream,
+    frame: &WsFrame,
+) -> SocketResult<()> {
+    let payload = encode_ws_frame(frame).map_err(|err| {
+        SocketError::new(
+            SocketErrorKind::Codec,
+            format!("Failed to encode stream frame: {}", err),
+        )
+    })?;
+    write_frame(stream, &payload).await
+}
+
+pub(super) async fn read_stream_frame(stream: &mut UnixStream) -> SocketResult<WsFrame> {
+    let payload = read_frame(stream).await?;
+    decode_ws_frame(&payload).map_err(|err| {
+        SocketError::new(
+            SocketErrorKind::Codec,
+            format!("Failed to decode stream frame: {}", err),
+        )
+    })
+}
+
 async fn read_frame(stream: &mut UnixStream) -> SocketResult<Vec<u8>> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await.map_err(|err| {
@@ -216,6 +242,7 @@ async fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> SocketResult<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::management::ws::protocol::{STREAM_FLAG_FINAL, StreamAckFrame, StreamChunkFrame};
     use tokio::io::AsyncWriteExt;
     use tokio::net::UnixStream;
 
@@ -274,5 +301,35 @@ mod tests {
             .await
             .expect_err("malformed payload should fail");
         assert_eq!(err.kind(), SocketErrorKind::Codec);
+    }
+
+    #[tokio::test]
+    async fn stream_chunk_roundtrip() {
+        let (mut client, mut server) = UnixStream::pair().expect("pair");
+        let frame = WsFrame::StreamChunk(StreamChunkFrame {
+            stream_id: 42,
+            seq: 7,
+            flags: STREAM_FLAG_FINAL,
+            payload: vec![1, 2, 3, 4],
+        });
+
+        write_stream_frame(&mut client, &frame).await.unwrap();
+        let received = read_stream_frame(&mut server).await.unwrap();
+
+        assert_eq!(received, frame);
+    }
+
+    #[tokio::test]
+    async fn stream_ack_roundtrip() {
+        let (mut client, mut server) = UnixStream::pair().expect("pair");
+        let frame = WsFrame::Ack(StreamAckFrame {
+            stream_id: 9,
+            seq: 11,
+        });
+
+        write_stream_frame(&mut client, &frame).await.unwrap();
+        let received = read_stream_frame(&mut server).await.unwrap();
+
+        assert_eq!(received, frame);
     }
 }

@@ -45,6 +45,38 @@ This guide summarizes how NoPressure builds, watches, and ships the `nop` binary
 - `nop user` subcommands provide user management for release manifests (including password hashing).
 - `nop/BUILD.md` contains legacy build notes; this DevOps doc supersedes it for quick reference but remains a detailed companion.
 
+## Security Audits (Rust + Node)
+
+This repo ships both Rust and Node dependencies. Audit findings must be reviewed before release and treated consistently.
+
+Required steps:
+- Run `cargo audit` from `nop/`.
+- Run `npm audit` from `nop/ts/site`, `nop/ts/login`, `nop/ts/admin`, and `tests/playwright`.
+- For each finding, locate the code path in this repo that uses the vulnerable dependency.
+- Confirm whether the vulnerable functionality is actually exercised by the code path in use.
+- If a fix exists, update to the patched version and re-run audits.
+- If no fix exists and the vulnerable functionality is not exercised, record the rationale and keep monitoring upstream.
+- If no fix exists and the vulnerable functionality is exercised, flag it as a major release issue with mitigation notes.
+- After all fixes are applied, run the full test suite across the codebase.
+
+### Reporting Format
+
+For each audit finding, produce one of the following report styles.
+
+Simple note (fix exists or functionality not exercised):
+- Vulnerability identifier(s) and package/version.
+- One or two sentences describing what the package provides.
+- One or two sentences describing the vulnerability.
+- Status statement: fixed in this release, or not exercised by current code paths.
+
+Detailed report (no fix exists and vulnerable functionality is exercised):
+- Vulnerability identifier(s) and package/version.
+- One or two sentences describing what the package provides.
+- One or two sentences describing the vulnerability.
+- Exact usage location in this repo (file path + line).
+- Impact summary specific to the actual code path.
+- Mitigation options or compensating controls.
+
 ## Operational Checklist
 
 1. Ensure configuration files exist: copy `examples/config.yaml.example` and `examples/users.yaml.example` into the runtime root (or rely on auto-bootstrap defaults).

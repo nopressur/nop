@@ -22,6 +22,7 @@ use crate::management::registry::{DomainActionKey, ManagementHandler, Management
 use crate::management::ws::WS_MAX_STREAM_CHUNK_BYTES;
 use crate::management::{OptionMap, WireDecode, WireEncode, WireReader, WireResult, WireWriter};
 use crate::public::page_meta_cache::{CachedObject, PageMetaCache};
+use crate::search::{UpsertMarkdownFromDiskRequest, UpsertMarkdownInMemoryRequest};
 use crate::util::detect_mime_type;
 use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, min};
@@ -156,6 +157,7 @@ pub struct ContentListRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentReadRequest {
     pub id: String,
+    pub stream_content: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -300,6 +302,9 @@ pub struct ContentReadResponse {
     pub original_filename: Option<String>,
     pub theme: Option<String>,
     pub content: Option<String>,
+    pub stream_id: Option<u32>,
+    pub chunk_bytes: Option<u32>,
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -308,6 +313,21 @@ pub struct ContentUploadResponse {
     pub alias: String,
     pub mime: String,
     pub is_markdown: bool,
+}
+
+pub fn content_summary_from_object(object: &CachedObject) -> ContentSummary {
+    ContentSummary {
+        id: content_id_hex(object.key.id),
+        alias: object.alias.clone(),
+        title: object.title.clone(),
+        mime: object.mime.clone(),
+        tags: object.tags.clone(),
+        nav_title: object.nav_title.clone(),
+        nav_parent_id: object.nav_parent_id.clone(),
+        nav_order: object.nav_order,
+        original_filename: object.original_filename.clone(),
+        is_markdown: object.is_markdown,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -429,15 +449,26 @@ impl WireDecode for ContentListRequest {
 
 impl WireEncode for ContentReadRequest {
     fn encode(&self, writer: &mut WireWriter) -> WireResult<()> {
-        writer.write_string(&self.id)
+        let option_flags = [self.stream_content.is_some()];
+        OptionMap::from_flags(&option_flags)?.write(writer)?;
+        writer.write_string(&self.id)?;
+        if let Some(value) = self.stream_content {
+            writer.write_bool(value);
+        }
+        Ok(())
     }
 }
 
 impl WireDecode for ContentReadRequest {
     fn decode(reader: &mut WireReader) -> WireResult<Self> {
-        Ok(Self {
-            id: reader.read_string()?,
-        })
+        let flags = OptionMap::read(reader, 1)?;
+        let id = reader.read_string()?;
+        let stream_content = if flags[0] {
+            Some(reader.read_bool()?)
+        } else {
+            None
+        };
+        Ok(Self { id, stream_content })
     }
 }
 
@@ -1139,6 +1170,9 @@ impl WireEncode for ContentReadResponse {
             self.original_filename.is_some(),
             self.theme.is_some(),
             self.content.is_some(),
+            self.stream_id.is_some(),
+            self.chunk_bytes.is_some(),
+            self.size_bytes.is_some(),
         ];
         OptionMap::from_flags(&option_flags)?.write(writer)?;
         writer.write_string(&self.id)?;
@@ -1166,13 +1200,22 @@ impl WireEncode for ContentReadResponse {
         if let Some(value) = &self.content {
             writer.write_string(value)?;
         }
+        if let Some(value) = self.stream_id {
+            writer.write_u32(value);
+        }
+        if let Some(value) = self.chunk_bytes {
+            writer.write_u32(value);
+        }
+        if let Some(value) = self.size_bytes {
+            writer.write_u64(value);
+        }
         Ok(())
     }
 }
 
 impl WireDecode for ContentReadResponse {
     fn decode(reader: &mut WireReader) -> WireResult<Self> {
-        let flags = OptionMap::read(reader, 7)?;
+        let flags = OptionMap::read(reader, 10)?;
         let id = reader.read_string()?;
         let alias = reader.read_string()?;
         let title = if flags[0] {
@@ -1212,6 +1255,21 @@ impl WireDecode for ContentReadResponse {
         } else {
             None
         };
+        let stream_id = if flags[7] {
+            Some(reader.read_u32()?)
+        } else {
+            None
+        };
+        let chunk_bytes = if flags[8] {
+            Some(reader.read_u32()?)
+        } else {
+            None
+        };
+        let size_bytes = if flags[9] {
+            Some(reader.read_u64()?)
+        } else {
+            None
+        };
         Ok(Self {
             id,
             alias,
@@ -1224,6 +1282,9 @@ impl WireDecode for ContentReadResponse {
             original_filename,
             theme,
             content,
+            stream_id,
+            chunk_bytes,
+            size_bytes,
         })
     }
 }
@@ -1736,18 +1797,7 @@ async fn handle_list(
 
     let response_items = page_items
         .into_iter()
-        .map(|object| ContentSummary {
-            id: content_id_hex(object.key.id),
-            alias: object.alias,
-            title: object.title,
-            mime: object.mime,
-            tags: object.tags,
-            nav_title: object.nav_title,
-            nav_parent_id: object.nav_parent_id,
-            nav_order: object.nav_order,
-            original_filename: object.original_filename,
-            is_markdown: object.is_markdown,
-        })
+        .map(|object| content_summary_from_object(&object))
         .collect();
 
     ManagementResponse {
@@ -1941,6 +1991,7 @@ async fn handle_read(
     workflow_id: u32,
     context: &ManagementContext,
 ) -> ManagementResponse {
+    let stream_requested = payload.stream_content.unwrap_or(false);
     let content_id = match parse_id_or_err(&payload.id) {
         Ok(id) => id,
         Err(err) => return response_err(CONTENT_ACTION_READ_ERR, workflow_id, &err),
@@ -1976,6 +2027,9 @@ async fn handle_read(
     let nav_parent_id = normalize_nav_parent_value(&sidecar.nav_parent_id, nav_title.is_some());
     let nav_order = normalize_nav_order_value(&sidecar.nav_order, nav_title.is_some());
 
+    let mut stream_id = None;
+    let mut chunk_bytes = None;
+    let mut size_bytes = None;
     let content = if object.is_markdown {
         let blob_path = blob_path(
             &context.runtime_paths.content_dir,
@@ -1993,6 +2047,26 @@ async fn handle_read(
             }
         }
     } else {
+        if stream_requested {
+            let blob_path = blob_path(
+                &context.runtime_paths.content_dir,
+                object.key.id,
+                object.key.version,
+            );
+            let metadata = match fs::metadata(&blob_path) {
+                Ok(metadata) => metadata,
+                Err(err) => {
+                    return response_err(
+                        CONTENT_ACTION_READ_ERR,
+                        workflow_id,
+                        &format!("Failed to read content metadata: {}", err),
+                    );
+                }
+            };
+            stream_id = Some(workflow_id);
+            chunk_bytes = Some(DEFAULT_STREAM_CHUNK_BYTES);
+            size_bytes = Some(metadata.len());
+        }
         None
     };
 
@@ -2012,6 +2086,9 @@ async fn handle_read(
             original_filename: sidecar.original_filename,
             theme: sidecar.theme,
             content,
+            stream_id,
+            chunk_bytes,
+            size_bytes,
         }),
     }
 }
@@ -2178,8 +2255,9 @@ async fn handle_update(
         );
     }
 
-    let content_bytes = payload.content.map(|content| content.into_bytes());
-    if let Some(content) = content_bytes {
+    let mut search_upsert_in_memory: Option<(ContentVersion, String)> = None;
+    let mut search_upsert_from_disk: Option<ContentVersion> = None;
+    if let Some(content_text) = payload.content {
         if !object.is_markdown {
             return response_err(
                 CONTENT_ACTION_UPDATE_ERR,
@@ -2187,14 +2265,14 @@ async fn handle_update(
                 "Only markdown content can be edited",
             );
         }
-        if content.is_empty() {
+        if content_text.is_empty() {
             return response_err(
                 CONTENT_ACTION_UPDATE_ERR,
                 workflow_id,
                 "Content cannot be empty",
             );
         }
-        if let Err(err) = resolve_upload_limit(content.len() as u64, &context.config) {
+        if let Err(err) = resolve_upload_limit(content_text.len() as u64, &context.config) {
             return response_err(CONTENT_ACTION_UPDATE_ERR, workflow_id, &err);
         }
 
@@ -2218,7 +2296,7 @@ async fn handle_update(
                 &format!("Failed to create shard dir: {}", err),
             );
         }
-        if let Err(err) = fs::write(&blob, content) {
+        if let Err(err) = fs::write(&blob, content_text.as_bytes()) {
             return response_err(
                 CONTENT_ACTION_UPDATE_ERR,
                 workflow_id,
@@ -2237,12 +2315,15 @@ async fn handle_update(
                 &format!("Failed to write sidecar: {}", err),
             );
         }
+        search_upsert_in_memory = Some((next_version, content_text));
     } else if let Err(err) = write_sidecar_atomic(&current_sidecar_path, &sidecar) {
         return response_err(
             CONTENT_ACTION_UPDATE_ERR,
             workflow_id,
             &format!("Failed to update sidecar: {}", err),
         );
+    } else if object.is_markdown {
+        search_upsert_from_disk = Some(object.key.version);
     }
 
     let mut child_nav_changed = false;
@@ -2251,6 +2332,25 @@ async fn handle_update(
             Ok(changed) => child_nav_changed = changed,
             Err(err) => return response_err(CONTENT_ACTION_UPDATE_ERR, workflow_id, &err),
         }
+    }
+
+    if let Some((version, body)) = search_upsert_in_memory {
+        enqueue_markdown_upsert_in_memory(
+            context,
+            object.key.id,
+            version,
+            &sidecar,
+            body,
+            "content.update.in_memory",
+        );
+    } else if let Some(version) = search_upsert_from_disk {
+        enqueue_markdown_upsert_from_disk(
+            context,
+            object.key.id,
+            version,
+            sidecar.mime.trim() == "text/markdown",
+            "content.update.from_disk",
+        );
     }
 
     invalidate_cache(context).await;
@@ -2293,6 +2393,8 @@ async fn handle_delete(
             &format!("Failed to delete content: {}", err),
         );
     }
+
+    enqueue_markdown_delete(context, object.key.id, object.is_markdown, "content.delete");
 
     invalidate_cache(context).await;
     if nav_has_entry {
@@ -2362,6 +2464,20 @@ async fn handle_upload(
             .unwrap_or("upload");
         detect_mime_type(Path::new(filename), &payload.content)
     };
+    let markdown_body = if mime == "text/markdown" {
+        match std::str::from_utf8(&payload.content) {
+            Ok(content) => Some(content.to_string()),
+            Err(_) => {
+                return response_err(
+                    CONTENT_ACTION_UPLOAD_ERR,
+                    workflow_id,
+                    "Markdown content must be valid UTF-8",
+                );
+            }
+        }
+    } else {
+        None
+    };
 
     let nav_title = normalize_nav_title_value(&payload.nav_title);
     let mut nav_parent_id = normalize_nav_parent_value(&payload.nav_parent_id, nav_title.is_some());
@@ -2429,6 +2545,17 @@ async fn handle_upload(
             CONTENT_ACTION_UPLOAD_ERR,
             workflow_id,
             &format!("Failed to write sidecar: {}", err),
+        );
+    }
+
+    if let Some(body) = markdown_body {
+        enqueue_markdown_upsert_in_memory(
+            context,
+            content_id,
+            version,
+            &sidecar,
+            body,
+            "content.upload.in_memory",
         );
     }
 
@@ -2951,6 +3078,14 @@ async fn handle_upload_stream_commit(
         );
     }
 
+    enqueue_markdown_upsert_from_disk(
+        context,
+        content_id,
+        version,
+        true,
+        "content.upload_stream_commit.from_disk",
+    );
+
     invalidate_cache(context).await;
     if meta.sidecar.nav_title.is_some() {
         bump_release_tracker_for_nav_change(context, content_id);
@@ -3319,6 +3454,14 @@ async fn handle_update_stream_commit(
         }
     }
 
+    enqueue_markdown_upsert_from_disk(
+        context,
+        content_id,
+        next_version,
+        true,
+        "content.update_stream_commit.from_disk",
+    );
+
     invalidate_cache(context).await;
     if meta.nav_changed || child_nav_changed {
         bump_release_tracker_for_nav_change(context, content_id);
@@ -3328,6 +3471,95 @@ async fn handle_update_stream_commit(
         workflow_id,
         "Content updated successfully",
     )
+}
+
+fn enqueue_markdown_upsert_in_memory(
+    context: &ManagementContext,
+    id: ContentId,
+    version: ContentVersion,
+    sidecar: &ContentSidecar,
+    body: String,
+    source: &str,
+) {
+    if sidecar.mime.trim() != "text/markdown" {
+        return;
+    }
+    let Some(search_service) = context.search_service.as_ref() else {
+        return;
+    };
+    let Some(title) = sidecar.title.as_ref() else {
+        log::warn!(
+            "Search enqueue skipped for {} id={} due to missing markdown title",
+            source,
+            content_id_hex(id)
+        );
+        return;
+    };
+    let request = UpsertMarkdownInMemoryRequest {
+        id,
+        version,
+        alias: sidecar.alias.clone(),
+        title: title.clone(),
+        tags: sidecar.tags.clone(),
+        body,
+    };
+    if let Err(err) = search_service.enqueue_upsert_markdown_in_memory(request) {
+        log::warn!(
+            "Search enqueue failed for {} id={} version={}: {}",
+            source,
+            content_id_hex(id),
+            version.0,
+            err
+        );
+    }
+}
+
+fn enqueue_markdown_upsert_from_disk(
+    context: &ManagementContext,
+    id: ContentId,
+    version: ContentVersion,
+    is_markdown: bool,
+    source: &str,
+) {
+    if !is_markdown {
+        return;
+    }
+    let Some(search_service) = context.search_service.as_ref() else {
+        return;
+    };
+    if let Err(err) = search_service
+        .enqueue_upsert_markdown_from_disk(UpsertMarkdownFromDiskRequest { id, version })
+    {
+        log::warn!(
+            "Search enqueue failed for {} id={} version={}: {}",
+            source,
+            content_id_hex(id),
+            version.0,
+            err
+        );
+    }
+}
+
+fn enqueue_markdown_delete(
+    context: &ManagementContext,
+    id: ContentId,
+    is_markdown: bool,
+    source: &str,
+) {
+    if !is_markdown {
+        return;
+    }
+    let Some(search_service) = context.search_service.as_ref() else {
+        return;
+    };
+    if let Err(err) = search_service.enqueue_delete_markdown(id) {
+        log::warn!(
+            "Search enqueue failed for {} id={}: {}",
+            source,
+            content_id_hex(id),
+            err
+        );
+    }
 }
 
 async fn get_cache(context: &ManagementContext) -> Result<PageMetaCache, String> {

@@ -40,6 +40,7 @@ const config: LoginRuntimeConfig = {
     outputLen: 32,
     saltLen: 16
   },
+  passwordComplexityEnabled: true,
   returnPath: null,
   user: null
 };

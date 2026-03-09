@@ -68,6 +68,10 @@ const browserMocks = vi.hoisted(() => ({
   writeClipboardText: vi.fn().mockResolvedValue(true),
 }));
 
+const searchMocks = vi.hoisted(() => ({
+  findSearch: vi.fn().mockResolvedValue({ hits: [] }),
+}));
+
 vi.mock("../services/browser", async () => {
   const actual = await vi.importActual<typeof import("../services/browser")>(
     "../services/browser",
@@ -105,6 +109,10 @@ vi.mock("../services/content", async () => {
     uploadBinaryFile: contentMocks.uploadBinaryFile,
   };
 });
+
+vi.mock("../services/search", () => ({
+  findSearch: searchMocks.findSearch,
+}));
 
 const tagMocks = vi.hoisted(() => ({
   listTags: vi.fn(),
@@ -160,6 +168,7 @@ describe("ContentEditorView", () => {
         outputLen: 32,
         saltLen: 16,
       },
+      passwordComplexityEnabled: true,
     });
     contentMocks.parseContentTags.mockReturnValue({ tags: [], error: null });
     contentMocks.defaultAliasForFile.mockImplementation((file: File, basePrefix?: string | null) => {

@@ -6,13 +6,14 @@
 use super::cache::{PageMetaCache, ResolvedRoles};
 use crate::config::ValidatedConfig;
 use crate::iam::User;
+use crate::iam::roles::{ResolvedRoleSet, has_access_for_roles};
 use actix_web::HttpRequest;
 use log::debug;
 
 impl PageMetaCache {
     pub fn user_has_access(&self, alias: &str, user: Option<&User>) -> Option<bool> {
         let object = self.get_by_alias(alias)?;
-        Some(has_access_for_roles(&object.resolved_roles, user))
+        Some(has_access_for_cached_roles(&object.resolved_roles, user))
     }
 
     pub fn resolved_roles(&self, alias: &str) -> Option<ResolvedRoles> {
@@ -21,24 +22,13 @@ impl PageMetaCache {
     }
 }
 
-fn has_access_for_roles(resolved_roles: &ResolvedRoles, user: Option<&User>) -> bool {
-    match resolved_roles {
-        ResolvedRoles::Public => true,
-        ResolvedRoles::Deny => false,
-        ResolvedRoles::Restricted(required_roles) => {
-            let Some(user) = user else {
-                return false;
-            };
-
-            if user.roles.iter().any(|role| role == "admin") {
-                return true;
-            }
-
-            user.roles
-                .iter()
-                .any(|role| required_roles.iter().any(|required| required == role))
-        }
-    }
+fn has_access_for_cached_roles(resolved_roles: &ResolvedRoles, user: Option<&User>) -> bool {
+    let resolved = match resolved_roles {
+        ResolvedRoles::Public => ResolvedRoleSet::Public,
+        ResolvedRoles::Deny => ResolvedRoleSet::Deny,
+        ResolvedRoles::Restricted(roles) => ResolvedRoleSet::Restricted(roles.clone()),
+    };
+    has_access_for_roles(&resolved, user)
 }
 
 /// Check if an alias exists and if user has access (using tag-based role resolution).
@@ -57,7 +47,7 @@ pub fn check_file_access(
                 return (true, true);
             }
 
-            let has_access = has_access_for_roles(&object.resolved_roles, user);
+            let has_access = has_access_for_cached_roles(&object.resolved_roles, user);
             (true, has_access)
         }
         None => {

@@ -151,6 +151,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
     : contentId
       ? `/id/${contentId}`
       : "#";
+  $: isDisplayableImage = !isMarkdown && Boolean(mime?.startsWith("image/"));
+  $: imageAltText =
+    title?.trim() || originalFilename?.trim() || currentAlias?.trim() || "Image preview";
 
   $: viewPagePath = isMarkdown && contentId
     ? buildContentPublicPath({ id: contentId })
@@ -991,7 +994,21 @@ The code and documentation in this repository is licensed under the GNU Affero G
         </div>
       {:else}
         <div class="mt-4 rounded-lg border border-border bg-surface-2 px-4 py-6 text-sm text-muted">
-          This file is not markdown. <a class="underline" href={downloadPath}>Download</a>
+          <div class="flex flex-wrap items-center gap-2">
+            <span>This file is not markdown.</span>
+            <a class="underline" href={downloadPath}>Download</a>
+          </div>
+          {#if isDisplayableImage}
+            <div class="mt-4 overflow-hidden rounded-lg border border-border bg-surface">
+              <img
+                src={downloadPath}
+                alt={imageAltText}
+                class="max-h-[420px] w-full object-contain"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          {/if}
         </div>
       {/if}
     {/if}

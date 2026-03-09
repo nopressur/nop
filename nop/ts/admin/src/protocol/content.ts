@@ -124,9 +124,20 @@ export function encodeContentListRequest(payload: {
   return writer.toUint8Array();
 }
 
-export function encodeContentReadRequest(payload: { id: string }): Uint8Array {
+export function encodeContentReadRequest(payload: {
+  id: string;
+  streamContent?: boolean | null;
+}): Uint8Array {
   const writer = new WireWriter();
+  const optionFlags = [
+    payload.streamContent !== null && payload.streamContent !== undefined,
+  ];
+  OptionMap.write(writer, optionFlags);
+
   writer.writeString(payload.id);
+  if (optionFlags[0]) {
+    writer.writeBool(payload.streamContent as boolean);
+  }
   return writer.toUint8Array();
 }
 
@@ -495,9 +506,12 @@ export function decodeContentReadResponse(bytes: Uint8Array): {
   originalFilename: string | null;
   theme: string | null;
   content: string | null;
+  streamId: number | null;
+  chunkBytes: number | null;
+  sizeBytes: number | null;
 } {
   const reader = new WireReader(bytes);
-  const flags = OptionMap.read(reader, 7);
+  const flags = OptionMap.read(reader, 10);
   const id = reader.readString();
   const alias = reader.readString();
   const title = flags[0] ? reader.readString() : null;
@@ -509,6 +523,9 @@ export function decodeContentReadResponse(bytes: Uint8Array): {
   const originalFilename = flags[4] ? reader.readString() : null;
   const theme = flags[5] ? reader.readString() : null;
   const content = flags[6] ? reader.readString() : null;
+  const streamId = flags[7] ? reader.readU32() : null;
+  const chunkBytes = flags[8] ? reader.readU32() : null;
+  const sizeBytes = flags[9] ? reader.readU64Number() : null;
   reader.ensureFullyConsumed();
   return {
     id,
@@ -522,6 +539,9 @@ export function decodeContentReadResponse(bytes: Uint8Array): {
     originalFilename,
     theme,
     content,
+    streamId,
+    chunkBytes,
+    sizeBytes,
   };
 }
 

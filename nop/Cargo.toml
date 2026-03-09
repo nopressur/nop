@@ -1,6 +1,6 @@
 [package]
 name = "nop"
-version = "0.1.28"
+version = "0.1.29"
 edition = "2024"
 build = "build.rs"
 default-run = "nop"
@@ -55,6 +55,7 @@ nom = "8.0.0"
 libc = "0.2.180"
 rpassword = "7.3"
 ring = "0.17"
+tantivy = "0.25"
 
 [build-dependencies]
 flate2 = "1.1.8"

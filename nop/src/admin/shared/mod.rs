@@ -58,6 +58,7 @@ struct AdminSpaRuntimeConfig {
     ws_ticket_path: String,
     user_management_enabled: bool,
     password_front_end: AdminPasswordFrontEndParams,
+    password_complexity_enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -94,6 +95,11 @@ pub async fn render_admin_spa_shell_html(
             output_len: front_end_params.output_len,
             salt_len: front_end_params.salt_len,
         },
+        password_complexity_enabled: config
+            .users
+            .local()
+            .map(|local| local.password_complexity_enabled)
+            .unwrap_or(true),
     };
 
     let runtime_config_json = serde_json::to_string(&runtime_config).map_err(|err| {

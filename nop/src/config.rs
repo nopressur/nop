@@ -10,6 +10,8 @@ use std::fs;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 
+pub const SEARCH_MAX_WORKER_COUNT: usize = 16;
+
 #[derive(Debug)]
 pub enum ConfigError {
     LoadError(String),
@@ -154,6 +156,31 @@ fn default_short_paragraph_length() -> usize {
     256
 }
 
+fn default_search_max_memory_mb() -> u64 {
+    128
+}
+
+fn default_search_worker_count() -> usize {
+    1
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SearchConfig {
+    #[serde(default = "default_search_max_memory_mb")]
+    pub max_memory_mb: u64,
+    #[serde(default = "default_search_worker_count")]
+    pub worker_count: usize,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            max_memory_mb: default_search_max_memory_mb(),
+            worker_count: default_search_worker_count(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RenderingConfig {
     #[serde(default = "default_short_paragraph_length")]
@@ -186,6 +213,8 @@ pub struct Config {
     pub shortcodes: ShortcodeConfig,
     #[serde(default)]
     pub rendering: RenderingConfig,
+    #[serde(default)]
+    pub search: SearchConfig,
     pub dev_mode: Option<DevMode>,
 }
 
@@ -206,6 +235,7 @@ pub struct ValidatedConfig {
     pub streaming: StreamingConfig,
     pub shortcodes: ShortcodeConfig,
     pub rendering: RenderingConfig,
+    pub search: SearchConfig,
     pub dev_mode: Option<DevMode>,
 }
 
@@ -513,6 +543,8 @@ pub struct LocalAuthConfig {
     pub jwt: JwtConfig,
     #[serde(default)]
     pub password: PasswordHashingConfig,
+    #[serde(default)]
+    pub password_complexity_disabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -722,6 +754,7 @@ impl ValidatedUsersConfig {
 pub struct ValidatedLocalAuthConfig {
     pub jwt: JwtConfig,
     pub password: PasswordHashingParams,
+    pub password_complexity_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -822,6 +855,7 @@ pub fn test_local_users_config() -> ValidatedUsersConfig {
             front_end: default_argon2_front_end_params(),
             back_end: default_argon2_back_end_params(),
         },
+        password_complexity_enabled: true,
     })
 }
 
@@ -863,7 +897,7 @@ impl Config {
 
     /// Loads and validates configuration at startup. If validation fails, the application should not start.
     pub fn load_and_validate(root: &Path) -> Result<ValidatedConfig, ConfigError> {
-        let config = Self::load(root)?;
+        let mut config = Self::load(root)?;
 
         // Validate users configuration based on auth method
         let validated_users = match config.users.auth_method {
@@ -918,9 +952,23 @@ impl Config {
                     )?,
                 };
 
+                let password_complexity_enabled = if local_config.password_complexity_disabled {
+                    if cfg!(debug_assertions) {
+                        false
+                    } else {
+                        log::info!(
+                            "password complexity disabled was set to true, ignored in production"
+                        );
+                        true
+                    }
+                } else {
+                    true
+                };
+
                 ValidatedUsersConfig::Local(ValidatedLocalAuthConfig {
                     jwt: local_config.jwt.clone(),
                     password: password_params,
+                    password_complexity_enabled,
                 })
             }
             AuthMethod::Oidc => {
@@ -974,6 +1022,24 @@ impl Config {
             Self::validate_tls_config(tls)?;
         }
 
+        if config.search.max_memory_mb == 0 {
+            return Err(ConfigError::ValidationError(
+                "search.max_memory_mb must be greater than 0".to_string(),
+            ));
+        }
+        if config.search.worker_count == 0 {
+            return Err(ConfigError::ValidationError(
+                "search.worker_count must be greater than 0".to_string(),
+            ));
+        }
+        if config.search.worker_count > SEARCH_MAX_WORKER_COUNT {
+            warn!(
+                "search.worker_count ({}) exceeds max ({}); clamping to {}",
+                config.search.worker_count, SEARCH_MAX_WORKER_COUNT, SEARCH_MAX_WORKER_COUNT
+            );
+            config.search.worker_count = SEARCH_MAX_WORKER_COUNT;
+        }
+
         let validated_config = ValidatedConfig {
             servers,
             server: config.server,
@@ -988,6 +1054,7 @@ impl Config {
             streaming: config.streaming,
             shortcodes: config.shortcodes,
             rendering: config.rendering,
+            search: config.search,
             dev_mode,
         };
 
@@ -1238,6 +1305,7 @@ mod tests {
     use super::*;
     use crate::util::test_fixtures::TestFixtureRoot;
     use std::fs;
+    use std::path::Path;
 
     fn base_server_config() -> ServerConfig {
         ServerConfig {
@@ -1419,5 +1487,96 @@ mod tests {
         });
         let result = Config::validate_tls_config(&tls);
         assert!(result.is_err(), "exec dns provider should fail");
+    }
+
+    fn write_local_config_with_search(
+        root: &Path,
+        search_block: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let content = format!(
+            r#"server:
+  host: "127.0.0.1"
+  port: 8080
+  workers: 1
+
+admin:
+  path: "/admin"
+
+users:
+  auth_method: "local"
+  local:
+    jwt:
+      secret: "test-secret"
+
+navigation:
+  max_dropdown_items: 7
+
+logging:
+  level: "info"
+
+security:
+  max_violations: 2
+  cooldown_seconds: 30
+  use_forwarded_for: false
+  hsts_enabled: false
+  hsts_max_age: 31536000
+  hsts_include_subdomains: true
+  hsts_preload: false
+
+app:
+  name: "Test"
+  description: "Test"
+
+upload:
+  max_file_size_mb: 100
+
+search:
+{}
+"#,
+            search_block
+        );
+        fs::write(root.join("config.yaml"), content)?;
+        Ok(())
+    }
+
+    #[test]
+    fn load_and_validate_clamps_search_worker_count_to_max_with_warning_path() {
+        let fixture = TestFixtureRoot::new_unique("config-search-clamp").unwrap();
+        write_local_config_with_search(fixture.path(), "  worker_count: 999\n  max_memory_mb: 256")
+            .expect("write config");
+
+        let validated = Config::load_and_validate(fixture.path()).expect("config should validate");
+        assert_eq!(validated.search.worker_count, SEARCH_MAX_WORKER_COUNT);
+        assert_eq!(validated.search.max_memory_mb, 256);
+    }
+
+    #[test]
+    fn load_and_validate_rejects_zero_search_worker_count() {
+        let fixture = TestFixtureRoot::new_unique("config-search-worker-zero").unwrap();
+        write_local_config_with_search(fixture.path(), "  worker_count: 0\n  max_memory_mb: 128")
+            .expect("write config");
+
+        let err = Config::load_and_validate(fixture.path()).expect_err("worker_count=0 must fail");
+        assert!(
+            err.to_string()
+                .contains("search.worker_count must be greater than 0"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn load_and_validate_rejects_zero_search_max_memory_mb() {
+        let fixture = TestFixtureRoot::new_unique("config-search-memory-zero").unwrap();
+        write_local_config_with_search(fixture.path(), "  worker_count: 1\n  max_memory_mb: 0")
+            .expect("write config");
+
+        let err = Config::load_and_validate(fixture.path()).expect_err("max_memory_mb=0 must fail");
+        assert!(
+            err.to_string()
+                .contains("search.max_memory_mb must be greater than 0"),
+            "unexpected error: {}",
+            err
+        );
     }
 }

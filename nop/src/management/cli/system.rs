@@ -49,6 +49,7 @@ pub fn ping_command() -> Result<CliCommand, CliError> {
             version_patch: version.patch,
         })),
         success_actions: vec![DomainActionKey::new(SYSTEM_DOMAIN_ID, SYSTEM_ACTION_PONG)],
+        stream_target: None,
     })
 }
 
@@ -89,6 +90,7 @@ fn parse_logging_show(args: &[String]) -> Result<CliCommand, CliError> {
             SYSTEM_DOMAIN_ID,
             SYSTEM_ACTION_LOGGING_GET_OK,
         )],
+        stream_target: None,
     })
 }
 
@@ -140,6 +142,7 @@ fn parse_logging_set(args: &[String]) -> Result<CliCommand, CliError> {
             SYSTEM_DOMAIN_ID,
             SYSTEM_ACTION_LOGGING_SET_OK,
         )],
+        stream_target: None,
     })
 }
 
@@ -153,6 +156,7 @@ fn parse_logging_clear(args: &[String]) -> Result<CliCommand, CliError> {
             SYSTEM_DOMAIN_ID,
             SYSTEM_ACTION_LOGGING_CLEAR_OK,
         )],
+        stream_target: None,
     })
 }
 

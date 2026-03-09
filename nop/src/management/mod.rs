@@ -351,6 +351,7 @@ mod core;
 mod errors;
 mod registry;
 mod roles;
+mod search;
 pub mod socket;
 mod system;
 mod tags;
@@ -411,6 +412,12 @@ pub use roles::{
     RoleChangeRequest, RoleCommand, RoleDeleteRequest, RoleListRequest, RoleListResponse,
     RoleShowRequest, RoleShowResponse,
 };
+pub use search::{
+    SEARCH_ACTION_FIND, SEARCH_ACTION_FIND_ERR, SEARCH_ACTION_FIND_OK, SEARCH_ACTION_INVALIDATE,
+    SEARCH_ACTION_INVALIDATE_ERR, SEARCH_ACTION_INVALIDATE_OK, SEARCH_ACTION_RESET,
+    SEARCH_ACTION_RESET_ERR, SEARCH_ACTION_RESET_OK, SEARCH_DOMAIN_ID, SearchCommand,
+    SearchFindRequest, SearchFindResponse, SearchInvalidateRequest, SearchResetRequest,
+};
 pub use system::{
     ClearLogsRequest, ClearLogsResponse, GetLoggingConfigRequest, LoggingConfigResponse,
     PingRequest, PongErrorResponse, PongResponse, SYSTEM_ACTION_LOGGING_CLEAR,
@@ -457,5 +464,6 @@ pub fn build_default_registry() -> Result<ManagementRegistry, RegistryError> {
     roles::register(&mut registry)?;
     tags::register(&mut registry)?;
     content::register(&mut registry)?;
+    search::register(&mut registry)?;
     Ok(registry)
 }

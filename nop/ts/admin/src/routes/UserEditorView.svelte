@@ -9,7 +9,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import { onDestroy, onMount } from "svelte";
   import Button from "../components/Button.svelte";
   import Input from "../components/Input.svelte";
-  import { getAdminBootstrap } from "../config/runtime";
+  import { getAdminBootstrap, getAdminRuntimeConfig } from "../config/runtime";
   import { confirmDialog } from "../stores/confirmDialog";
   import { pushNotification } from "../stores/notifications";
   import { route, navigate } from "../stores/router";
@@ -27,6 +27,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   } from "../services/response";
   import { listRoles } from "../services/roles";
   import { validateEmailAddress } from "../validation/email";
+  import { evaluatePasswordComplexity } from "../validation/password_complexity";
   import { addWindowListener, removeWindowListener } from "../services/browser";
 
   type Bootstrap = {
@@ -45,12 +46,28 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let initialName = "";
 
   let loading = false;
+  const passwordComplexityEnabled =
+    getAdminRuntimeConfig().passwordComplexityEnabled;
 
   $: currentPath = $route.path;
   $: isNew = currentPath.startsWith("/users/new");
   $: editingEmail = currentPath.startsWith("/users/edit/")
     ? decodeURIComponent(currentPath.replace("/users/edit/", ""))
     : "";
+  $: passwordComplexity = evaluatePasswordComplexity(password);
+  $: shouldValidatePassword =
+    isNew || password.length > 0 || confirm.length > 0;
+  $: passwordRequirementsMet =
+    !passwordComplexityEnabled ||
+    !shouldValidatePassword ||
+    passwordComplexity.valid;
+  $: passwordNote =
+    passwordComplexityEnabled &&
+    passwordComplexity.length > 3 &&
+    !passwordComplexity.valid
+      ? passwordComplexity.message
+      : "";
+  $: saveDisabled = loading || !passwordRequirementsMet;
 
   onMount(() => {
     void init();
@@ -111,12 +128,14 @@ The code and documentation in this repository is licensed under the GNU Affero G
       (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
     if (isSaveKey) {
       event.preventDefault();
-      void saveUser();
+      if (!saveDisabled) {
+        void saveUser();
+      }
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      if (!loading) {
+      if (!saveDisabled) {
         void saveUser();
       }
       return;
@@ -165,6 +184,11 @@ The code and documentation in this repository is licensed under the GNU Affero G
         return;
       }
       passwordValue = password;
+    }
+
+    if (passwordValue && passwordComplexityEnabled && !passwordComplexity.valid) {
+      pushNotification(passwordComplexity.message, "error");
+      return;
     }
 
     if (isNew) {
@@ -258,7 +282,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
       <Button variant="outline" size="sm" on:click={() => navigate("/users")}
         >Cancel</Button
       >
-      <Button variant="primary" size="sm" on:click={saveUser} disabled={loading}
+      <Button variant="primary" size="sm" on:click={saveUser} disabled={saveDisabled}
         >Save</Button
       >
     </div>
@@ -285,6 +309,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
           <label for="user-confirm" class="text-[11px] uppercase tracking-[0.3em] text-muted">Confirm Password</label>
           <Input id="user-confirm" type="password" bind:value={confirm} className="mt-2" />
         </div>
+        {#if passwordNote}
+          <p class="md:col-span-2 mt-1 text-xs text-muted">{passwordNote}</p>
+        {/if}
       </div>
 
       <div class="mt-4">

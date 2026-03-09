@@ -52,6 +52,7 @@ impl TestFixtureRoot {
         fs::create_dir_all(self.themes_dir())?;
         fs::create_dir_all(self.state_dir().join("sys"))?;
         fs::create_dir_all(self.state_dir().join("sc"))?;
+        fs::create_dir_all(self.state_dir().join("sys").join("search").join("index"))?;
         Ok(())
     }
 
@@ -63,6 +64,13 @@ impl TestFixtureRoot {
         let state_dir = self.state_dir().canonicalize()?;
         let state_sys_dir = self.state_dir().join("sys").canonicalize()?;
         let state_sc_dir = self.state_dir().join("sc").canonicalize()?;
+        let state_search_dir = self.state_dir().join("sys").join("search").canonicalize()?;
+        let state_search_index_dir = self
+            .state_dir()
+            .join("sys")
+            .join("search")
+            .join("index")
+            .canonicalize()?;
 
         Ok(RuntimePaths {
             root,
@@ -73,6 +81,9 @@ impl TestFixtureRoot {
             state_dir,
             state_sys_dir,
             state_sc_dir,
+            state_search_dir: state_search_dir.clone(),
+            state_search_index_dir,
+            state_search_failed_ids_file: state_search_dir.join("failed-ids.yaml"),
             logs_dir: self.path.join("logs"),
         })
     }

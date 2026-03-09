@@ -84,6 +84,7 @@ async fn content_upload_list_update_delete() {
             3,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
+                stream_content: None,
             })),
         )
         .await
@@ -123,6 +124,7 @@ async fn content_upload_list_update_delete() {
             5,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
+                stream_content: None,
             })),
         )
         .await
@@ -343,6 +345,7 @@ async fn content_read_update_delete_by_id() {
             2,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
+                stream_content: None,
             })),
         )
         .await
@@ -375,6 +378,7 @@ async fn content_read_update_delete_by_id() {
             4,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
+                stream_content: None,
             })),
         )
         .await

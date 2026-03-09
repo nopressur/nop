@@ -8,9 +8,9 @@
 use crate::config::{
     AdminConfig, AppConfig, DEFAULT_ARGON2_BACK_END_PARAMS, DEFAULT_ARGON2_FRONT_END_PARAMS,
     DevMode, JwtConfig, LoggingConfig, LoggingRotationConfig, NavigationConfig,
-    PasswordHashingParams, RenderingConfig, SecurityConfig, ServerConfig, ServerListenerConfig,
-    ServerProtocol, ServerRole, ShortcodeConfig, StreamingConfig, UploadConfig, ValidatedConfig,
-    ValidatedLocalAuthConfig, ValidatedUsersConfig,
+    PasswordHashingParams, RenderingConfig, SearchConfig, SecurityConfig, ServerConfig,
+    ServerListenerConfig, ServerProtocol, ServerRole, ShortcodeConfig, StreamingConfig,
+    UploadConfig, ValidatedConfig, ValidatedLocalAuthConfig, ValidatedUsersConfig,
 };
 
 #[derive(Debug, Clone)]
@@ -68,6 +68,7 @@ impl TestConfigBuilder {
                 streaming: StreamingConfig { enabled: true },
                 shortcodes: ShortcodeConfig::default(),
                 rendering: RenderingConfig::default(),
+                search: SearchConfig::default(),
                 dev_mode: None,
             },
         }
@@ -124,5 +125,6 @@ fn build_test_local_users_config() -> ValidatedUsersConfig {
             front_end: DEFAULT_ARGON2_FRONT_END_PARAMS,
             back_end: DEFAULT_ARGON2_BACK_END_PARAMS,
         },
+        password_complexity_enabled: true,
     })
 }

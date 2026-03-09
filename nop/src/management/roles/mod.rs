@@ -303,12 +303,19 @@ impl RoleStore {
             )));
         }
         let mut roles = BTreeSet::new();
+        let mut should_persist = false;
+        let raw_len = raw.len();
         for role in raw {
             let normalized =
                 normalize_role(&role).map_err(|err| RoleStoreError::new(err.to_string()))?;
+            if normalized != role {
+                should_persist = true;
+            }
             roles.insert(normalized);
         }
-        let mut should_persist = false;
+        if roles.len() != raw_len {
+            should_persist = true;
+        }
         if !roles.contains(ADMIN_ROLE) {
             roles.insert(ADMIN_ROLE.to_string());
             should_persist = true;
@@ -1068,6 +1075,7 @@ mod tests {
             streaming: StreamingConfig { enabled: false },
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
+            search: crate::config::SearchConfig::default(),
             dev_mode: None,
         }
     }

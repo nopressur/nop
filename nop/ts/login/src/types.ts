@@ -31,6 +31,7 @@ export type LoginRuntimeConfig = {
   returnPath?: string | null;
   providers: LoginProvider[];
   passwordFrontEnd: PasswordFrontEndParams;
+  passwordComplexityEnabled: boolean;
   user?: LoginUser | null;
 };
 

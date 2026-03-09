@@ -17,6 +17,7 @@ pub mod management;
 pub mod public;
 pub mod roles;
 pub mod runtime_paths;
+pub mod search;
 pub mod security;
 pub mod templates;
 pub mod util;

@@ -1,22 +1,12 @@
 # Themes
 
-Status: In Progress
+Status: Developed
 
 ## Objectives
 
 - Move public theming to variable-only theme files with a built-in preset stylesheet.
 - Keep theme files simple (one key/value per line) while preserving light/dark palettes.
 - Provide a single, canonical reference for the theme format, variables, and built-in palettes.
-
-## Action Plan
-
-- [x] Document the theme format, variable catalog, and built-in palette files in this document.
-- [x] Update related docs to link here and remove theme-specific details from the content model doc.
-- [x] Transition built-in and seed themes to the `.theme` variable format.
-- [x] Add the theme preset stylesheet and update the public render pipeline to inject variables.
-- [x] Update admin theme editing and theme listings for the new extension.
-- [x] Update tests and fixtures that write theme files.
-- [ ] Confirm the variable catalog and defaults with stakeholders before marking Developed.
 
 ## Technical Details
 
@@ -41,7 +31,8 @@ Status: In Progress
   - `<link rel="stylesheet" href="/builtin/theme-preset.css?v=<release>">`
   - `<style>:root { --<key>: <value>; }</style>`
 - The rendered HTML snippet is injected into `public/templates/main_layout.html` via `{theme_content}`.
-- Admin code never reads `themes/`; only the public renderer loads theme files.
+- Admin theme endpoints read and write `.theme` files for list, create, customize, and delete.
+- Only the public renderer loads theme files for rendering responses.
 - The built-in preset stylesheet (generated into `nop/builtin/theme-preset.css` from
   `nop/ts/site/theme-preset.css`) contains all structural CSS and references the variables.
 
