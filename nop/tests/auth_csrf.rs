@@ -9,18 +9,22 @@ use actix_http::Request;
 use actix_web::body::BoxBody;
 use actix_web::dev::{Service, ServiceResponse};
 use actix_web::{http::StatusCode, test};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{EncodingKey, Header, encode};
-use nop::iam::jwt::Claims;
-use nop::iam::{build_password_provider_block, derive_front_end_hash};
-use nop::login::types::{
+use hmac::{Hmac, KeyInit, Mac};
+use nop_iam_passwords::{build_password_provider_block, derive_front_end_hash};
+use nop_rt_csrf::CSRF_HEADER_NAME;
+use nop_rt_iam::jwt::Claims;
+use nop_rt_login::types::{
     LoginBootstrapRequest, LoginBootstrapResponse, LoginErrorResponse, LoginSuccessResponse,
     PasswordEmailRequest, PasswordEmailResponse, PasswordLoginRequest,
     ProfilePasswordChangeRequest, ProfilePasswordSaltResponse, ProfileUpdateRequest,
 };
-use nop::util::csrf_validation::CSRF_HEADER_NAME;
 use serde_json::Value;
+use sha2::Sha256;
 use uuid::Uuid;
+
+type HmacSha256 = Hmac<Sha256>;
 
 const TEST_PEER_ADDR: &str = "127.0.0.1:1234";
 const LOGIN_CONFIG_MARKER: &str = "window.nopLoginConfig = ";
@@ -33,6 +37,16 @@ fn extract_login_config(body: &[u8]) -> Value {
     let end = remainder.find(';').expect("login config end");
     let json = &remainder[..end].trim();
     serde_json::from_str(json).expect("login config json")
+}
+
+fn hs256_token(claims: &Claims, secret: &str) -> String {
+    let header = URL_SAFE_NO_PAD.encode(br#"{"typ":"JWT","alg":"HS256"}"#);
+    let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(claims).expect("claims json"));
+    let signing_input = format!("{header}.{payload}");
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("hmac key");
+    mac.update(signing_input.as_bytes());
+    let signature = mac.finalize().into_bytes();
+    format!("{}.{}", signing_input, URL_SAFE_NO_PAD.encode(signature))
 }
 
 async fn login_bootstrap<S>(app: &S, return_path: Option<&str>) -> LoginBootstrapResponse
@@ -295,12 +309,7 @@ async fn logout_clears_cookie_without_refresh() {
         jti: Uuid::new_v4().to_string(),
         password_version: harness.admin_user.password_version,
     };
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(local_config.jwt.secret.as_ref()),
-    )
-    .expect("token");
+    let token = hs256_token(&claims, &local_config.jwt.secret);
     let cookie = jwt_service.create_auth_cookie(&token).into_owned();
 
     let req = test::TestRequest::post()

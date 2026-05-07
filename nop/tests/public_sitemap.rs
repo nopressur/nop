@@ -7,14 +7,14 @@ mod common;
 
 use actix_web::{http::StatusCode, test};
 use chrono::{DateTime, Utc};
-use nop::content::flat_storage::{
+use nop_content_store::flat_storage::{
     ContentId, ContentSidecar, ContentVersion, blob_path, content_id_hex, sidecar_path,
     write_sidecar_atomic,
 };
 use std::fs;
 
 fn write_markdown_object(
-    runtime_paths: &nop::runtime_paths::RuntimePaths,
+    runtime_paths: &nop_rt_paths::RuntimePaths,
     content_id: ContentId,
     alias: &str,
 ) {

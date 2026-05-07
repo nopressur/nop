@@ -166,6 +166,7 @@ export async function readContent(id: string): Promise<{
   originalFilename: string | null;
   theme: string | null;
   content: string | null;
+  sizeBytes: number | null;
 }> {
   const client = getAdminWsClient();
   const response = await client.request(

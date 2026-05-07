@@ -1,0 +1,11 @@
+[package]
+name = "nop-management-system"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+nop-config = { path = "../nop-config" }
+nop-management-contract = { path = "../nop-management-contract" }
+nop-management-errors = { path = "../nop-management-errors" }
+nop-rt-logging = { path = "../nop-rt-logging" }
+serde_yaml = "0.9"

@@ -33,7 +33,7 @@ This document is the single source of truth for admin content management. On-dis
 - Admin routes are mounted under `config.admin.path` (default `/admin`).
 - All admin routes are protected by `RequireAdminMiddleware` (admin role or dev-mode bypass in debug builds; release builds ignore `dev_mode`).
 - The admin UI is a Svelte SPA served by the MiniJinja shell template
-  `nop/src/admin/templates/spa_shell.html`, with assets built from `nop/ts/admin` into
+  `nop/crates/nop-admin/src/templates/spa_shell.html`, with assets built from `nop/ts/admin` into
   `/builtin/admin/admin-spa.{js,css}`.
 - The SPA pulls content data over WebSocket; server-side shells do not pre-render content lists.
 - CSRF tokens are refreshed via `/csrf-token-api` and required for mutating APIs.
@@ -146,6 +146,22 @@ Validation:
 - Theme (if enabled per object; see `docs/content/themes.md` for file format and selection).
 - Original filename (read-only).
 - Saving metadata updates the sidecar without altering blob versions.
+
+#### Markdown Paste-Merge
+
+- Markdown editors include a `Paste-Merge` toolbar action for appending clipboard text to the current
+  document.
+- Clipboard content is accepted when it is readable text with non-whitespace content; no full Markdown
+  validation is required.
+- If the existing document has a trailing numbered reference definition block, that block is moved to
+  the final end of the document after the pasted body.
+- Pasted numbered reference-style link labels and pasted numbered reference definitions are renumbered
+  after the highest existing numbered reference label in the document.
+- Orphaned pasted in-text reference labels are also renumbered, but no missing definition is created.
+  This preserves the pasted text's missing-definition state without making the label point at an
+  existing reference.
+- After a successful merge, the Markdown editor cursor moves to the end of the pasted body text,
+  before the final reference definition block when one exists.
 
 #### Editor Insert Modal
 
@@ -309,7 +325,7 @@ Field applicability:
 - Extend `nop/ts/admin/src/services` or `nop/ts/admin/src/transport` for new data flows,
   reusing existing WebSocket/REST helpers where possible.
 - If server-provided bootstrap data is required, pass it through
-  `render_admin_spa_shell_response` in `nop/src/admin/shared/mod.rs` and populate it in the
+  `render_admin_spa_shell_response` in `nop/crates/nop-admin/src/shared/mod.rs` and populate it in the
   relevant handler.
 - Always refresh `PageMetaCache` after content mutations so public navigation stays coherent.
 

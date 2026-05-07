@@ -3,25 +3,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use nop::config::{
+use nop_config::{
     AdminConfig, AppConfig, AuthMethod, Config, JwtConfig, LocalAuthConfig, LoggingConfig,
     LoggingRotationConfig, NavigationConfig, PasswordHashingConfig, RenderingConfig,
     SecurityConfig, ServerConfig, ShortcodeConfig, StreamingConfig, UploadConfig, UsersConfig,
 };
-use nop::content::flat_storage::{
+use nop_content_store::flat_storage::{
     ContentId, ContentSidecar, ContentVersion, blob_path, content_id_hex, sidecar_path,
     write_sidecar_atomic,
 };
-use nop::content::reserved_paths::ReservedPaths;
-use nop::management::socket::ManagementSocket;
-use nop::management::socket::client::{SocketClient, SocketConnect};
-use nop::management::ws::{StreamAckFrame, WsFrame};
-use nop::management::{
-    CONTENT_ACTION_READ_OK, ContentCommand, ContentReadRequest, ManagementBus, ManagementCommand,
-    ManagementContext, ResponsePayload, build_default_registry,
+use nop_content_store::reserved_paths::ReservedPaths;
+use nop_management_bus::socket::ManagementSocket;
+use nop_management_bus::socket::client::{SocketClient, SocketConnect};
+use nop_management_bus::ws::{StreamAckFrame, WsFrame};
+use nop_management_bus::{ManagementBus, ManagementContext, build_default_registry};
+use nop_management_contract::content::{
+    CONTENT_ACTION_READ_OK, ContentCommand, ContentReadRequest,
 };
-use nop::public::page_meta_cache::PageMetaCache;
-use nop::runtime_paths::RuntimePaths;
+use nop_management_contract::{ManagementCommand, ResponsePayload};
+use nop_rt_page_cache::PageMetaCache;
+use nop_rt_paths::RuntimePaths;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -68,7 +69,7 @@ fn write_local_config(root: &Path) {
             max_violations: 10,
             cooldown_seconds: 60,
             use_forwarded_for: false,
-            login_sessions: nop::config::LoginSessionConfig::default(),
+            login_sessions: nop_config::LoginSessionConfig::default(),
             hsts_enabled: false,
             hsts_max_age: 31536000,
             hsts_include_subdomains: true,
@@ -86,7 +87,7 @@ fn write_local_config(root: &Path) {
         streaming: StreamingConfig { enabled: false },
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
-        search: nop::config::SearchConfig::default(),
+        search: nop_config::SearchConfig::default(),
         dev_mode: None,
     };
 

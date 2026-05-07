@@ -23,7 +23,7 @@ and admin surfaces. JWT lifecycle and middleware behavior are documented in
   (`local.rs`, `oidc.rs` placeholder).
 - `iam/` – Core services for user lookup (`IamService`), JWT management (`jwt::JwtService`), and
   high-level orchestrator (`UserServices`).
-- `util::CsrfTokenStore` – Couples CSRF tokens to JWT IDs; logout routes clear associated tokens.
+- `csrf::CsrfTokenStore` – Couples CSRF tokens to JWT IDs; logout routes clear associated tokens.
 
 #### Authentication Flow (Local, Modular Login SPA)
 
@@ -63,6 +63,9 @@ configuration.
 - Login flows call `JwtService::create_token` after identity verification and issue the auth cookie.
 - Request-time authentication, refresh, cookie rules, and auth helpers live in
   `docs/iam/auth-middleware.md`.
+- The JWT codec requirement is HS256-only and is defined in
+  `docs/infrastructure/hs256-jwt-codec.md`; login providers must not select JWT algorithms or
+  mint provider-specific session cookies.
 - JWT claims include `password_version` for password-change revocation; legacy tokens that omit it
   default to version `1`, matching the `users.yaml` default.
 

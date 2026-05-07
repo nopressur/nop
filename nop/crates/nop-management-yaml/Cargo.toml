@@ -1,0 +1,9 @@
+[package]
+name = "nop-management-yaml"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+log = "0.4.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"

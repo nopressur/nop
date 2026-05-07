@@ -16,7 +16,7 @@ This directory contains the Docker configuration for running the NoPressure Rust
 
 ### 1. Build the Docker Image
 
-From the `examples/docker` directory:
+From the `examples/docker` directory (the compose file builds using the repo root as context):
 
 ```sh
 docker-compose build
@@ -39,7 +39,8 @@ Create `../data` (relative to this directory) and place `config.yaml`, `users.ya
 ## Notes
 
 - The app always runs on port 5466.
-- The build context assumes the `nop` source directory is one level up from `examples/docker/`.
+- The build context is the repo root and uses `examples/docker/Dockerfile`.
+- The container runs as an unprivileged `nop` user by default.
 - Do **not** copy files from `/inspiration` into these directories.
 - For development, you can rebuild and restart the container as needed.
 

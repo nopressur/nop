@@ -17,7 +17,7 @@ npm run test:e2e
 
 ## Environment Overrides
 
-- `NOP_BINARY`: use a prebuilt `nop` binary instead of `scripts/cargo.sh run`.
+- `NOP_BINARY`: use a prebuilt `nop` binary instead of `scripts/crg.sh nop run`.
 - `CARGO_TARGET_DIR`: override where cargo writes build artifacts.
 - `PW_RUN_ID`: suffix for temp artifact directories (default: `local`).
 - `PW_OUTPUT_DIR`: explicit artifacts directory (defaults to a temp folder).

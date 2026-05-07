@@ -59,7 +59,7 @@ Handlers register in `create_default_registry_with_config`; they must be thread-
   - `title` (required).
   - `link` (required).
   - `noblank` (optional flag; default opens `_blank`).
-- Auto-generates background gradients using helpers in `util::color_hsv`.
+- Auto-generates background gradients using helpers in `public::shortcode::color_hsv`.
 
 **Current classification:** `start-unibox`, `video`, and `link-card` are all registered as static.
 
@@ -115,7 +115,7 @@ Rendering rules:
 - Configuration: Validate URLs and required attributes (for example, `start-unibox` enforces `<QUERY>` placeholder and `http(s)://` schemes).
 - Performance: Hash caching prevents duplicate parse/execute cycles for repeated identical shortcodes within one document.
 - Debugging: because failed or unknown shortcodes render verbatim, editors can immediately locate and correct the offending markup.
-- See also `nop/src/public/shortcode/README.md` for module-local examples and handler templates.
+- See also `nop/crates/nop-public/src/shortcode/README.md` for module-local examples and handler templates.
 
 <!--
 This file is part of the product NoPressure.

@@ -18,14 +18,16 @@ After that baseline, read the area-specific doc under `docs/` that matches the m
 
 ## Build, Test, and Development Commands
 
-**Ensure scripts/cargo.sh build without warnings and npm run check without warnings!**
+**Ensure scripts/crg.sh nop build without warnings and npm run check without warnings!**
 
-- `scripts/cargo.sh run -- -C ../runtime -F` runs the server with a local runtime root and stays in the foreground.
-- `./scripts/watch.sh` restarts `scripts/cargo.sh run` on Rust/config/asset changes and creates `runtime/` as needed.
-- `scripts/cargo.sh check` runs a fast type check.
-- `scripts/cargo.sh fmt --all` formats Rust; `scripts/cargo.sh clippy -- -D warnings` lints.
-- `scripts/cargo.sh test` runs unit + integration tests; `scripts/cargo.sh test --tests` targets integration only.
-- `scripts/cargo.sh build --release` produces the optimized binary.
+- `scripts/crg.sh nop run -- -C ../runtime -F` runs the server with a local runtime root and stays in the foreground.
+- `./scripts/watch.sh` restarts `scripts/crg.sh nop run` on Rust/config/asset changes and creates `runtime/` as needed.
+- `scripts/crg.sh nop check` runs a fast type check.
+- `scripts/crg.sh nop fmt --all` formats Rust; `scripts/crg.sh nop clippy -- -D warnings` lints.
+- `scripts/crg.sh nop test` runs tests for the root `nop` package; replace `nop` with a crate selector such as `rt-well-known` to target a local path crate.
+- `scripts/run-full-tests.sh` is the full non-browser testing scope: Rust format/test/clippy for `nop` and all local path crates, then SPA checks/tests.
+- `scripts/run-playwright.sh` runs the Playwright browser E2E/UX scope separately.
+- `scripts/crg.sh nop build --release` produces the optimized binary.
 - `cd tests/playwright && npm install && npx playwright install` then `npm run test:e2e` runs UI suites.
 
 ## Coding Style & Naming Conventions

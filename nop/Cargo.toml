@@ -1,15 +1,49 @@
 [package]
 name = "nop"
-version = "0.1.29"
+version = "0.1.31"
 edition = "2024"
-build = "build.rs"
 default-run = "nop"
 
 [dependencies]
+nop-config = { path = "crates/nop-config" }
+nop-content-store = { path = "crates/nop-content-store" }
+nop-management-contract = { path = "crates/nop-management-contract" }
+nop-management-errors = { path = "crates/nop-management-errors" }
+nop-management-roles = { path = "crates/nop-management-roles" }
+nop-management-tags = { path = "crates/nop-management-tags" }
+nop-management-users = { path = "crates/nop-management-users" }
+nop-management-content = { path = "crates/nop-management-content" }
+nop-management-search = { path = "crates/nop-management-search" }
+nop-library = { path = "crates/nop-library" }
+nop-management-workflows = { path = "crates/nop-management-workflows" }
+nop-management-system = { path = "crates/nop-management-system" }
+nop-management-yaml = { path = "crates/nop-management-yaml" }
+nop-iam-passwords = { path = "crates/nop-iam-passwords" }
+nop-rt-paths = { path = "crates/nop-rt-paths" }
+nop-rt-release = { path = "crates/nop-rt-release" }
+nop-rt-logging = { path = "crates/nop-rt-logging" }
+nop-rt-iam = { path = "crates/nop-rt-iam" }
+nop-rt-login = { path = "crates/nop-rt-login" }
+nop-rt-builtin = { path = "crates/nop-rt-builtin" }
+nop-rt-bootstrap = { path = "crates/nop-rt-bootstrap" }
+nop-rt-page-cache = { path = "crates/nop-rt-page-cache" }
+nop-rt-security = { path = "crates/nop-rt-security" }
+nop-rt-search-service = { path = "crates/nop-rt-search-service" }
+nop-rt-tls = { path = "crates/nop-rt-tls" }
+nop-rt-templates = { path = "crates/nop-rt-templates" }
+nop-rt-well-known = { path = "crates/nop-rt-well-known" }
+nop-rt-headers = { path = "crates/nop-rt-headers" }
+nop-rt-csrf = { path = "crates/nop-rt-csrf" }
+nop-public = { path = "crates/nop-public" }
+nop-api = { path = "crates/nop-api" }
+nop-management-bus = { path = "crates/nop-management-bus" }
+nop-admin = { path = "crates/nop-admin" }
+nop-roles = { path = "crates/nop-roles" }
+nop-security-paths = { path = "crates/nop-security-paths" }
 actix-web = { version = "4.12.1", features = ["rustls-0_23"] }
 actix-files = "0.6.9"
 actix-multipart = "0.7.2"
-actix-ws = "0.3.1"
+actix-ws = "0.4.0"
 tokio = { version = "1.49.0", features = ["full"] }
 tokio-util = { version = "0.7.18", features = ["io"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -28,7 +62,6 @@ regex = "1.12.2"
 urlencoding = "2.1"
 ammonia = "4.1.2"
 futures-util = "0.3"
-jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 argon2 = "0.5"
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
 validator = { version = "0.20", features = ["derive"] }
@@ -40,13 +73,13 @@ rustls = { version = "0.23.36", default-features = false, features = ["ring", "s
 rcgen = "0.14.7"
 x509-parser = "0.18.0"
 time = "0.3.46"
-getrandom = "0.3.4"
+getrandom = "0.4.2"
 reqwest = { version = "0.13.1", default-features = false, features = ["json", "query", "rustls-no-provider"] }
 async-trait = "0.1.89"
-hickory-resolver = "0.25"
+hickory-resolver = "0.26.1"
 rustls-native-certs = "0.8.3"
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"
 md5 = "0.8.0"
 base64 = "0.22"
 hex = "0.4"
@@ -55,15 +88,17 @@ nom = "8.0.0"
 libc = "0.2.180"
 rpassword = "7.3"
 ring = "0.17"
-tantivy = "0.25"
+tantivy = "0.26.1"
 
 [build-dependencies]
 flate2 = "1.1.8"
-sha2 = "0.10"
+sha2 = "0.11"
 walkdir = "2.0"
 mime_guess = "2.0"
 serde_json = "1.0.149"
 
 [dev-dependencies]
+nop-config = { path = "crates/nop-config", features = ["test-helpers"] }
 actix-http = "3.11.2"
 tempfile = "3.24.0"
+nop-testing = { path = "crates/nop-testing" }

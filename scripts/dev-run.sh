@@ -11,6 +11,6 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 mkdir -p "${REPO_ROOT}/runtime"
 
-"${REPO_ROOT}/scripts/cargo.sh" build
+"${REPO_ROOT}/scripts/crg.sh" nop build
 
 exec "${REPO_ROOT}/nop/target/debug/nop" -C "${REPO_ROOT}/runtime" -F

@@ -1,0 +1,19 @@
+[package]
+name = "nop-rt-bootstrap"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+getrandom = "0.4.2"
+nop-config = { path = "../nop-config" }
+nop-content-store = { path = "../nop-content-store" }
+nop-iam-passwords = { path = "../nop-iam-passwords" }
+nop-roles = { path = "../nop-roles" }
+nop-rt-paths = { path = "../nop-rt-paths" }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+[dev-dependencies]
+nop-config = { path = "../nop-config", features = ["test-helpers"] }
+nop-testing = { path = "../nop-testing" }
+tempfile = "3.24.0"

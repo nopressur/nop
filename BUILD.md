@@ -8,7 +8,7 @@ Prerequisites:
 Quick start (auto-bootstrap a clean data directory):
 
 ```bash
-scripts/cargo.sh run -- -C /path/to/empty-directory -F
+scripts/crg.sh nop run -- -C /path/to/empty-directory -F
 ```
 
 - Visit `https://localhost:7443` for the public site when using auto-generated config.
@@ -19,7 +19,7 @@ scripts/cargo.sh run -- -C /path/to/empty-directory -F
 Release build:
 
 ```bash
-scripts/cargo.sh build --release
+scripts/crg.sh nop build --release
 mkdir -p /path/to/empty-directory
 cd /path/to/empty-directory
 /path/to/nop/target/release/nop

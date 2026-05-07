@@ -1,0 +1,20 @@
+[package]
+name = "nop-rt-security"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+actix-web = { version = "4.12.1", features = ["rustls-0_23"] }
+log = "0.4.29"
+nop-config = { path = "../nop-config" }
+nop-content-store = { path = "../nop-content-store" }
+nop-rt-page-cache = { path = "../nop-rt-page-cache" }
+nop-rt-templates = { path = "../nop-rt-templates" }
+tokio = { version = "1.49.0", features = ["full"] }
+urlencoding = "2.1"
+
+[dev-dependencies]
+nop-config = { path = "../nop-config", features = ["test-helpers"] }
+nop-security-paths = { path = "../nop-security-paths" }
+nop-testing = { path = "../nop-testing" }
+tempfile = "3.24.0"

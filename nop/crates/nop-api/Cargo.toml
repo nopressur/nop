@@ -1,0 +1,16 @@
+[package]
+name = "nop-api"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+actix-web = { version = "4.12.1", features = ["rustls-0_23"] }
+log = "0.4.29"
+nop-config = { path = "../nop-config" }
+nop-roles = { path = "../nop-roles" }
+nop-rt-iam = { path = "../nop-rt-iam" }
+nop-rt-page-cache = { path = "../nop-rt-page-cache" }
+nop-rt-search-service = { path = "../nop-rt-search-service" }
+nop-rt-security = { path = "../nop-rt-security" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.149"

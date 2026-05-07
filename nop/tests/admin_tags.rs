@@ -9,13 +9,13 @@ use awc::Client;
 use awc::ws::Message as ClientMessage;
 use common::ws;
 use futures_util::SinkExt;
-use nop::management::ws::{AuthFrame, WsFrame, encode_frame};
-use nop::management::{
-    AccessRule, MessageResponse, TAG_ACTION_ADD, TAG_ACTION_ADD_OK, TAG_ACTION_CHANGE,
-    TAG_ACTION_CHANGE_OK, TAG_ACTION_DELETE, TAG_ACTION_DELETE_OK, TAG_ACTION_SHOW,
-    TAG_ACTION_SHOW_OK, TAGS_DOMAIN_ID, TagAddRequest, TagChangeRequest, TagDeleteRequest,
-    TagShowRequest,
+use nop_management_bus::ws::{AuthFrame, WsFrame, encode_frame};
+use nop_management_contract::tags::{
+    TAG_ACTION_ADD, TAG_ACTION_ADD_OK, TAG_ACTION_CHANGE, TAG_ACTION_CHANGE_OK, TAG_ACTION_DELETE,
+    TAG_ACTION_DELETE_OK, TAG_ACTION_SHOW, TAG_ACTION_SHOW_OK, TAGS_DOMAIN_ID, TagAddRequest,
+    TagChangeRequest, TagDeleteRequest, TagShowRequest,
 };
+use nop_management_contract::{AccessRule, MessageResponse};
 
 #[actix_web::test]
 async fn create_update_delete_tag() {
@@ -77,7 +77,8 @@ async fn create_update_delete_tag() {
     .await;
     assert_eq!(response.action_id, TAG_ACTION_SHOW_OK);
 
-    let show: nop::management::TagShowResponse = ws::decode_payload(&response.payload);
+    let show: nop_management_contract::tags::TagShowResponse =
+        ws::decode_payload(&response.payload);
     assert_eq!(show.id, tag_id);
     assert_eq!(show.name, "News Alerts");
     assert_eq!(show.roles, vec!["editor".to_string()]);

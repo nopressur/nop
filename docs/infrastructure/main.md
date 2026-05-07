@@ -23,18 +23,25 @@ This document walks through the NoPressure entrypoint so contributors understand
    - If daemonization is requested on non-Unix builds, warn and continue in foreground mode.
    - Create `<runtime-root>/nop.pid` only after daemonizing.
 7. **Resolve log level** from `config.logging.level`, defaulting to `info`. Logging targets stdout in foreground mode and rotating log files in daemon mode.
-8. **Install custom logger** via `util::init_logger`, which applies rule-based level overrides (currently bumping `html5ever` trace noise down to debug).
+8. **Install custom logger** via `logging::init_logger`, which applies rule-based level overrides (currently bumping `html5ever` trace noise down to debug).
 9. **Emit startup telemetry** through `log_startup_info`, including canonical runtime paths and the resolved admin URL.
-10. **Initialize `AppState`** (templates + error renderer) using the app name and runtime paths.
-11. **Create `UserServices`** using the validated config and `users.yaml` path. This wires auth backends (local users or OIDC) and will later mediate RBAC checks.
-12. **Instantiate the page metadata cache** (`public::page_meta_cache::PageMetaCache`) pointed at the canonical content directory, then inject it into `UserServices`.
-13. **Ensure `.mime-types` manifests** exist under every content directory using `initialize_mime_types_files`. If generation fails, the process aborts.
-14. **Warm the page metadata cache** by calling `PageMetaCache::rebuild_cache()`. Any error is fatal.
-15. **Prepare ancillary singletons**:
+10. **Build the management registry** via `nop_management_bus::build_default_registry`.
+11. **Instantiate the page metadata cache** (`page_meta_cache::PageMetaCache`) pointed at the canonical content directory.
+12. **Create `UserServices`** using the validated config and `users.yaml` path. This wires auth backends (local users or OIDC).
+13. **Create the upload registry** (`nop_management_bus::UploadRegistry`).
+14. **Initialize the release tracker** (`ReleaseTracker`) for cache-busting headers.
+15. **Initialize search service** via `nop_rt_search_service::initialize`, then warm the searcher and query paths.
+16. **Build the management context** with runtime paths, validated config, user services, page cache, and log controller; then attach the upload registry, release tracker, and search service.
+17. **Start the management bus and socket** (`ManagementBus::start`, `ManagementSocket::start`).
+18. **Initialize request/system tool bags** (`RequestTools`, `RenderTools`, `SecurityTools`,
+    `LoginState`, `ManagementTools`) using the app name and management bus.
+19. **Initialize the well-known registry** and register ACME HTTP-01 handlers when configured.
+20. **Warm the page metadata cache** by calling `PageMetaCache::rebuild_cache()`. Any error is fatal.
+21. **Prepare ancillary singletons**:
     - Clone the admin base path and server listener configuration.
     - Build the shortcode registry via `public::shortcode::create_default_registry_with_config`.
     - Ensure shortcode state subdirectories exist under `state/sc/<shortcode>`.
-    - Instantiate the CSRF token store (`util::CsrfTokenStore::new`), seeding exempt endpoints from configuration.
+    - Instantiate the CSRF token store (`csrf::CsrfTokenStore::new`), seeding exempt endpoints from configuration.
 
 Everything above happens before binding sockets so failures are visible immediately.
 
@@ -44,11 +51,18 @@ Everything above happens before binding sockets so failures are visible immediat
 
 - **App data** injected as `web::Data`:
   - `ValidatedConfig`
-  - `AppState`
+  - `RuntimePaths`
+  - `RequestTools`
+  - `RenderTools`
+  - `SecurityTools`
+  - `LoginState`
+  - `ManagementTools`
   - `Arc<UserServices>`
   - `Arc<PageMetaCache>`
+  - `Arc<SearchService>`
   - `Arc<ShortcodeRegistry>`
   - `Arc<CsrfTokenStore>`
+  - `Arc<WsTicketStore>`
   - `Arc<ReleaseTracker>`
 
 - **Middleware stack (outermost first)**:
@@ -72,7 +86,7 @@ Finally the server sets the worker pool size from `config.server.workers` and bi
 ## Failure and Shutdown Behaviour
 
 - Any initialization failure before `HttpServer::new` results in a logged error and hard exit. There is no partial startup.
-- `initialize_mime_types_files` and `PageMetaCache::rebuild_cache` run before binding sockets to avoid serving stale or incomplete content.
+- `PageMetaCache::rebuild_cache` runs before binding sockets to avoid serving stale or incomplete content.
 - Bind failures (port in use, permissions) bubble up through the `?` operator and return an `std::io::Result`, which Actix logs before terminating.
 
 ## Maintenance Notes

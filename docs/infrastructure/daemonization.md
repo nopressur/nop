@@ -46,7 +46,7 @@ Status: Developed
   - Add unit tests for argument parsing to validate `-F` handling and subcommand rejection.
   - Ensure Playwright harness and CLI tests keep the server in the foreground by using `-F`.
   - Cover PID file parsing, stale cleanup, and bootstrap acceptance of `nop.pid`.
-  - Run the full suite: `scripts/cargo.sh fmt`, `scripts/cargo.sh clippy -- -D warnings`, `scripts/cargo.sh test`.
+  - Run the full suite: `scripts/crg.sh nop fmt`, `scripts/crg.sh nop clippy -- -D warnings`, `scripts/crg.sh nop test`.
 
 <!--
 This file is part of the product NoPressure.

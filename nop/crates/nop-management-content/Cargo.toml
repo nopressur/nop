@@ -1,0 +1,16 @@
+[package]
+name = "nop-management-content"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.89"
+infer = "0.19.0"
+mime_guess = "2.0"
+nop-config = { path = "../nop-config" }
+nop-content-store = { path = "../nop-content-store" }
+nop-management-contract = { path = "../nop-management-contract" }
+nop-management-errors = { path = "../nop-management-errors" }
+nop-management-workflows = { path = "../nop-management-workflows" }
+nop-rt-page-cache = { path = "../nop-rt-page-cache" }
+nop-security-paths = { path = "../nop-security-paths" }

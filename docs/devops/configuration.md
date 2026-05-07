@@ -106,7 +106,7 @@ block; when TLS is enabled, the HTTP port is provided by `server.http_port`.
   - `tls.acme.dns.propagation_check` enables DNS-01 TXT propagation checks (defaults to false).
   - `tls.acme.dns.propagation_delay_seconds` adds a delay before ACME validation (defaults to 30).
   - ACME issues certificates at startup when required (missing/expired/config mismatch) and renews within 30 days.
-  - TLS reloads certificates on new handshakes after files change.
+  - TLS reloads certificates via a background poller (checks at most every 5 seconds) after files change.
   - ACME integration test uses a local Pebble stack via Docker; tests warn and skip if Docker is unavailable.
 - **Logging**:
   - `logging.level` is a free-form string parsed to `debug/info/warn/error`; defaults to `info` on unknown input.
@@ -116,6 +116,8 @@ block; when TLS is enabled, the HTTP port is provided by `server.http_port`.
 ## Secrets Handling
 
 - **JWT** (`users.local.jwt.secret`) must be unique per environment.
+  Local session tokens are HS256-only; codec and validation requirements are defined in
+  `docs/infrastructure/hs256-jwt-codec.md`.
 - **OIDC** secrets (client secret) are optional but, when used, must be stored securely. Consider environment templating or secret managers instead of raw files.
 - **Avoid Check-ins**: `.gitignore` should exclude environment-specific `config.yaml`/`users.yaml`. Never commit production secrets.
 

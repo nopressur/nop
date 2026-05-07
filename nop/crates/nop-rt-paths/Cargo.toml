@@ -1,0 +1,11 @@
+[package]
+name = "nop-rt-paths"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+nop-config = { path = "../nop-config" }
+uuid = { version = "1.20.0", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.24.0"

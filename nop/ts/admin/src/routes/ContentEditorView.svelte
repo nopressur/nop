@@ -6,7 +6,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 -->
 
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import { get } from "svelte/store";
   import AceEditor from "../components/AceEditor.svelte";
   import Button from "../components/Button.svelte";
@@ -21,6 +21,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import {
     addWindowListener,
     openNewTab,
+    readClipboardText,
     removeWindowListener,
     writeClipboardText,
   } from "../services/browser";
@@ -44,6 +45,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     updateMarkdownStream,
   } from "../services/content";
   import type { ContentListItem, ContentNavIndexItem } from "../services/content";
+  import { pasteMergeMarkdown } from "../services/markdownPasteMerge";
   import { listTags } from "../services/tags";
   import { listThemes } from "../services/themes";
   import { normalizeAlias } from "../validation/alias";
@@ -67,6 +69,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let availableThemes: string[] = [];
   let mime = "text/markdown";
   let originalFilename = "";
+  let sizeBytes: number | null = null;
   let isMarkdown = true;
   let contentValue = "# New Page\n";
   let currentAlias = "";
@@ -202,6 +205,27 @@ The code and documentation in this repository is licensed under the GNU Affero G
     return Boolean(source?.metaKey || source?.ctrlKey);
   }
 
+  function formatSize(bytes: number | null): string {
+    if (bytes === null || !Number.isFinite(bytes) || bytes < 0) {
+      return "—";
+    }
+    if (bytes === 0) {
+      return "0 B";
+    }
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+      value /= 1024;
+      idx += 1;
+    }
+    return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+  }
+
+  function getContentSizeBytes(value: string): number {
+    return new TextEncoder().encode(value).length;
+  }
+
   async function copyEditorUrl(
     useAlias: boolean,
     event?: MouseEvent | CustomEvent<MouseEvent>,
@@ -229,6 +253,34 @@ The code and documentation in this repository is licensed under the GNU Affero G
     } catch {
       pushNotification(useAlias ? "Failed to copy alias URL" : "Failed to copy ID URL", "error");
     }
+  }
+
+  async function pasteMergeFromClipboard(): Promise<void> {
+    if (!isMarkdown) {
+      return;
+    }
+    const clipboardText = await readClipboardText();
+    if (clipboardText === null) {
+      pushNotification("Unable to read clipboard text", "error");
+      return;
+    }
+    if (!clipboardText.trim()) {
+      pushNotification("Clipboard text is empty", "error");
+      return;
+    }
+
+    const merged = pasteMergeMarkdown(contentValue || "", clipboardText);
+    contentValue = merged.content;
+    sizeBytes = getContentSizeBytes(contentValue || "");
+    await tick();
+    if (editorRef) {
+      const position = editorRef.session
+        .getDocument()
+        .indexToPosition(merged.cursorOffset, 0);
+      editorRef.moveCursorToPosition(position);
+      editorRef.focus();
+    }
+    pushNotification("Pasted and merged references", "success");
   }
 
   function syncTagsWithAvailable(): void {
@@ -422,6 +474,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     theme = "";
     mime = "text/markdown";
     originalFilename = "";
+    sizeBytes = null;
     isMarkdown = true;
     contentValue = "# New Page\n";
     currentAlias = "";
@@ -465,6 +518,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
       theme = payload.theme || "";
       mime = payload.mime;
       originalFilename = payload.originalFilename || "";
+      sizeBytes =
+        payload.sizeBytes ?? (payload.content ? getContentSizeBytes(payload.content) : null);
       isMarkdown = payload.mime === "text/markdown";
       contentValue = payload.content || "";
       selectedTags = payload.tags;
@@ -580,6 +635,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           theme: trimmedTheme,
           content: contentValue || ""
         });
+        sizeBytes = getContentSizeBytes(contentValue || "");
       } else {
         await updateContent({
           id: contentId,
@@ -950,6 +1006,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
         <CompactButton variant="outline" disabled={!isMarkdown} on:click={openInsertModal}>
           Insert
         </CompactButton>
+        <CompactButton variant="outline" disabled={!isMarkdown} on:click={pasteMergeFromClipboard}>
+          Paste-Merge
+        </CompactButton>
         <CompactButton variant="outline" on:click={openUploadOverlay}>
           Upload
         </CompactButton>
@@ -973,6 +1032,10 @@ The code and documentation in this repository is licensed under the GNU Affero G
             Alias
           </CompactButton>
         {/if}
+        <div class="ml-auto flex items-center gap-2 text-xs text-muted">
+          <span class="text-[9px] uppercase tracking-[0.28em] text-muted">Size</span>
+          <span class="text-text">{formatSize(sizeBytes)}</span>
+        </div>
       </div>
 
       {#if isMarkdown}

@@ -3,14 +3,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use nop::config::SearchConfig;
-use nop::content::flat_storage::{
+use nop_config::SearchConfig;
+use nop_content_store::flat_storage::{
     ContentId, ContentSidecar, ContentVersion, blob_path, sidecar_path, write_sidecar_atomic,
 };
-use nop::content::reserved_paths::ReservedPaths;
-use nop::runtime_paths::RuntimePaths;
-use nop::search::{QueryAdminRequest, QueryPublicRequest, initialize};
-use nop::util::test_fixtures::TestFixtureRoot;
+use nop_content_store::reserved_paths::ReservedPaths;
+use nop_rt_paths::RuntimePaths;
+use nop_rt_search_service::{QueryAdminRequest, QueryPublicRequest, initialize};
+use nop_testing::test_fixtures::TestFixtureRoot;
 
 fn write_markdown(
     runtime_paths: &RuntimePaths,
@@ -41,7 +41,7 @@ fn write_markdown(
     write_sidecar_atomic(&sidecar_file, &sidecar).expect("write sidecar");
 }
 
-fn startup(runtime_paths: &RuntimePaths) -> std::sync::Arc<nop::search::SearchService> {
+fn startup(runtime_paths: &RuntimePaths) -> std::sync::Arc<nop_rt_search_service::SearchService> {
     let startup = initialize(
         runtime_paths,
         &SearchConfig {

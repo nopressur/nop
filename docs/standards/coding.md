@@ -4,13 +4,13 @@ These guidelines keep the codebase consistent and approachable for both AI assis
 
 ## Language & Tooling
 
-- **Rust 2024 edition**. Always run `scripts/cargo.sh fmt --all` and `scripts/cargo.sh clippy -- -D warnings` before shipping.
+- **Rust 2024 edition**. Always run `scripts/crg.sh nop fmt --all` and `scripts/crg.sh nop clippy -- -D warnings` before shipping.
 - Target **stable Rust**. Avoid nightly-only features unless signed off and guarded behind feature flags.
 - Use `actix_web::Result` in handlers and map errors with `actix_web::error::Error*` helpers. Avoid `unwrap()` in production paths; panics are acceptable only in tests or clearly unreachable branches with comments.
 
 ## Project Structure
 
-- Group functionality by domain (e.g., `public/`, `admin/`, `iam/`, `security/`, `util/`). Keep modules small and focused.
+- Group functionality by domain (e.g., `public/`, `admin/`, `iam/`, `security/`, `logging/`). Keep modules small and focused.
 - Each domain has a `mod.rs` that re-exports public entry points and wires submodules (e.g., `admin::configure`).
 - When creating new capabilities:
   1. Create a directory (`nop/src/<area>/<feature>/`) with `mod.rs`, `handlers.rs` or equivalent, `templates/` if needed.

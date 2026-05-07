@@ -143,6 +143,40 @@ describe('search overlay', () => {
     expect(input.value).toHaveLength(256)
   })
 
+  it('preserves leading and trailing whitespace in the input field', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => []
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    controller = initSearchOverlay(document)
+    const button = document.querySelector<HTMLElement>('[data-site-search-button]')!
+    const input = document.querySelector<HTMLInputElement>('[data-site-search-input]')!
+
+    button.click()
+    input.value = 'abc '
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    vi.advanceTimersByTime(250)
+    await flushAsync()
+
+    expect(input.value).toBe('abc ')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [trailingUrl] = fetchMock.mock.calls[0] as [string]
+    expect(trailingUrl).toBe(`/api/search?q=${encodeURIComponent('abc')}`)
+
+    fetchMock.mockClear()
+    input.value = '  hello world '
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    vi.advanceTimersByTime(250)
+    await flushAsync()
+
+    expect(input.value).toBe('  hello world ')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [innerUrl] = fetchMock.mock.calls[0] as [string]
+    expect(innerUrl).toBe(`/api/search?q=${encodeURIComponent('hello world')}`)
+  })
+
   it('supports wrap-around keyboard selection and enter navigation', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

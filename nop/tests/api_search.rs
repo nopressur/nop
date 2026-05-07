@@ -6,7 +6,7 @@
 mod common;
 
 use actix_web::{http::StatusCode, test, web};
-use nop::content::flat_storage::{
+use nop_content_store::flat_storage::{
     ContentId, ContentSidecar, ContentVersion, blob_path, sidecar_path, write_sidecar_atomic,
 };
 use serde_json::Value;
@@ -15,10 +15,10 @@ use std::fs;
 #[actix_web::test]
 async fn search_api_anonymous_returns_public_matches_only() {
     let harness = common::TestHarness::new().await;
-    let search_startup = nop::search::initialize(
+    let search_startup = nop_rt_search_service::initialize(
         &harness.runtime_paths,
         &harness.config.search,
-        nop::content::reserved_paths::ReservedPaths::from_config(&harness.config),
+        nop_content_store::reserved_paths::ReservedPaths::from_config(&harness.config),
         false,
     )
     .expect("search startup");
@@ -53,10 +53,10 @@ async fn search_api_anonymous_returns_public_matches_only() {
 #[actix_web::test]
 async fn search_api_admin_can_view_restricted_hits() {
     let harness = common::TestHarness::new().await;
-    let search_startup = nop::search::initialize(
+    let search_startup = nop_rt_search_service::initialize(
         &harness.runtime_paths,
         &harness.config.search,
-        nop::content::reserved_paths::ReservedPaths::from_config(&harness.config),
+        nop_content_store::reserved_paths::ReservedPaths::from_config(&harness.config),
         false,
     )
     .expect("search startup");
@@ -96,10 +96,10 @@ async fn search_api_admin_can_view_restricted_hits() {
 #[actix_web::test]
 async fn search_api_public_profile_does_not_match_tags() {
     let harness = common::TestHarness::new().await;
-    let search_startup = nop::search::initialize(
+    let search_startup = nop_rt_search_service::initialize(
         &harness.runtime_paths,
         &harness.config.search,
-        nop::content::reserved_paths::ReservedPaths::from_config(&harness.config),
+        nop_content_store::reserved_paths::ReservedPaths::from_config(&harness.config),
         false,
     )
     .expect("search startup");
@@ -127,10 +127,10 @@ async fn search_api_public_profile_does_not_match_tags() {
 #[actix_web::test]
 async fn search_api_sorts_results_by_title_after_filtering() {
     let harness = common::TestHarness::new().await;
-    let search_startup = nop::search::initialize(
+    let search_startup = nop_rt_search_service::initialize(
         &harness.runtime_paths,
         &harness.config.search,
-        nop::content::reserved_paths::ReservedPaths::from_config(&harness.config),
+        nop_content_store::reserved_paths::ReservedPaths::from_config(&harness.config),
         false,
     )
     .expect("search startup");
@@ -163,10 +163,10 @@ async fn search_api_sorts_results_by_title_after_filtering() {
 #[actix_web::test]
 async fn search_api_rejects_invalid_query_lengths() {
     let harness = common::TestHarness::new().await;
-    let search_startup = nop::search::initialize(
+    let search_startup = nop_rt_search_service::initialize(
         &harness.runtime_paths,
         &harness.config.search,
-        nop::content::reserved_paths::ReservedPaths::from_config(&harness.config),
+        nop_content_store::reserved_paths::ReservedPaths::from_config(&harness.config),
         false,
     )
     .expect("search startup");
@@ -238,10 +238,10 @@ beta:
         .await
         .expect("cache rebuild");
 
-    let search_startup = nop::search::initialize(
+    let search_startup = nop_rt_search_service::initialize(
         &harness.runtime_paths,
         &harness.config.search,
-        nop::content::reserved_paths::ReservedPaths::from_config(&harness.config),
+        nop_content_store::reserved_paths::ReservedPaths::from_config(&harness.config),
         false,
     )
     .expect("search startup");
@@ -308,10 +308,10 @@ async fn search_api_returns_public_hits_beyond_restricted_top_n() {
         .await
         .expect("cache rebuild");
 
-    let search_startup = nop::search::initialize(
+    let search_startup = nop_rt_search_service::initialize(
         &harness.runtime_paths,
         &harness.config.search,
-        nop::content::reserved_paths::ReservedPaths::from_config(&harness.config),
+        nop_content_store::reserved_paths::ReservedPaths::from_config(&harness.config),
         false,
     )
     .expect("search startup");
@@ -337,7 +337,7 @@ async fn search_api_returns_public_hits_beyond_restricted_top_n() {
 }
 
 fn write_markdown(
-    runtime_paths: &nop::runtime_paths::RuntimePaths,
+    runtime_paths: &nop_rt_paths::RuntimePaths,
     id: ContentId,
     alias: &str,
     title: Option<&str>,

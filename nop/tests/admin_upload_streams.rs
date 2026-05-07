@@ -6,17 +6,17 @@
 mod common;
 
 use common::TestHarness;
-use nop::management::{
+use nop_management_contract::content::{
     BinaryPrevalidateRequest, BinaryUploadCommitRequest, BinaryUploadInitRequest,
     CONTENT_ACTION_BINARY_PREVALIDATE_OK, CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK,
     CONTENT_ACTION_BINARY_UPLOAD_INIT_OK, CONTENT_ACTION_READ_OK,
     CONTENT_ACTION_UPDATE_STREAM_COMMIT_OK, CONTENT_ACTION_UPDATE_STREAM_INIT_OK,
     CONTENT_ACTION_UPLOAD_STREAM_COMMIT_OK, CONTENT_ACTION_UPLOAD_STREAM_INIT_OK, ContentCommand,
     ContentReadRequest, ContentUpdateStreamCommitRequest, ContentUpdateStreamInitRequest,
-    ContentUploadStreamCommitRequest, ContentUploadStreamInitRequest, ManagementCommand,
-    ManagementRequest, ResponsePayload,
+    ContentUploadStreamCommitRequest, ContentUploadStreamInitRequest,
 };
-use nop::util::is_temp_upload_name;
+use nop_management_contract::{ManagementCommand, ManagementRequest, ResponsePayload};
+use nop_rt_page_cache::is_temp_upload_name;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -52,11 +52,11 @@ fn collect_temp_uploads(content_dir: &Path) -> Vec<PathBuf> {
 #[actix_web::test]
 async fn binary_prevalidate_rejects_disallowed_extension() {
     let harness = TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
+    let bus = harness.management_tools.management_bus.clone();
 
     let response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             1,
             ManagementCommand::Content(ContentCommand::BinaryPrevalidate(
                 BinaryPrevalidateRequest {
@@ -80,13 +80,13 @@ async fn binary_prevalidate_rejects_disallowed_extension() {
 #[actix_web::test]
 async fn binary_prevalidate_rejects_oversize() {
     let harness = TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
+    let bus = harness.management_tools.management_bus.clone();
     let max_mb = harness.config.upload.max_file_size_mb;
     let oversize = (max_mb + 1) * 1024 * 1024;
 
     let response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             1,
             ManagementCommand::Content(ContentCommand::BinaryPrevalidate(
                 BinaryPrevalidateRequest {
@@ -110,8 +110,8 @@ async fn binary_prevalidate_rejects_oversize() {
 #[actix_web::test]
 async fn binary_stream_upload_commits() {
     let harness = TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
-    let upload_registry = harness.app_state.upload_registry.clone();
+    let bus = harness.management_tools.management_bus.clone();
+    let upload_registry = harness.management_tools.upload_registry.clone();
     let connection_id = 7;
 
     let payload = b"streamed-binary".to_vec();
@@ -182,8 +182,8 @@ async fn binary_stream_upload_commits() {
 #[actix_web::test]
 async fn upload_cleanup_removes_temp_files_on_disconnect() {
     let harness = TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
-    let upload_registry = harness.app_state.upload_registry.clone();
+    let bus = harness.management_tools.management_bus.clone();
+    let upload_registry = harness.management_tools.upload_registry.clone();
     let connection_id = 11;
 
     let init_request = BinaryUploadInitRequest {
@@ -244,8 +244,8 @@ async fn startup_scan_removes_temp_uploads() {
 #[actix_web::test]
 async fn markdown_stream_create_and_update() {
     let harness = TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
-    let upload_registry = harness.app_state.upload_registry.clone();
+    let bus = harness.management_tools.management_bus.clone();
+    let upload_registry = harness.management_tools.upload_registry.clone();
     let connection_id = 21;
 
     let content = "# Streamed\n\nHello.".to_string();
@@ -312,7 +312,7 @@ async fn markdown_stream_create_and_update() {
 
     let read_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             3,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
@@ -386,7 +386,7 @@ async fn markdown_stream_create_and_update() {
 
     let read_updated = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             6,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id,

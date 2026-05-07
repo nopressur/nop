@@ -1,0 +1,10 @@
+[package]
+name = "nop-testing"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+nop-config = { path = "../nop-config" }
+nop-rt-paths = { path = "../nop-rt-paths" }
+tempfile = "3.24.0"
+uuid = { version = "1.20.0", features = ["v4"] }

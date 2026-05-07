@@ -16,12 +16,21 @@ Status: Developed
 
 - Core operations are the canonical implementations for management mutations.
 - Each domain defines request/response structs with explicit fields (no loose maps).
+- Domain IDs, request/response DTOs, wire enums, and codec limits live in `nop/crates/nop-management-contract` and are used directly by the management bus and connectors.
+- Domain implementations live under `nop/crates/nop-management-<domain>/` and are used directly by the management bus and request layer.
 - All core operations are async and return structured results and errors.
 - Core operations are transport-agnostic and do not depend on sockets or CLI parsing.
 - Core operations receive `ManagementContext` (version info, blocking pool, runtime root, validated config, runtime paths).
 - Core operations must apply mutations to the live in-memory services and persist to disk; no daemon restart is required.
 - Each domain exposes a registration hook that exports command IDs, request/response codecs, and handler wiring.
 - Domain modules define action IDs, request/response size limits, and parameter formats.
+
+### Layer 1.5: Cross-Domain Workflows
+
+- Cross-domain workflows are the only approved place for management operations that intentionally coordinate side effects across domains.
+- Workflows live under `nop/crates/nop-management-workflows/src/` and are invoked explicitly by domain handlers when a use case spans domains.
+- Workflow dependencies are expressed via narrow capability traits implemented by `ManagementContext` (no service locator).
+- Domain modules keep local mutation logic; workflows own orchestration, ordering, and cache/search/release coordination.
 
 ### Layer 2: Async Management Bus
 
@@ -59,8 +68,8 @@ Status: Developed
 - Connectors translate external inputs into `ManagementCommand` and submit them to the bus.
 - Connectors do not implement business logic; they only validate transport-level constraints.
 - Connectors implemented today:
-  - Socket connector (`nop/src/management/socket`).
-  - CLI bypass connector (`nop/src/management/cli_helper.rs`).
+  - Socket connector (`nop/crates/nop-management-bus/src/socket`).
+  - CLI bypass connector (`nop/crates/nop-management-bus/src/cli_helper.rs`).
 - Each connector has its own feature document:
   - `docs/management/connector-socket.md`
   - `docs/management/connector-cli-bypass.md`
@@ -84,7 +93,7 @@ Status: Developed
 ### Command IDs and Registry
 
 - A central registry in the management module owns domain ID assignments.
-- Each domain module owns its action IDs and publishes its request/response size limits.
+- Each domain module owns its action IDs and publishes its request/response size limits through the contract crate.
 - Protocol encoders/decoders use published limits to validate payload sizes.
 - A shared codec registry maps `DomainActionKey { domain_id, action_id }` to typed request/response encoders.
 
@@ -123,12 +132,12 @@ Status: Developed
   - Per-field max sizes (string lengths, list lengths).
   - Any required normalization rules (for example, lowercase roles).
 - Connectors enforce size limits during decoding using the published per-field limits.
-- Limits are expressed via `FieldLimits`/`FieldLimit` (`MaxChars`, `Range`, `MaxEntries`) in `nop/src/management/codec.rs`.
+- Limits are expressed via `FieldLimits`/`FieldLimit` (`MaxChars`, `Range`, `MaxEntries`) in `nop/crates/nop-management-contract/src/codec.rs` (use `nop_management_contract::codec`).
 
 #### Protocol Helper Modules
 
-- `nop/src/management/codec.rs` provides shared `encode_payload`/`decode_payload` helpers plus codecs for requests/responses.
-- `nop/src/management/socket/protocol.rs` owns the binary frame encoding for socket envelopes.
+- `nop/crates/nop-management-contract/src/codec.rs` provides shared `encode_payload`/`decode_payload` helpers plus codecs for requests/responses; `nop/crates/nop-management-bus/src/codec.rs` hosts the local `CodecRegistry`.
+- `nop/crates/nop-management-bus/src/socket/protocol.rs` owns the binary frame encoding for socket envelopes.
 - The CLI helper uses the shared response payload type (`MessageResponse`) to provide uniform output.
 
 #### Success/Error Response Shape

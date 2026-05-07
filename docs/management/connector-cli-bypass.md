@@ -26,7 +26,7 @@ Status: Developed
 
 ### CLI Helper Module
 
-- Provide a shared CLI helper module inside the main binary (`nop/src/management/cli_helper.rs`) that:
+- Provide a shared CLI helper module inside the management bus crate (`nop/crates/nop-management-bus/src/cli_helper.rs`) that:
   - Accepts domain-decoded command structs (no CLI parsing inside the helper).
   - Selects the connector path (socket vs bypass) based on socket presence.
   - Hides the connector details from domain-specific CLI code.

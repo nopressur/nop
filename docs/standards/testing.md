@@ -7,11 +7,21 @@ Reliable tests keep regressions out and make changes easier for AI assistants to
 - Tests must be **deterministic** and **hermetic**: no external network calls, stable filesystem fixtures, predictable random values.
 - Prefer **table-driven** tests for parsing, validation, and helpers.
 - Name tests by behaviour (`saves_markdown_sidecar`, `rejects_invalid_csrf_header`).
-- Run the baseline suite locally before PRs:
+- Run the focused Rust package baseline while iterating:
   ```bash
-  scripts/cargo.sh fmt --all
-  scripts/cargo.sh clippy -- -D warnings
-  scripts/cargo.sh test
+  scripts/crg.sh nop fmt --all
+  scripts/crg.sh nop clippy -- -D warnings
+  scripts/crg.sh nop test
+  ```
+- Run the full non-browser testing scope before shipping broad changes:
+  ```bash
+  scripts/run-full-tests.sh
+  ```
+  This formats, tests, and lints the root `nop` package and every local Rust path crate in
+  dependency-first order, then runs SPA checks/tests.
+- Run the Playwright browser E2E/UX scope separately when UI workflow coverage is relevant:
+  ```bash
+  scripts/run-playwright.sh
   ```
 - When changing the admin SPA, also run `cd nop/ts/admin && npm run test` (and `npm run check` for type validation).
 
@@ -23,8 +33,9 @@ Reliable tests keep regressions out and make changes easier for AI assistants to
 - For async tests, use `#[actix_web::test]` or `#[tokio::test]` as appropriate.
 - Mock dependencies by:
   - Supplying simplified configs (see helpers in `nop/tests/common`).
-  - Seeding runtime roots with `util::test_fixtures::TestFixtureRoot`.
-  - Building full app state via `TestHarness` in `nop/tests/common` when a handler needs auth/cache wiring.
+  - Seeding runtime roots with `testing::test_fixtures::TestFixtureRoot`.
+  - Building full app wiring (request/render/security/login/management tools plus cache/config)
+    via `TestHarness` in `nop/tests/common` when a handler needs auth/cache wiring.
 - Validate logging via expected state changes, not string matching (unless necessary).
 - Example structure:
   ```rust
@@ -47,7 +58,7 @@ Reliable tests keep regressions out and make changes easier for AI assistants to
 ## Integration Tests
 
 - Use the `tests/` directory at the crate root (`nop/tests/`) for cross-module integration tests.
-- Integration tests import the crate via `nop::...` (see `nop/src/lib.rs` for the exposed module surface).
+- Integration tests import the needed crates directly; `nop` is glue-only and does not expose a library surface.
 - Boot a minimal Actix app via `test::init_service(App::new()...)` with in-memory or fixture-root assets.
 - Use the shared harness in `nop/tests/common/mod.rs` for API-level suites (auth, admin APIs, public render/assets, security).
 - Validate multiple components together—for example:
@@ -55,7 +66,7 @@ Reliable tests keep regressions out and make changes easier for AI assistants to
   - Management bus uploads updating the page cache.
   - Admin page lifecycle (create/edit/delete) reflected in public cache state.
 - When filesystem state matters, build fixtures under `target/test-fixtures` using `TestFixtureRoot` to avoid `/tmp` and keep paths deterministic.
-- Run integration tests with `scripts/cargo.sh test --tests`.
+- Run root-package integration tests with `scripts/crg.sh nop test --tests`.
 
 ## Frontend (SPA) Tests
 
@@ -88,7 +99,7 @@ We ship Playwright-based E2E/UX coverage under `tests/playwright`. Use it for en
 including the login/profile flows, while keeping SPA unit/integration logic in Vitest:
 
 1. **Harness**: Use `tests/playwright/fixtures.ts` (it creates a temp runtime root under `/tmp/nop-test/`, seeds config/users/roles/content, starts the server, and tears down per test).
-2. **Server launch**: Defaults to `scripts/cargo.sh run -- -C <temp> -F` (`-F -C <temp>` is equivalent); set `NOP_BINARY` to use a prebuilt binary. `CARGO_TARGET_DIR` is redirected to a temp dir to keep artifacts isolated.
+2. **Server launch**: Defaults to `scripts/crg.sh nop run -- -C <temp> -F` (`-F -C <temp>` is equivalent); set `NOP_BINARY` to use a prebuilt binary. `CARGO_TARGET_DIR` is redirected to a temp dir to keep artifacts isolated.
 3. **Input rules**: Use `humanType`, `humanClick`, and `humanClearAndType` from `tests/playwright/utils/humanInput.ts`. Randomization is deterministic via `PW_RNG_SEED` or the test title path.
 4. **Suite split**: `tests/playwright/tests/e2e` can use full Playwright power; `tests/playwright/tests/ux` must stick to user-visible selectors (roles, labels, text) without hidden selectors or `page.evaluate`.
 5. **Artifacts**: HTML report plus trace/screenshot/video on failure under `PW_OUTPUT_DIR` or the OS temp dir `nopressure-pw-<run-id>` (`PW_RUN_ID`).
@@ -105,7 +116,7 @@ npm run test:e2e
 ## Test Utilities
 
 - Use helper modules to avoid duplication (`nop/tests/common/` or submodules).
-- If a helper becomes widely useful, consider adding it to `util/` with a test-specific feature flag.
+- If a helper becomes widely useful, add it to the owning module (or a new support module) with a test-specific feature flag when needed.
 - Prefer `serde_json::json!` to build JSON bodies and assert equality against `serde_json::Value`.
 - For time-sensitive logic, inject clocks or use helper functions to freeze time rather than sleeping.
 

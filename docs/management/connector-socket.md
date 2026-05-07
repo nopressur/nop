@@ -170,7 +170,7 @@ Status: Developed
   - Response frames are routed back to the requesting client and/or frontend connector.
   - Stream frames are processed by the shared streaming helper.
 - The coordinator enforces:
-  - Protocol message size limits (63 KiB) and payload limits via `management::codec` field limits.
+  - Protocol message size limits (63 KiB) and payload limits via `nop_management_contract::codec` field limits.
   - Admin-only access and CSRF ticket validation on connection setup.
   - Backpressure by gating outbound stream chunks on per-frame acknowledgements.
 
@@ -322,6 +322,7 @@ Request payload:
 ```
 BinaryUploadInitRequest {
   alias: Option<String>,
+  title: Option<String>,
   tags: Vec<String>,
   filename: String,
   mime: String,

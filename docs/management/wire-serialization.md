@@ -81,6 +81,7 @@ Rules:
 ##### Users Password Payloads (Wire)
 
 - `PasswordPayload` encodes as a tagged union:
+  - Tag is encoded as `u8`.
   - `0` = `Plaintext { plaintext: String }`
   - `1` = `FrontEndHash { front_end_hash: String, front_end_salt: String }`
 - `UserPasswordSetRequest { email, password, change_token? }`
@@ -228,7 +229,7 @@ WebSocket connector:
 
 ### Rust Codec Implementation
 
-- `WireWriter`, `WireReader`, `WireEncode`, `WireDecode`, and `OptionMap` live in `nop/src/management/wire.rs`.
+- `WireWriter`, `WireReader`, `WireEncode`, `WireDecode`, and `OptionMap` live in `nop/crates/nop-management-contract/src/wire.rs` (use `nop_management_contract` for access).
 - Payload structs implement `WireEncode`/`WireDecode` directly.
 - `WireReader::ensure_fully_consumed()` rejects trailing bytes after decode.
 
@@ -248,7 +249,7 @@ impl WireEncode for ContentUpdateStreamInitRequest {
         ];
         OptionMap::from_flags(&option_flags)?.write(writer)?;
 
-        writer.write_string(&self.alias)?;
+        writer.write_string(&self.id)?;
         if let Some(value) = &self.new_alias {
             writer.write_string(value)?;
         }
@@ -299,7 +300,7 @@ export function encodeContentUpdateStreamInitRequest(
   ];
   OptionMap.write(writer, optionFlags);
 
-  writer.writeString(payload.alias);
+  writer.writeString(payload.id);
   if (payload.newAlias !== undefined) {
     writer.writeString(payload.newAlias);
   }
@@ -346,7 +347,7 @@ Payload:
 
 ```
 ContentUpdateStreamInitRequest {
-  alias: String,
+  id: String,
   new_alias: Option<String>,
   title: Option<String>,
   tags: Option<Vec<String>>,
@@ -362,7 +363,7 @@ Field order:
 
 1. Option bitset (7 optional fields -> `u8`).
 2. Declared field order, encoding optionals only when present:
-   `alias`, `new_alias`, `title`, `tags`, `nav_title`, `nav_parent_id`, `nav_order`, `theme`, `size_bytes`.
+   `id`, `new_alias`, `title`, `tags`, `nav_title`, `nav_parent_id`, `nav_order`, `theme`, `size_bytes`.
 
 ### Frame Codec Structure
 
@@ -407,9 +408,9 @@ WebSocket frame order:
 
 #### Unit Tests (Rust)
 
-- `nop/src/management/wire.rs` covers primitives, option bitsets, and error paths.
-- `nop/src/management/socket/protocol.rs` covers frame round-trip and oversized frame rejection.
-- `nop/src/management/ws/protocol.rs` covers frame round-trip and oversized frame rejection.
+- `nop/crates/nop-management-contract/src/codec.rs` and `nop/crates/nop-management-contract/src/wire.rs` are exercised via `nop/tests/management_wire_vectors.rs` and request/response codec tests in domain modules.
+- `nop/crates/nop-management-bus/src/socket/protocol.rs` covers frame round-trip and oversized frame rejection.
+- `nop/crates/nop-management-bus/src/ws/protocol.rs` covers frame round-trip and oversized frame rejection.
 - `nop/tests/management_wire_vectors.rs` validates payload golden vectors.
 
 #### Unit Tests (TypeScript)

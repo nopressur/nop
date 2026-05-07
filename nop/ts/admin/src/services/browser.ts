@@ -119,7 +119,7 @@ export function replaceHistoryState(nextPath: string): void {
 
 export function matchMediaQuery(query: string): MediaQueryList | null {
   const win = getWindow();
-  return win ? win.matchMedia(query) : null;
+  return win?.matchMedia ? win.matchMedia(query) : null;
 }
 
 export function getLocalStorage(): Storage | null {
@@ -130,6 +130,18 @@ export function getLocalStorage(): Storage | null {
 export function getSessionStorage(): Storage | null {
   const win = getWindow();
   return win?.sessionStorage ?? null;
+}
+
+export async function readClipboardText(): Promise<string | null> {
+  const win = getWindow();
+  if (!win?.navigator?.clipboard?.readText) {
+    return null;
+  }
+  try {
+    return await win.navigator.clipboard.readText();
+  } catch {
+    return null;
+  }
 }
 
 export async function writeClipboardText(text: string): Promise<boolean> {

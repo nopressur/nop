@@ -114,3 +114,114 @@ test("search overlay returns seeded fixtures", async ({ page, harness, rng }) =>
   await expect(tableResult).toBeVisible();
   await expect(htmlResult).toBeVisible();
 });
+
+async function stubSearchAndCapture(page: import("@playwright/test").Page): Promise<string[]> {
+  const queries: string[] = [];
+  await page.route("**/api/search**", async (route) => {
+    const url = new URL(route.request().url());
+    queries.push(url.searchParams.get("q") ?? "");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([]),
+    });
+  });
+  return queries;
+}
+
+test("search input keeps trailing space and sends trimmed query", async ({ page, harness, rng }) => {
+  const queries = await stubSearchAndCapture(page);
+  await page.goto(`${harness.baseUrl}/`);
+
+  await humanClick(page.locator("[data-site-search-button]:visible"), rng);
+  const input = page.locator("[data-site-search-input]");
+  await humanType(input, "sea ", rng);
+  await page.waitForTimeout(350);
+
+  await expect(input).toHaveValue("sea ");
+  expect(queries).toEqual(["sea"]);
+});
+
+test("search input keeps leading space and sends trimmed query", async ({ page, harness, rng }) => {
+  const queries = await stubSearchAndCapture(page);
+  await page.goto(`${harness.baseUrl}/`);
+
+  await humanClick(page.locator("[data-site-search-button]:visible"), rng);
+  const input = page.locator("[data-site-search-input]");
+  await humanType(input, " sea", rng);
+  await page.waitForTimeout(350);
+
+  await expect(input).toHaveValue(" sea");
+  expect(queries).toEqual(["sea"]);
+});
+
+test("search input keeps interior space when typed mid-string", async ({ page, harness, rng }) => {
+  const queries = await stubSearchAndCapture(page);
+  await page.goto(`${harness.baseUrl}/`);
+
+  await humanClick(page.locator("[data-site-search-button]:visible"), rng);
+  const input = page.locator("[data-site-search-input]");
+  await humanType(input, "hel", rng);
+  await input.press("Space");
+  await humanType(input, "lo", rng);
+  await page.waitForTimeout(350);
+
+  await expect(input).toHaveValue("hel lo");
+  expect(queries[queries.length - 1]).toBe("hel lo");
+});
+
+test("search input stays idle for whitespace-only query", async ({ page, harness, rng }) => {
+  const queries = await stubSearchAndCapture(page);
+  await page.goto(`${harness.baseUrl}/`);
+
+  await humanClick(page.locator("[data-site-search-button]:visible"), rng);
+  const input = page.locator("[data-site-search-input]");
+  await humanType(input, "   ", rng);
+  await page.waitForTimeout(350);
+
+  await expect(input).toHaveValue("   ");
+  expect(queries).toEqual([]);
+  await expect(page.getByText("No results")).toHaveCount(0);
+});
+
+test("search input stays idle when padded query trims below threshold", async ({ page, harness, rng }) => {
+  const queries = await stubSearchAndCapture(page);
+  await page.goto(`${harness.baseUrl}/`);
+
+  await humanClick(page.locator("[data-site-search-button]:visible"), rng);
+  const input = page.locator("[data-site-search-input]");
+  await humanType(input, "  ab  ", rng);
+  await page.waitForTimeout(350);
+
+  await expect(input).toHaveValue("  ab  ");
+  expect(queries).toEqual([]);
+  await expect(page.getByText("No results")).toHaveCount(0);
+});
+
+test("search input fires trimmed query when padding wraps a threshold-length term", async ({ page, harness, rng }) => {
+  const queries = await stubSearchAndCapture(page);
+  await page.goto(`${harness.baseUrl}/`);
+
+  await humanClick(page.locator("[data-site-search-button]:visible"), rng);
+  const input = page.locator("[data-site-search-input]");
+  await humanType(input, " abc ", rng);
+  await page.waitForTimeout(350);
+
+  await expect(input).toHaveValue(" abc ");
+  expect(queries).toEqual(["abc"]);
+});
+
+test("search input survives typing additional characters after a trailing space", async ({ page, harness, rng }) => {
+  const queries = await stubSearchAndCapture(page);
+  await page.goto(`${harness.baseUrl}/`);
+
+  await humanClick(page.locator("[data-site-search-button]:visible"), rng);
+  const input = page.locator("[data-site-search-input]");
+  await humanType(input, "sea", rng);
+  await input.press("Space");
+  await humanType(input, "rch", rng);
+  await page.waitForTimeout(350);
+
+  await expect(input).toHaveValue("sea rch");
+  expect(queries[queries.length - 1]).toBe("sea rch");
+});

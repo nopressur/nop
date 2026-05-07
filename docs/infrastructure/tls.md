@@ -187,8 +187,8 @@ For implementation details and the ACME-specific action plan, see `docs/infrastr
 - ACME mode runs a background renewal loop (default: every 12 hours).
 - Renew certificates when they are within 30 days of expiration.
 - On renewal, rewrite `cert.pem` and `key.pem`.
-- TLS uses a reloadable resolver that detects certificate file changes on new
-  handshakes, keeping the last known good certificate if reload fails.
+- TLS uses a reloadable resolver with a background poller (checks at most every 5 seconds)
+  and keeps the last known good certificate if reload fails.
 
 ### Testing Scope
 

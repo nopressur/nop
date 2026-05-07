@@ -1,0 +1,13 @@
+[package]
+name = "nop-rt-well-known"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+actix-web = { version = "4.12.1", features = ["rustls-0_23"] }
+log = "0.4.29"
+nop-config = { path = "../nop-config" }
+nop-rt-tls = { path = "../nop-rt-tls" }
+
+[dev-dependencies]
+nop-config = { path = "../nop-config", features = ["test-helpers"] }

@@ -1,0 +1,19 @@
+[package]
+name = "nop-rt-headers"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+actix-web = { version = "4.12.1", features = ["rustls-0_23"] }
+argon2 = "0.5"
+base64 = "0.22"
+futures-util = "0.3"
+log = "0.4.29"
+nop-config = { path = "../nop-config" }
+nop-content-store = { path = "../nop-content-store" }
+nop-rt-page-cache = { path = "../nop-rt-page-cache" }
+password-hash = { version = "0.5", features = ["getrandom"] }
+
+[dev-dependencies]
+nop-rt-paths = { path = "../nop-rt-paths" }
+tempfile = "3.24.0"

@@ -1,0 +1,12 @@
+[package]
+name = "nop-rt-templates"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+actix-web = { version = "4.12.1", features = ["rustls-0_23"] }
+log = "0.4.29"
+minijinja = { version = "2.15.1", features = ["macros", "custom_syntax", "loader", "builtins", "preserve_order", "debug", "urlencode", "json"] }
+serde_json = "1.0.145"
+uuid = { version = "1.18.1", features = ["v4"] }
+nop-rt-builtin = { path = "../nop-rt-builtin" }

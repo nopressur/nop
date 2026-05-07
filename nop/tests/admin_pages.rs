@@ -5,19 +5,19 @@
 
 mod common;
 
-use nop::content::flat_storage::content_id_hex;
-use nop::management::{
+use nop_content_store::flat_storage::content_id_hex;
+use nop_management_contract::content::{
     CONTENT_ACTION_DELETE_OK, CONTENT_ACTION_LIST_OK, CONTENT_ACTION_READ_OK,
     CONTENT_ACTION_UPDATE_ERR, CONTENT_ACTION_UPDATE_OK, CONTENT_ACTION_UPLOAD_OK, ContentCommand,
     ContentDeleteRequest, ContentListRequest, ContentReadRequest, ContentSortDirection,
-    ContentSortField, ContentUpdateRequest, ContentUploadRequest, ManagementCommand,
-    ResponsePayload,
+    ContentSortField, ContentUpdateRequest, ContentUploadRequest,
 };
+use nop_management_contract::{ManagementCommand, ResponsePayload};
 
 #[actix_web::test]
 async fn content_upload_list_update_delete() {
     let harness = common::TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
+    let bus = harness.management_tools.management_bus.clone();
 
     let upload = ContentUploadRequest {
         alias: Some("docs/getting-started".to_string()),
@@ -34,7 +34,7 @@ async fn content_upload_list_update_delete() {
 
     let response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             1,
             ManagementCommand::Content(ContentCommand::Upload(upload)),
         )
@@ -51,7 +51,7 @@ async fn content_upload_list_update_delete() {
 
     let list_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             2,
             ManagementCommand::Content(ContentCommand::List(ContentListRequest {
                 page: 1,
@@ -80,7 +80,7 @@ async fn content_upload_list_update_delete() {
 
     let read_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             3,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
@@ -100,7 +100,7 @@ async fn content_upload_list_update_delete() {
 
     let update_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             4,
             ManagementCommand::Content(ContentCommand::Update(ContentUpdateRequest {
                 id: content_id.clone(),
@@ -120,7 +120,7 @@ async fn content_upload_list_update_delete() {
 
     let read_updated = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             5,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
@@ -133,7 +133,7 @@ async fn content_upload_list_update_delete() {
 
     let delete_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             6,
             ManagementCommand::Content(ContentCommand::Delete(ContentDeleteRequest {
                 id: content_id,
@@ -147,7 +147,7 @@ async fn content_upload_list_update_delete() {
 #[actix_web::test]
 async fn nav_alias_change_bumps_release_tracker() {
     let harness = common::TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
+    let bus = harness.management_tools.management_bus.clone();
 
     let parent_upload = ContentUploadRequest {
         alias: Some("docs".to_string()),
@@ -164,7 +164,7 @@ async fn nav_alias_change_bumps_release_tracker() {
 
     let parent_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             10,
             ManagementCommand::Content(ContentCommand::Upload(parent_upload)),
         )
@@ -192,7 +192,7 @@ async fn nav_alias_change_bumps_release_tracker() {
 
     let child_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             11,
             ManagementCommand::Content(ContentCommand::Upload(child_upload)),
         )
@@ -208,7 +208,7 @@ async fn nav_alias_change_bumps_release_tracker() {
 
     let update_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             12,
             ManagementCommand::Content(ContentCommand::Update(ContentUpdateRequest {
                 id: child_payload.id.clone(),
@@ -236,7 +236,7 @@ async fn nav_alias_change_bumps_release_tracker() {
 #[actix_web::test]
 async fn non_markdown_upload_exposes_id_alias() {
     let harness = common::TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
+    let bus = harness.management_tools.management_bus.clone();
 
     let pdf_bytes = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n".to_vec();
     let upload = ContentUploadRequest {
@@ -254,7 +254,7 @@ async fn non_markdown_upload_exposes_id_alias() {
 
     let response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             1,
             ManagementCommand::Content(ContentCommand::Upload(upload)),
         )
@@ -276,11 +276,11 @@ async fn non_markdown_upload_exposes_id_alias() {
 #[actix_web::test]
 async fn index_alias_cannot_be_renamed() {
     let harness = common::TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
+    let bus = harness.management_tools.management_bus.clone();
 
     let response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             1,
             ManagementCommand::Content(ContentCommand::Update(ContentUpdateRequest {
                 id: content_id_hex(
@@ -310,7 +310,7 @@ async fn index_alias_cannot_be_renamed() {
 #[actix_web::test]
 async fn content_read_update_delete_by_id() {
     let harness = common::TestHarness::new().await;
-    let bus = harness.app_state.management_bus.clone();
+    let bus = harness.management_tools.management_bus.clone();
 
     let upload = ContentUploadRequest {
         alias: None,
@@ -327,7 +327,7 @@ async fn content_read_update_delete_by_id() {
 
     let response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             1,
             ManagementCommand::Content(ContentCommand::Upload(upload)),
         )
@@ -341,7 +341,7 @@ async fn content_read_update_delete_by_id() {
 
     let read_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             2,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
@@ -354,7 +354,7 @@ async fn content_read_update_delete_by_id() {
 
     let update_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             3,
             ManagementCommand::Content(ContentCommand::Update(ContentUpdateRequest {
                 id: content_id.clone(),
@@ -374,7 +374,7 @@ async fn content_read_update_delete_by_id() {
 
     let read_updated = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             4,
             ManagementCommand::Content(ContentCommand::Read(ContentReadRequest {
                 id: content_id.clone(),
@@ -392,7 +392,7 @@ async fn content_read_update_delete_by_id() {
 
     let delete_response = bus
         .send(
-            nop::management::next_connection_id(),
+            nop_management_bus::next_connection_id(),
             5,
             ManagementCommand::Content(ContentCommand::Delete(ContentDeleteRequest {
                 id: content_id,

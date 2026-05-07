@@ -111,11 +111,11 @@ abort before daemon forking.
 Required startup sequence:
 
 1. Resolve search config from validated config (`search.max_memory_mb`, `search.worker_count`) in
-   `nop/src/config.rs`, computing `effective_worker_count = min(worker_count, 16)` and logging a
+   `nop/crates/nop-config/src/lib.rs`, computing `effective_worker_count = min(worker_count, 16)` and logging a
    startup warning when clamping occurs.
 2. Resolve search runtime paths from canonical runtime root (`state/sys/search/`,
    `state/sys/search/index/`, `state/sys/search/failed-ids.yaml`) using runtime path helpers in
-   `nop/src/runtime_paths.rs`.
+   `nop/crates/nop-rt-paths/src/lib.rs`.
 3. Ensure search directories exist before service construction.
 4. Create failed-ID store and load snapshot from `state/sys/search/failed-ids.yaml`.
 5. Resolve startup reindex mode:
@@ -126,7 +126,7 @@ Required startup sequence:
    - construct `IndexReader` and acquire initial `Searcher` to warm reader state;
    - if open/read/warm fails for an existing index, abort startup immediately (hard stop).
    - no schema fingerprint/version compatibility check is performed in this release.
-7. Create the search service (`nop/src/search/`) with:
+7. Create the search service (`nop/crates/nop-rt-search-service/src/lib.rs`) with:
    - partitioned ingestion workers from `effective_worker_count`;
    - Tantivy writer memory budget from `search.max_memory_mb`;
    - single serialized write/commit stage.
@@ -136,7 +136,7 @@ Required startup sequence:
    - build deterministic upsert jobs (`id`, metadata, derived roles, normalized body);
    - commit and reload reader after rebuild completion.
 9. Inject the resulting search service handle into management shared context
-   (`nop/src/management/core.rs`) so content mutation handlers can enqueue async upsert/delete work.
+   (`nop/crates/nop-management-bus/src/core.rs`) so content mutation handlers can enqueue async upsert/delete work.
 10. Expose query capability through `SearchService` module methods only; public/admin/management
     integration paths call this module API in their own phases.
 
@@ -285,8 +285,9 @@ Required behavior:
 - Content pipeline publishes the canonical metadata and extracted text inputs used by ingestion.
 - Search infrastructure remains domain-neutral; domain-specific permissions are expressed only through `roles` tokens.
 - Public/admin/management integrations must call shared query methods on `SearchService`; query behavior differences are selected via module query capability, not duplicated per transport.
-- Forced reindex is exposed first as an internal search API endpoint; management-bus command wiring is
-  defined in later integration work.
+- Forced reindex is exposed via the internal search API endpoint and management-bus commands
+  (`search.invalidate`, `search.reset`) implemented in `nop-management-search`; CLI/admin tooling
+  invoke these commands rather than reindexing directly.
 
 ### Testing Scope
 
@@ -314,9 +315,9 @@ Required behavior:
 - Public API tests:
   - invalid query lengths (`<3`, `>256`, blank/missing after trim) return `400`.
   - internal query failures return `500` with generic client-visible message.
-- Admin search wiring is implemented; coverage currently remains in search unit/integration tests,
-  CLI integration tests for search commands, and `/api/search` tests. Dedicated management-bus
-  integration coverage for admin UI search flows remains pending.
+- Coverage includes search unit/integration tests (`search_query`, `search_reindex`), `/api/search`
+  integration tests, CLI integration tests for search commands, and management contract wire
+  vectors. Route-level `/api/internal/search/reindex` coverage is tracked separately.
 
 For ingestion-specific behavior, see `docs/infrastructure/search-ingest.md`.
 

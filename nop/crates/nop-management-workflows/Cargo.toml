@@ -1,0 +1,15 @@
+[package]
+name = "nop-management-workflows"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.89"
+log = "0.4.29"
+nop-config = { path = "../nop-config" }
+nop-content-store = { path = "../nop-content-store" }
+nop-roles = { path = "../nop-roles" }
+nop-rt-page-cache = { path = "../nop-rt-page-cache" }
+nop-rt-paths = { path = "../nop-rt-paths" }
+nop-rt-release = { path = "../nop-rt-release" }
+nop-rt-search-service = { path = "../nop-rt-search-service" }

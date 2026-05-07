@@ -7,6 +7,7 @@ import { initSiteNavigation } from './navigation';
 import type { SiteNavigationController } from './navigation';
 import { initSearchOverlay } from './search';
 import { initUserMenu } from './userMenu';
+import { initCodeCopyButtons } from './codeCopy';
 
 const stateKey = '__nopSiteNavigationInit' as const;
 const controllerKey = '__nopSiteNavigationController' as const;
@@ -22,6 +23,7 @@ function start() {
   win[controllerKey] = initSiteNavigation(document);
   initSearchOverlay(document);
   initUserMenu();
+  initCodeCopyButtons(document);
 }
 
 if (document.readyState === 'loading') {

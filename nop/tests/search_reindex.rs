@@ -3,14 +3,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use nop::config::SearchConfig;
-use nop::content::flat_storage::{
+use actix_web::test as actix_test;
+use actix_web::{http::StatusCode, web};
+use nop_config::SearchConfig;
+use nop_content_store::flat_storage::{
     ContentId, ContentSidecar, ContentVersion, blob_path, sidecar_path, write_sidecar_atomic,
 };
-use nop::content::reserved_paths::ReservedPaths;
-use nop::runtime_paths::RuntimePaths;
-use nop::search::{ReindexReason, initialize};
-use nop::util::test_fixtures::TestFixtureRoot;
+use nop_content_store::reserved_paths::ReservedPaths;
+use nop_iam_passwords::build_password_provider_block;
+use nop_rt_paths::RuntimePaths;
+use nop_rt_search_service::{ReindexReason, initialize};
+use nop_testing::test_fixtures::TestFixtureRoot;
+use serde_json::Value;
+
+mod common;
 
 fn write_markdown(
     runtime_paths: &RuntimePaths,
@@ -49,6 +55,46 @@ fn index_doc_count(index_dir: &std::path::Path) -> usize {
         .iter()
         .map(|segment| segment.num_docs() as usize)
         .sum()
+}
+
+async fn roleless_auth(harness: &common::TestHarness) -> common::AuthSession {
+    let email = "roleless@example.com";
+    let password = "roleless-pass";
+    let password_params = harness
+        .config
+        .users
+        .local()
+        .expect("local auth config")
+        .password
+        .clone();
+    let password_block =
+        build_password_provider_block(password, &password_params).expect("password block");
+    harness
+        .user_services
+        .add_user(email, "Roleless User", password_block, Vec::new())
+        .await
+        .expect("add user");
+
+    let user = harness
+        .user_services
+        .get_user(email)
+        .expect("get user")
+        .expect("user");
+    let jwt_service = harness.user_services.jwt_service().expect("jwt service");
+    let token = jwt_service
+        .create_token(&user.email, &user)
+        .expect("jwt token");
+    let claims = jwt_service.verify_token(&token).expect("jwt claims");
+    let cookie = jwt_service.create_auth_cookie(&token).into_owned();
+    let csrf_token = harness.csrf_store.get_or_refresh_token(&claims.jti);
+
+    common::AuthSession {
+        user,
+        jwt_token: token,
+        jwt_id: claims.jti,
+        cookie,
+        csrf_token,
+    }
 }
 
 #[test]
@@ -183,4 +229,99 @@ fn forced_reindex_rebuilds_from_current_markdown_files() {
         .reindex_all_markdown(ReindexReason::Forced)
         .expect("forced reindex");
     assert_eq!(index_doc_count(&runtime_paths.state_search_index_dir), 1);
+}
+
+#[actix_web::test]
+async fn search_reindex_route_requires_authentication() {
+    let harness = common::TestHarness::new().await;
+    let search_startup = initialize(
+        &harness.runtime_paths,
+        &harness.config.search,
+        ReservedPaths::from_config(&harness.config),
+        false,
+    )
+    .expect("search startup");
+    let app = actix_test::init_service(
+        common::build_test_app(harness.app_bundle())
+            .app_data(web::Data::from(search_startup.service.clone())),
+    )
+    .await;
+
+    let req = actix_test::TestRequest::post()
+        .uri("/api/internal/search/reindex")
+        .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let body = actix_test::read_body(resp).await;
+    let json: Value = serde_json::from_slice(&body).expect("response json");
+    assert_eq!(
+        json.get("message").and_then(Value::as_str),
+        Some("Authentication required")
+    );
+}
+
+#[actix_web::test]
+async fn search_reindex_route_rejects_non_admin() {
+    let harness = common::TestHarness::new().await;
+    let search_startup = initialize(
+        &harness.runtime_paths,
+        &harness.config.search,
+        ReservedPaths::from_config(&harness.config),
+        false,
+    )
+    .expect("search startup");
+    let app = actix_test::init_service(
+        common::build_test_app(harness.app_bundle())
+            .app_data(web::Data::from(search_startup.service.clone())),
+    )
+    .await;
+    let session = roleless_auth(&harness).await;
+
+    let req = common::add_auth_headers(
+        actix_test::TestRequest::post().uri("/api/internal/search/reindex"),
+        &session,
+        true,
+    )
+    .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = actix_test::read_body(resp).await;
+    let json: Value = serde_json::from_slice(&body).expect("response json");
+    assert_eq!(
+        json.get("message").and_then(Value::as_str),
+        Some("Admin role required")
+    );
+}
+
+#[actix_web::test]
+async fn search_reindex_route_accepts_admin() {
+    let harness = common::TestHarness::new().await;
+    let search_startup = initialize(
+        &harness.runtime_paths,
+        &harness.config.search,
+        ReservedPaths::from_config(&harness.config),
+        false,
+    )
+    .expect("search startup");
+    let app = actix_test::init_service(
+        common::build_test_app(harness.app_bundle())
+            .app_data(web::Data::from(search_startup.service.clone())),
+    )
+    .await;
+    let session = harness.admin_auth();
+
+    let req = common::add_auth_headers(
+        actix_test::TestRequest::post().uri("/api/internal/search/reindex"),
+        &session,
+        true,
+    )
+    .to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = actix_test::read_body(resp).await;
+    let json: Value = serde_json::from_slice(&body).expect("response json");
+    assert_eq!(
+        json.get("message").and_then(Value::as_str),
+        Some("Search reindex completed")
+    );
 }

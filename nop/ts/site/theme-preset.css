@@ -34,6 +34,43 @@ body {
     transition: color 0.3s ease;
 }
 
+figure[data-site-code-block="true"] {
+    position: relative;
+    margin: 1.25rem 0;
+}
+
+figure[data-site-code-block="true"] > figcaption {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    z-index: 2;
+}
+
+figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="true"] {
+    border: 1px solid var(--color-border-light);
+    border-radius: 8px;
+    background-color: var(--color-content-background-light);
+    color: var(--color-text-secondary-light);
+    font-family: var(--font-body-family);
+    font-size: 0.85rem;
+    line-height: 1;
+    padding: 0.45rem 0.55rem;
+    cursor: pointer;
+}
+
+figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="true"]:hover {
+    color: var(--color-text-primary-light);
+}
+
+figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="true"]:focus-visible {
+    outline: 2px solid var(--color-content-link-light);
+    outline-offset: 1px;
+}
+
+figure[data-site-code-block="true"] pre {
+    padding-top: 2.2rem;
+}
+
 .navbar {
     background: transparent !important;
     transition: color 0.3s ease;

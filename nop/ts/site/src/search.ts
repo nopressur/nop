@@ -328,10 +328,14 @@ export function initSearchOverlay(
 
   const scheduleSearch = (rawQuery: string) => {
     clearPendingSearch()
-    const query = normalizeQuery(rawQuery)
-    if (input.value !== query) {
-      input.value = query
+    if (rawQuery.length > SEARCH_MAX_QUERY_LEN) {
+      const clamped = rawQuery.slice(0, SEARCH_MAX_QUERY_LEN)
+      if (input.value !== clamped) {
+        input.value = clamped
+      }
+      rawQuery = clamped
     }
+    const query = normalizeQuery(rawQuery)
     if (query.length < SEARCH_MIN_QUERY_LEN) {
       renderIdleState()
       return

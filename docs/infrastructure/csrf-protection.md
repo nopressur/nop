@@ -12,6 +12,7 @@ Status: Developed
 
 ### Components
 
+- CSRF helpers live under `nop/src/csrf/`.
 - `csrf_helper.rs` defines `CsrfTokenStore`, the single source of truth for CSRF tokens.
 - `csrf_helper.rs` also provides `issue_csrf_token` so login and admin token endpoints share the
   same JWT/dev-mode resolution logic.
@@ -42,6 +43,9 @@ The middleware resolves the JWT ID using this priority:
 1. JWT claims in the request extensions (`jti`).
 2. Dev-mode localhost fallback (`"localhost"`) when dev mode is enabled in debug builds and the request originates from loopback (release builds ignore `dev_mode`).
 3. Unauthenticated, non-dev requests skip CSRF validation entirely (auth middleware blocks these routes).
+
+JWT claim validation requirements, including strict `jti` validation for the HS256 local session
+token, are defined in `docs/infrastructure/hs256-jwt-codec.md`.
 
 ### Exempt Endpoints
 

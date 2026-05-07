@@ -1,6 +1,8 @@
 services:
   nopressure:
-    build: .
+    build:
+      context: ../..
+      dockerfile: examples/docker/Dockerfile
     working_dir: /app
     volumes:
       - ../data:/data

@@ -7,9 +7,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NOP_DIR="$ROOT_DIR/nop"
+source "$ROOT_DIR/scripts/lib/rust-crates.sh"
+
 ADMIN_DIR="$NOP_DIR/ts/admin"
 LOGIN_DIR="$NOP_DIR/ts/login"
+
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$NOP_DIR/target/full-testing-scope}"
+
+GENERATED_LOCKFILES=()
 
 require_tool() {
   local tool="$1"
@@ -26,6 +31,59 @@ ensure_node_modules() {
   fi
 }
 
+cleanup_generated_lockfiles() {
+  local lockfile
+  for lockfile in "${GENERATED_LOCKFILES[@]}"; do
+    rm -f "$lockfile"
+  done
+}
+
+track_generated_lockfile() {
+  local lockfile="$1"
+  if [[ -f "$lockfile" ]]; then
+    return
+  fi
+  GENERATED_LOCKFILES+=("$lockfile")
+}
+
+run_cargo_scope() {
+  local label="$1"
+  local dir="$2"
+  local lockfile="$dir/Cargo.lock"
+
+  if [[ ! -f "$dir/Cargo.toml" ]]; then
+    echo "Rust crate manifest not found for $label: $dir/Cargo.toml" >&2
+    exit 1
+  fi
+
+  track_generated_lockfile "$lockfile"
+
+  echo "Formatting Rust crate: $label"
+  (cd "$dir" && cargo fmt --all)
+
+  echo "Testing Rust crate: $label"
+  (cd "$dir" && cargo test)
+
+  echo "Linting Rust crate: $label"
+  (cd "$dir" && cargo clippy --all-targets -- -D warnings)
+}
+
+run_rust_full_testing_scope() {
+  local entry
+  local label
+  local dir
+
+  echo "Running Rust full testing scope..."
+  echo "Rust scope: format, test, and clippy for dependency crates first, then nop."
+  for entry in "${RUST_CRATES[@]}"; do
+    label="${entry%%:*}"
+    dir="${entry#*:}"
+    run_cargo_scope "$label" "$dir"
+  done
+}
+
+trap cleanup_generated_lockfiles EXIT
+
 require_tool cargo
 require_tool npm
 
@@ -38,8 +96,7 @@ if [[ ! -d "$LOGIN_DIR" ]]; then
   exit 1
 fi
 
-echo "Running Rust tests..."
-"$ROOT_DIR/scripts/cargo.sh" test
+run_rust_full_testing_scope
 
 echo "Ensuring admin SPA dependencies..."
 ensure_node_modules "$ADMIN_DIR"
@@ -54,6 +111,3 @@ echo "Running login SPA checks..."
 (cd "$LOGIN_DIR" && npm run check)
 echo "Running login SPA tests..."
 (cd "$LOGIN_DIR" && npm run test)
-
-echo "Running Playwright E2E tests..."
-"$ROOT_DIR/scripts/run-playwright.sh"

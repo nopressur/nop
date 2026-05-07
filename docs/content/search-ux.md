@@ -129,7 +129,7 @@ Result behavior:
 - Expected integration points:
   - `nop/ts/site/src/main.ts` initializes a new search module alongside existing navigation/user
     menu initialization;
-  - `nop/src/public/templates/main_layout.html` hosts required search trigger/overlay mount
+  - `nop/crates/nop-public/src/templates/main_layout.html` hosts required search trigger/overlay mount
     elements (data-attribute based);
   - output remains the compiled site bundle served as `site.js`.
 

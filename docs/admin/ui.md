@@ -85,7 +85,7 @@ Status: Developed
 #### SPA shell and runtime config
 
 - Serve a single SPA shell HTML for all admin routes (except login). The shell is a MiniJinja template
-  (`nop/src/admin/templates/spa_shell.html`) and mounts the app into a single root element (for example
+  (`nop/crates/nop-admin/src/templates/spa_shell.html`) and mounts the app into a single root element (for example
   `<div id="admin-app"></div>`).
 - The backend must never return Actix's default 404 for admin deep links. Any authenticated admin GET
   under `adminPath` that is not an API endpoint still serves the SPA shell so the client can handle it.
@@ -179,7 +179,15 @@ Status: Developed
 - The editor API supports:
   - Setting/getting content.
   - Cursor tracking for upload insertions.
+  - Cursor placement after append-style paste merges.
   - Theme selection based on system preference.
+- Markdown editors provide a `Paste-Merge` toolbar action that reads clipboard text, appends it to
+  the document, and merges numbered reference-style links into the final reference definition block.
+- `Paste-Merge` renumbers pasted in-text reference labels and pasted reference definitions after the
+  highest numbered reference already present in the editor. Orphaned pasted labels are renumbered
+  without creating definitions, so they do not resolve to existing document references.
+- After `Paste-Merge`, the editor cursor moves to the end of the pasted body text, before the final
+  reference definition block when one exists.
 
 #### Editor Insert Modal
 

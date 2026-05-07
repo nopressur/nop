@@ -4,33 +4,34 @@ This guide summarizes how NoPressure builds, watches, and ships the `nop` binary
 
 ## Build Modes
 
-- **Development (`scripts/cargo.sh run`)** – Actix serves admin and login assets from the filesystem. `build.rs`
+- **Development (`scripts/crg.sh nop run`)** – Actix serves admin and login assets from the filesystem. `build.rs`
   ensures the admin SPA is generated in `nop/builtin/admin` and the login SPA in a versioned
   directory such as `nop/builtin/login-<hash>` (runs `npm install` if needed, then `npm run build`).
   The script writes `builtin/login-spa-version.txt` plus a generated `login_spa_version.rs` so the
   Rust templates know which versioned login assets to reference. Debug builds still write an empty
   `builtin_files.rs`, so asset changes are reflected without recompiling the Rust binary.
   `build.rs` also builds the public site bundle from `nop/ts/site` into `nop/builtin/site.js`.
-- **Release (`scripts/cargo.sh build --release`)** – `build.rs` (see `nop/build.rs`) walks `nop/builtin/`, gzip-compresses each asset, and generates `BUILTIN_FILES` (a `HashMap<&str, (&[u8], &str)>`). Release binaries embed these bytes, so no external asset directory is needed at runtime.
+- **Release (`scripts/crg.sh nop build --release`)** – `build.rs` (see `nop/build.rs`) walks `nop/builtin/`, gzip-compresses each asset, and generates `BUILTIN_FILES` (a `HashMap<&str, (&[u8], &str)>`). Release binaries embed these bytes, so no external asset directory is needed at runtime.
 - Cargo reruns the build script when admin/login SPA sources or builtin assets change, ensuring the
   frontends and embedded assets stay in sync.
 
 ## Local Iteration
 
-- `scripts/cargo.sh run -- -C ../runtime -F` – standard dev loop (runtime root at `../runtime`; `-F -C ../runtime` is equivalent).
-- `scripts/cargo.sh check` – type-check without linking; use for quick feedback when editing APIs.
+- `scripts/crg.sh nop run -- -C ../runtime -F` – standard dev loop (runtime root at `../runtime`; `-F -C ../runtime` is equivalent).
+- `scripts/crg.sh nop check` – type-check without linking; use for quick feedback when editing APIs.
 - Note: the server daemonizes by default when started without subcommands; pass `-F` to keep it in the foreground. If auto-bootstrap creates `config.yaml` or `users.yaml`, the server stays in the foreground for that run so credentials are visible.
 
 ## Release Builds
 
-- `scripts/cargo.sh build --release` – builds the optimized binary with embedded assets. Output lands in `nop/target/release/nop`.
+- `scripts/crg.sh nop build --release` – builds the optimized binary with embedded assets. Output lands in `nop/target/release/nop`.
 
 ## Container Images
 
 - `examples/docker/` – example full build pipeline inside Docker:
-  - `Dockerfile` builds the Rust project, runs `scripts/cargo.sh build --release`, and copies the binary into a runtime image.
-  - `docker-compose.yaml` mounts a host `data/` runtime root into `/data` and exposes the app on port `5466`.
+  - `Dockerfile` builds the Rust project, runs `scripts/crg.sh nop build --release`, and copies the binary into a runtime image.
+  - `docker-compose.yaml` builds from the repo root context (using `examples/docker/Dockerfile`), mounts a host `data/` runtime root into `/data`, and exposes the app on port `5466`.
   - `README.md` outlines build and run instructions (`docker-compose build && docker-compose up`).
+  - Runtime containers run as an unprivileged user (`nop`) by default.
 - `examples/docker-slim/` – expects a prebuilt `nop` binary dropped into the directory. `Dockerfile` simply packages that binary with runtime dependencies; ideal for CI pipelines where the binary is built elsewhere.
 
 ## Supporting Utilities
@@ -80,9 +81,9 @@ Detailed report (no fix exists and vulnerable functionality is exercised):
 ## Operational Checklist
 
 1. Ensure configuration files exist: copy `examples/config.yaml.example` and `examples/users.yaml.example` into the runtime root (or rely on auto-bootstrap defaults).
-2. Run `scripts/cargo.sh fmt --all`, `scripts/cargo.sh clippy -- -D warnings`, and `scripts/cargo.sh test` locally before producing release artifacts.
+2. Run the full testing scope with `scripts/run-full-tests.sh` locally before producing release artifacts.
 3. Choose a delivery path:
-   - Local binary: `scripts/cargo.sh build --release`, distribute `nop/target/release/nop`.
+   - Local binary: `scripts/crg.sh nop build --release`, distribute `nop/target/release/nop`.
    - Container: `cd examples/docker && docker-compose build` (full build) or `cd examples/docker-slim && docker-compose build` (package prebuilt binary).
 4. Persist or publish the resulting binaries/images through your deployment pipeline.
 

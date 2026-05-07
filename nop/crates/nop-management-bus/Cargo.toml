@@ -1,0 +1,43 @@
+[package]
+name = "nop-management-bus"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.89"
+chrono = { version = "0.4.43", features = ["serde"] }
+flate2 = "1.1.8"
+futures-util = "0.3"
+log = "0.4.29"
+libc = "0.2.180"
+mime_guess = "2.0"
+nop-config = { path = "../nop-config" }
+nop-content-store = { path = "../nop-content-store" }
+nop-iam-passwords = { path = "../nop-iam-passwords" }
+nop-management-contract = { path = "../nop-management-contract" }
+nop-management-errors = { path = "../nop-management-errors" }
+nop-management-roles = { path = "../nop-management-roles" }
+nop-management-tags = { path = "../nop-management-tags" }
+nop-management-users = { path = "../nop-management-users" }
+nop-management-content = { path = "../nop-management-content" }
+nop-management-search = { path = "../nop-management-search" }
+nop-management-system = { path = "../nop-management-system" }
+nop-management-workflows = { path = "../nop-management-workflows" }
+nop-roles = { path = "../nop-roles" }
+nop-rt-bootstrap = { path = "../nop-rt-bootstrap" }
+nop-rt-iam = { path = "../nop-rt-iam" }
+nop-rt-logging = { path = "../nop-rt-logging" }
+nop-rt-page-cache = { path = "../nop-rt-page-cache" }
+nop-rt-paths = { path = "../nop-rt-paths" }
+nop-rt-release = { path = "../nop-rt-release" }
+nop-rt-search-service = { path = "../nop-rt-search-service" }
+rpassword = "7.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.49.0", features = ["full"] }
+
+[dev-dependencies]
+nop-config = { path = "../nop-config", features = ["test-helpers"] }
+nop-testing = { path = "../nop-testing" }
+serde_yaml = "0.9"
+tempfile = "3.24.0"

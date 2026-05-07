@@ -3,18 +3,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use nop::config::{
+use nop_config::{
     AdminConfig, AppConfig, AuthMethod, Config, JwtConfig, LocalAuthConfig, LoggingConfig,
     LoggingRotationConfig, NavigationConfig, OidcConfig, PasswordHashingConfig, RenderingConfig,
     SecurityConfig, ServerConfig, ShortcodeConfig, StreamingConfig, UploadConfig, UsersConfig,
 };
-use nop::iam::{
-    FileUserStore, IamError, UserServices, UserStore, UsersData, build_password_provider_block,
-};
-use nop::management::socket::ManagementSocket;
-use nop::management::{AccessRule, ManagementBus, ManagementContext, build_default_registry};
-use nop::runtime_paths::RuntimePaths;
-use nop::util::test_fixtures::TestFixtureRoot;
+use nop_iam_passwords::build_password_provider_block;
+use nop_management_bus::socket::ManagementSocket;
+use nop_management_bus::{ManagementBus, ManagementContext, build_default_registry};
+use nop_management_contract::AccessRule;
+use nop_rt_iam::UserServices;
+use nop_rt_iam::store::{FileUserStore, UserStore};
+use nop_rt_iam::types::{IamError, UsersData};
+use nop_rt_paths::RuntimePaths;
+use nop_testing::test_fixtures::TestFixtureRoot;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -149,7 +151,7 @@ fn write_local_config(root: &Path) {
             max_violations: 10,
             cooldown_seconds: 60,
             use_forwarded_for: false,
-            login_sessions: nop::config::LoginSessionConfig::default(),
+            login_sessions: nop_config::LoginSessionConfig::default(),
             hsts_enabled: false,
             hsts_max_age: 31536000,
             hsts_include_subdomains: true,
@@ -167,7 +169,7 @@ fn write_local_config(root: &Path) {
         streaming: StreamingConfig { enabled: false },
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
-        search: nop::config::SearchConfig::default(),
+        search: nop_config::SearchConfig::default(),
         dev_mode: None,
     };
 
@@ -217,7 +219,7 @@ fn write_oidc_config(root: &Path) {
             max_violations: 10,
             cooldown_seconds: 60,
             use_forwarded_for: false,
-            login_sessions: nop::config::LoginSessionConfig::default(),
+            login_sessions: nop_config::LoginSessionConfig::default(),
             hsts_enabled: false,
             hsts_max_age: 31536000,
             hsts_include_subdomains: true,
@@ -235,7 +237,7 @@ fn write_oidc_config(root: &Path) {
         streaming: StreamingConfig { enabled: false },
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
-        search: nop::config::SearchConfig::default(),
+        search: nop_config::SearchConfig::default(),
         dev_mode: None,
     };
 
@@ -419,7 +421,7 @@ fn cli_tag_crud_roundtrip() {
     let output = run_cli(fixture.path(), &["tag", "delete", "news/alerts"]);
     assert!(output.status.success());
     let tags = read_tags(fixture.path());
-    assert!(tags.get("news/alerts").is_none());
+    assert!(!tags.contains_key("news/alerts"));
 }
 
 #[test]
@@ -636,10 +638,10 @@ fn cli_user_queue_full_returns_retryable_error() {
             tokio::spawn(async move {
                 let email = format!("queued{}@example.com", idx);
                 let result = services.add_user(&email, "Queued", block, Vec::new()).await;
-                if let Err(err) = result {
-                    if err.to_string() == MUTATION_QUEUE_FULL_MESSAGE {
-                        busy_notify.notify_one();
-                    }
+                if let Err(err) = result
+                    && err.to_string() == MUTATION_QUEUE_FULL_MESSAGE
+                {
+                    busy_notify.notify_one();
                 }
             });
         }
@@ -1026,7 +1028,7 @@ fn cli_content_roundtrip_bypass() {
     std::fs::write(&updated_path, "Updated from CLI\n").expect("write markdown update");
     let output = run_cli_owned(
         fixture.path(),
-        &vec![
+        &[
             "content".to_string(),
             "change".to_string(),
             markdown_id.clone(),
@@ -1037,7 +1039,7 @@ fn cli_content_roundtrip_bypass() {
 
     let output = run_cli_owned(
         fixture.path(),
-        &vec![
+        &[
             "content".to_string(),
             "stream".to_string(),
             markdown_id.clone(),
@@ -1049,7 +1051,7 @@ fn cli_content_roundtrip_bypass() {
 
     let output = run_cli_owned(
         fixture.path(),
-        &vec![
+        &[
             "content".to_string(),
             "delete".to_string(),
             markdown_id.clone(),
@@ -1059,7 +1061,7 @@ fn cli_content_roundtrip_bypass() {
 
     let output = run_cli_owned(
         fixture.path(),
-        &vec![
+        &[
             "content".to_string(),
             "stream".to_string(),
             markdown_id,
@@ -1081,7 +1083,7 @@ fn cli_content_roundtrip_bypass() {
     let output_path = input_dir.path().join("asset-copy.bin");
     let output = run_cli_owned(
         fixture.path(),
-        &vec![
+        &[
             "content".to_string(),
             "stream".to_string(),
             binary_id.clone(),
@@ -1094,7 +1096,7 @@ fn cli_content_roundtrip_bypass() {
 
     let output = run_cli_owned(
         fixture.path(),
-        &vec!["content".to_string(), "delete".to_string(), binary_id],
+        &["content".to_string(), "delete".to_string(), binary_id],
     );
     assert_cli_success(&output);
 }
@@ -1150,7 +1152,7 @@ fn cli_content_roundtrip_socket() {
     std::fs::write(&updated_path, "Socket update\n").expect("write update");
     let output = run_cli_owned(
         root,
-        &vec![
+        &[
             "content".to_string(),
             "change".to_string(),
             markdown_id.clone(),
@@ -1161,7 +1163,7 @@ fn cli_content_roundtrip_socket() {
 
     let output = run_cli_owned(
         root,
-        &vec![
+        &[
             "content".to_string(),
             "stream".to_string(),
             markdown_id.clone(),
@@ -1173,7 +1175,7 @@ fn cli_content_roundtrip_socket() {
 
     let output = run_cli_owned(
         root,
-        &vec!["content".to_string(), "delete".to_string(), markdown_id],
+        &["content".to_string(), "delete".to_string(), markdown_id],
     );
     assert_cli_success(&output);
 
@@ -1190,7 +1192,7 @@ fn cli_content_roundtrip_socket() {
     let output_path = input_dir.path().join("socket-copy.bin");
     let output = run_cli_owned(
         root,
-        &vec![
+        &[
             "content".to_string(),
             "stream".to_string(),
             binary_id.clone(),
@@ -1203,7 +1205,7 @@ fn cli_content_roundtrip_socket() {
 
     let output = run_cli_owned(
         root,
-        &vec!["content".to_string(), "delete".to_string(), binary_id],
+        &["content".to_string(), "delete".to_string(), binary_id],
     );
     assert_cli_success(&output);
 }

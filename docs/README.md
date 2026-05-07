@@ -7,7 +7,7 @@ This file is the entry point for contributors and AI assistants. It explains whe
 - **Runtime**: Rust + Actix Web, packaged as a single binary with embedded admin/static assets in release builds.
 - **Content Model**: Markdown + sidecar metadata stored in `content/`; IDs are canonical, aliases are optional for routing, and navbar metadata drives navigation.
 - **Interfaces**: Public site, admin UI, and JSON endpoints guarded by JWT-backed RBAC.
-- **Key Services**: Authentication (`iam`, `login`), security middleware (`security`, CSRF), templating (`templates` + MiniJinja), admin tooling (`admin/*`), management bus (`management/*`), rendering pipeline (`public/*`), shared helpers (`util/*`), configuration (`config`), entrypoint (`docs/infrastructure/main.md`).
+- **Key Services**: Authentication (`nop-rt-iam`, `nop-rt-login`), security middleware (`nop-rt-security`, `nop-rt-csrf`), templating (`nop-rt-templates` + MiniJinja), admin tooling (`nop-admin`), management bus (`nop-management-bus`), rendering pipeline (`nop-public`), shared helpers (`nop-library`, `nop-rt-logging`, `nop-rt-page-cache`), configuration (`nop-config`), entrypoint (glue-only `nop` + `docs/infrastructure/main.md`).
 
 ## Documentation Placement
 
@@ -26,7 +26,9 @@ Choose the home that matches the primary purpose of the document and avoid dupli
 
 ## Module Boundaries
 
-The `public` module owns the core content model, including `PageMetaCache` as the systemwide source of content metadata and access rules. IAM depends on that cache by design to make authorization decisions about which users can view public content.
+The `nop-rt-page-cache` crate owns the systemwide content metadata cache used by public rendering and IAM access checks; public and IAM depend on it for alias lookups and authorization decisions.
+The `nop-library` crate hosts dependency-free, cross-domain helpers (for example validation) and should not depend on domain crates.
+The `nop-roles` crate owns role rules and shared role types used by IAM, search, and cache authorization flows.
 
 ## Documentation Map
 
@@ -34,6 +36,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 - `docs/infrastructure/storage.md` - On-disk content contract, sidecar metadata, and write expectations.
 - `docs/content/content-model.md` - Routing, rendering, navigation, and public access control rules.
 - `docs/content/search-ux.md` - Public search API contract and site TypeScript search overlay behavior.
+- `docs/content/sitemap.md` - `/robots.txt` and `/sitemap.xml` behavior, crawl rules, and canonical URL rules.
 - `docs/content/themes.md` - Theme file format, palettes, and public theme rendering pipeline.
 - `docs/modules/shortcodes.md` - Parser syntax, built-in handlers, extension workflow.
 - `docs/content/public-rbac.md` - Public RBAC rules and access outcomes.
@@ -42,6 +45,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 ### Admin Experience
 - `docs/content/content-management.md` - Admin content operations, uploads, metadata edits, and cache updates.
 - `docs/admin/ui.md` - Admin SPA architecture, UX requirements, and UI integration details.
+- `docs/admin/auto-bootstrap.md` - Runtime root validation rules and default bootstrap behavior.
 - `docs/admin/list-control-guideline.md` - Admin list interaction pattern and keyboard navigation guidelines.
 - `docs/admin/user-management.md` - User management UI and management bus integration.
 
@@ -63,7 +67,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 ### DevOps & Platform
 - `docs/devops/build-and-release.md` - Build modes, asset embedding, multi-target release process.
 - `docs/devops/configuration.md` - Config schema, defaults, validation, secrets handling.
-- `docs/devops/tooling.md` - Helper scripts (`scripts/cargo.sh`) plus Bulma (`scripts/update-bulma.sh`) and Ace (`scripts/update-ace.sh`) updaters.
+- `docs/devops/tooling.md` - Helper scripts (`scripts/crg.sh`) plus Bulma (`scripts/update-bulma.sh`) and Ace (`scripts/update-ace.sh`) updaters.
 
 ### Infrastructure Support Modules
 - `docs/infrastructure/csrf-protection.md` - CSRF protection architecture and behavior.
@@ -72,6 +76,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 - `docs/infrastructure/filesystem-security.md` - Canonical path enforcement and safe file creation.
 - `docs/infrastructure/daemonization.md` - Daemonized startup behavior, PID guards, and logging.
 - `docs/infrastructure/internal-utilities.md` - CSRF store, streaming ranges, MIME detection, logging helpers, color utilities.
+- `docs/infrastructure/hs256-jwt-codec.md` - Requirements for the repo-owned HS256-only JWT codec.
 - `docs/infrastructure/search.md` - Infrastructure search architecture and Tantivy integration contract.
 - `docs/infrastructure/search-ingest.md` - Search ingestion requirements, mutation semantics, and retry behavior.
 
@@ -98,6 +103,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 ### Standards
 - `docs/standards/coding.md` - Style conventions, module structure, error handling, security, logging.
 - `docs/standards/testing.md` - Unit/integration patterns, hermetic principles, and test layout.
+- `docs/coupling.md` - Cross-module coupling rules, approved dependency patterns, and ownership boundaries.
 
 ### Security
 - `docs/threat-modeling.md` - Non-exhaustive threat modeling notes.
@@ -106,6 +112,7 @@ The `public` module owns the core content model, including `PageMetaCache` as th
 ## How to Use This Library
 
 1. **Start with Standards**: Read `coding.md` and `testing.md` before writing code.
+   For any code review, audit, or dependency audit, also read `docs/threat-modeling.md`.
 2. **Follow Storage and Public Model**: Use `docs/infrastructure/storage.md` and `docs/content/content-model.md` for core behavior.
 3. **Check Domain Docs**: Apply the DevOps/Admin/IAM/Infrastructure docs for the area you are touching.
 4. **Follow Runtime Flow**: Use `docs/infrastructure/main.md` to understand startup and middleware ordering.

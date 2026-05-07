@@ -1,0 +1,18 @@
+[package]
+name = "nop-management-search"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nop-config = { path = "../nop-config" }
+nop-content-store = { path = "../nop-content-store" }
+nop-management-contract = { path = "../nop-management-contract" }
+nop-management-errors = { path = "../nop-management-errors" }
+nop-management-workflows = { path = "../nop-management-workflows" }
+nop-rt-page-cache = { path = "../nop-rt-page-cache" }
+nop-rt-search-service = { path = "../nop-rt-search-service" }
+
+[dev-dependencies]
+nop-rt-paths = { path = "../nop-rt-paths" }
+tempfile = "3.24.0"
+tokio = { version = "1.49.0", features = ["rt", "macros"] }

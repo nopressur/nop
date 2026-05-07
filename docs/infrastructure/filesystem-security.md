@@ -1,8 +1,9 @@
 # Filesystem Security
 
-This document covers filesystem safety helpers in `nop/src/security/` that enforce canonical paths
-and safe file creation. These guards are shared by public and admin code paths and return standard
-public error pages; API routes should use their own response formats.
+This document covers filesystem safety helpers for canonical path enforcement in
+`nop/src/security/` and safe file creation in `nop/crates/nop-security-paths`. These guards are shared
+by public and admin code paths and return standard public error pages; API routes should use their
+own response formats.
 
 ## Path Canonicalization and Root Enforcement
 
@@ -17,8 +18,9 @@ public error pages; API routes should use their own response formats.
 
 ## Safe File Naming
 
-- `validate_new_file_path` and `validate_new_file_name` reinforce safe naming for uploads and page
-  creation, blocking attempts to create unexpected paths or filenames.
+- `validate_new_file_path` (from `nop/crates/nop-security-paths`) and `validate_new_file_name`
+  reinforce safe naming for uploads and page creation, blocking attempts to create unexpected
+  paths or filenames.
 
 ## Error Handling
 

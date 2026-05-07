@@ -3,9 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use nop::management;
-use nop::management::WireEncode;
-use nop::management::WireWriter;
+use nop_management_contract::{WireEncode, WireWriter};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
@@ -97,7 +95,7 @@ fn push_entry<T: Serialize + WireEncode>(
 }
 
 fn system_entries(entries: &mut Vec<VectorEntry>) {
-    use management::{
+    use nop_management_contract::system::{
         ClearLogsRequest, ClearLogsResponse, GetLoggingConfigRequest, LoggingConfigResponse,
         PingRequest, PongErrorResponse, PongResponse, SYSTEM_ACTION_LOGGING_CLEAR,
         SYSTEM_ACTION_LOGGING_CLEAR_ERR, SYSTEM_ACTION_LOGGING_CLEAR_OK, SYSTEM_ACTION_LOGGING_GET,
@@ -178,7 +176,7 @@ fn system_entries(entries: &mut Vec<VectorEntry>) {
         "system.logging_get_err.response",
         SYSTEM_DOMAIN_ID,
         SYSTEM_ACTION_LOGGING_GET_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "logging not configured".to_string(),
         },
     );
@@ -200,7 +198,7 @@ fn system_entries(entries: &mut Vec<VectorEntry>) {
         "system.logging_set_err.response",
         SYSTEM_DOMAIN_ID,
         SYSTEM_ACTION_LOGGING_SET_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "invalid rotation size".to_string(),
         },
     );
@@ -220,14 +218,14 @@ fn system_entries(entries: &mut Vec<VectorEntry>) {
         "system.logging_clear_err.response",
         SYSTEM_DOMAIN_ID,
         SYSTEM_ACTION_LOGGING_CLEAR_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "permission denied".to_string(),
         },
     );
 }
 
 fn user_entries(entries: &mut Vec<VectorEntry>) {
-    use management::{
+    use nop_management_contract::users::{
         PasswordPayload, PasswordSaltResponse, PasswordValidateResponse, USER_ACTION_ADD,
         USER_ACTION_ADD_ERR, USER_ACTION_ADD_OK, USER_ACTION_CHANGE, USER_ACTION_CHANGE_ERR,
         USER_ACTION_CHANGE_OK, USER_ACTION_DELETE, USER_ACTION_DELETE_ERR, USER_ACTION_DELETE_OK,
@@ -390,7 +388,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.add_ok.response",
         USERS_DOMAIN_ID,
         USER_ACTION_ADD_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "user created".to_string(),
         },
     );
@@ -399,7 +397,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.add_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_ADD_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "email already exists".to_string(),
         },
     );
@@ -408,7 +406,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.change_ok.response",
         USERS_DOMAIN_ID,
         USER_ACTION_CHANGE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "user updated".to_string(),
         },
     );
@@ -417,7 +415,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.change_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_CHANGE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "user not found".to_string(),
         },
     );
@@ -426,7 +424,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.delete_ok.response",
         USERS_DOMAIN_ID,
         USER_ACTION_DELETE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "user deleted".to_string(),
         },
     );
@@ -435,7 +433,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.delete_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_DELETE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "cannot delete admin".to_string(),
         },
     );
@@ -444,7 +442,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.password_set_ok.response",
         USERS_DOMAIN_ID,
         USER_ACTION_PASSWORD_SET_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "password updated".to_string(),
         },
     );
@@ -453,7 +451,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.password_set_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_PASSWORD_SET_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "password too short".to_string(),
         },
     );
@@ -474,7 +472,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.password_salt_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_PASSWORD_SALT_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "salt unavailable".to_string(),
         },
     );
@@ -490,7 +488,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.password_validate_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_PASSWORD_VALIDATE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "validation failed".to_string(),
         },
     );
@@ -499,7 +497,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.password_update_ok.response",
         USERS_DOMAIN_ID,
         USER_ACTION_PASSWORD_UPDATE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "password updated".to_string(),
         },
     );
@@ -508,7 +506,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.password_update_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_PASSWORD_UPDATE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "password change failed".to_string(),
         },
     );
@@ -535,7 +533,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.list_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_LIST_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "user list error".to_string(),
         },
     );
@@ -555,7 +553,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.show_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_SHOW_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "user not found".to_string(),
         },
     );
@@ -564,7 +562,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.role_add_ok.response",
         USERS_DOMAIN_ID,
         USER_ACTION_ROLE_ADD_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role added".to_string(),
         },
     );
@@ -573,7 +571,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.role_add_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_ROLE_ADD_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role already assigned".to_string(),
         },
     );
@@ -582,7 +580,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.role_remove_ok.response",
         USERS_DOMAIN_ID,
         USER_ACTION_ROLE_REMOVE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role removed".to_string(),
         },
     );
@@ -591,7 +589,7 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.role_remove_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_ROLE_REMOVE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role not found".to_string(),
         },
     );
@@ -613,15 +611,16 @@ fn user_entries(entries: &mut Vec<VectorEntry>) {
         "users.roles_list_err.response",
         USERS_DOMAIN_ID,
         USER_ACTION_ROLES_LIST_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role list error".to_string(),
         },
     );
 }
 
 fn tag_entries(entries: &mut Vec<VectorEntry>) {
-    use management::{
-        AccessRule, TAG_ACTION_ADD, TAG_ACTION_ADD_ERR, TAG_ACTION_ADD_OK, TAG_ACTION_CHANGE,
+    use nop_management_contract::AccessRule;
+    use nop_management_contract::tags::{
+        TAG_ACTION_ADD, TAG_ACTION_ADD_ERR, TAG_ACTION_ADD_OK, TAG_ACTION_CHANGE,
         TAG_ACTION_CHANGE_ERR, TAG_ACTION_CHANGE_OK, TAG_ACTION_DELETE, TAG_ACTION_DELETE_ERR,
         TAG_ACTION_DELETE_OK, TAG_ACTION_LIST, TAG_ACTION_LIST_ERR, TAG_ACTION_LIST_OK,
         TAG_ACTION_SHOW, TAG_ACTION_SHOW_ERR, TAG_ACTION_SHOW_OK, TAGS_DOMAIN_ID, TagAddRequest,
@@ -686,7 +685,7 @@ fn tag_entries(entries: &mut Vec<VectorEntry>) {
         "tags.add_ok.response",
         TAGS_DOMAIN_ID,
         TAG_ACTION_ADD_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "tag created".to_string(),
         },
     );
@@ -695,7 +694,7 @@ fn tag_entries(entries: &mut Vec<VectorEntry>) {
         "tags.add_err.response",
         TAGS_DOMAIN_ID,
         TAG_ACTION_ADD_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "tag already exists".to_string(),
         },
     );
@@ -704,7 +703,7 @@ fn tag_entries(entries: &mut Vec<VectorEntry>) {
         "tags.change_ok.response",
         TAGS_DOMAIN_ID,
         TAG_ACTION_CHANGE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "tag updated".to_string(),
         },
     );
@@ -713,7 +712,7 @@ fn tag_entries(entries: &mut Vec<VectorEntry>) {
         "tags.change_err.response",
         TAGS_DOMAIN_ID,
         TAG_ACTION_CHANGE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "tag not found".to_string(),
         },
     );
@@ -722,7 +721,7 @@ fn tag_entries(entries: &mut Vec<VectorEntry>) {
         "tags.delete_ok.response",
         TAGS_DOMAIN_ID,
         TAG_ACTION_DELETE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "tag deleted".to_string(),
         },
     );
@@ -731,7 +730,7 @@ fn tag_entries(entries: &mut Vec<VectorEntry>) {
         "tags.delete_err.response",
         TAGS_DOMAIN_ID,
         TAG_ACTION_DELETE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "tag in use".to_string(),
         },
     );
@@ -758,7 +757,7 @@ fn tag_entries(entries: &mut Vec<VectorEntry>) {
         "tags.list_err.response",
         TAGS_DOMAIN_ID,
         TAG_ACTION_LIST_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "tag list error".to_string(),
         },
     );
@@ -779,14 +778,14 @@ fn tag_entries(entries: &mut Vec<VectorEntry>) {
         "tags.show_err.response",
         TAGS_DOMAIN_ID,
         TAG_ACTION_SHOW_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "tag not found".to_string(),
         },
     );
 }
 
 fn role_entries(entries: &mut Vec<VectorEntry>) {
-    use management::{
+    use nop_management_contract::roles::{
         ROLE_ACTION_ADD, ROLE_ACTION_ADD_ERR, ROLE_ACTION_ADD_OK, ROLE_ACTION_CHANGE,
         ROLE_ACTION_CHANGE_ERR, ROLE_ACTION_CHANGE_OK, ROLE_ACTION_DELETE, ROLE_ACTION_DELETE_ERR,
         ROLE_ACTION_DELETE_OK, ROLE_ACTION_LIST, ROLE_ACTION_LIST_ERR, ROLE_ACTION_LIST_OK,
@@ -845,7 +844,7 @@ fn role_entries(entries: &mut Vec<VectorEntry>) {
         "roles.add_ok.response",
         ROLES_DOMAIN_ID,
         ROLE_ACTION_ADD_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role created".to_string(),
         },
     );
@@ -854,7 +853,7 @@ fn role_entries(entries: &mut Vec<VectorEntry>) {
         "roles.add_err.response",
         ROLES_DOMAIN_ID,
         ROLE_ACTION_ADD_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role already exists".to_string(),
         },
     );
@@ -863,7 +862,7 @@ fn role_entries(entries: &mut Vec<VectorEntry>) {
         "roles.change_ok.response",
         ROLES_DOMAIN_ID,
         ROLE_ACTION_CHANGE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role updated".to_string(),
         },
     );
@@ -872,7 +871,7 @@ fn role_entries(entries: &mut Vec<VectorEntry>) {
         "roles.change_err.response",
         ROLES_DOMAIN_ID,
         ROLE_ACTION_CHANGE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role not found".to_string(),
         },
     );
@@ -881,7 +880,7 @@ fn role_entries(entries: &mut Vec<VectorEntry>) {
         "roles.delete_ok.response",
         ROLES_DOMAIN_ID,
         ROLE_ACTION_DELETE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role deleted".to_string(),
         },
     );
@@ -890,7 +889,7 @@ fn role_entries(entries: &mut Vec<VectorEntry>) {
         "roles.delete_err.response",
         ROLES_DOMAIN_ID,
         ROLE_ACTION_DELETE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role in use".to_string(),
         },
     );
@@ -912,7 +911,7 @@ fn role_entries(entries: &mut Vec<VectorEntry>) {
         "roles.list_err.response",
         ROLES_DOMAIN_ID,
         ROLE_ACTION_LIST_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role list error".to_string(),
         },
     );
@@ -930,14 +929,14 @@ fn role_entries(entries: &mut Vec<VectorEntry>) {
         "roles.show_err.response",
         ROLES_DOMAIN_ID,
         ROLE_ACTION_SHOW_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "role not found".to_string(),
         },
     );
 }
 
 fn content_entries(entries: &mut Vec<VectorEntry>) {
-    use management::{
+    use nop_management_contract::content::{
         BinaryPrevalidateRequest, BinaryPrevalidateResponse, BinaryUploadCommitRequest,
         BinaryUploadInitRequest, CONTENT_ACTION_BINARY_PREVALIDATE,
         CONTENT_ACTION_BINARY_PREVALIDATE_ERR, CONTENT_ACTION_BINARY_PREVALIDATE_OK,
@@ -1158,7 +1157,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.list_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_LIST_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "content list error".to_string(),
         },
     );
@@ -1202,7 +1201,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             theme: None,
             content: None,
             stream_id: Some(42),
-            chunk_bytes: Some(nop::management::ws::WS_MAX_STREAM_CHUNK_BYTES as u32),
+            chunk_bytes: Some(nop_management_bus::ws::WS_MAX_STREAM_CHUNK_BYTES as u32),
             size_bytes: Some(64),
         },
     );
@@ -1211,7 +1210,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.read_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_READ_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "content not found".to_string(),
         },
     );
@@ -1220,7 +1219,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.update_ok.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_UPDATE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "content updated".to_string(),
         },
     );
@@ -1229,7 +1228,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.update_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_UPDATE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "content update failed".to_string(),
         },
     );
@@ -1238,7 +1237,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.delete_ok.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_DELETE_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "content deleted".to_string(),
         },
     );
@@ -1247,7 +1246,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.delete_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_DELETE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "content delete failed".to_string(),
         },
     );
@@ -1268,7 +1267,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.upload_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_UPLOAD_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "content upload failed".to_string(),
         },
     );
@@ -1293,7 +1292,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.nav_index_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_NAV_INDEX_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "nav index failed".to_string(),
         },
     );
@@ -1312,7 +1311,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.binary_prevalidate_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_BINARY_PREVALIDATE_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "binary prevalidate failed".to_string(),
         },
     );
@@ -1333,7 +1332,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.binary_upload_init_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "binary upload init failed".to_string(),
         },
     );
@@ -1354,7 +1353,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.binary_upload_commit_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_BINARY_UPLOAD_COMMIT_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "binary upload commit failed".to_string(),
         },
     );
@@ -1375,7 +1374,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.upload_stream_init_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_UPLOAD_STREAM_INIT_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "upload stream init failed".to_string(),
         },
     );
@@ -1396,7 +1395,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.upload_stream_commit_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_UPLOAD_STREAM_COMMIT_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "upload stream commit failed".to_string(),
         },
     );
@@ -1417,7 +1416,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.update_stream_init_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_UPDATE_STREAM_INIT_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "update stream init failed".to_string(),
         },
     );
@@ -1426,7 +1425,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.update_stream_commit_ok.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_UPDATE_STREAM_COMMIT_OK,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "update stream committed".to_string(),
         },
     );
@@ -1435,19 +1434,20 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         "content.update_stream_commit_err.response",
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR,
-        management::MessageResponse {
+        nop_management_contract::MessageResponse {
             message: "update stream commit failed".to_string(),
         },
     );
 }
 
 fn search_entries(entries: &mut Vec<VectorEntry>) {
-    use management::{
-        ContentSummary, MessageResponse, SEARCH_ACTION_FIND, SEARCH_ACTION_FIND_ERR,
-        SEARCH_ACTION_FIND_OK, SEARCH_ACTION_INVALIDATE, SEARCH_ACTION_INVALIDATE_ERR,
-        SEARCH_ACTION_INVALIDATE_OK, SEARCH_ACTION_RESET, SEARCH_ACTION_RESET_ERR,
-        SEARCH_ACTION_RESET_OK, SEARCH_DOMAIN_ID, SearchFindRequest, SearchFindResponse,
-        SearchInvalidateRequest, SearchResetRequest,
+    use nop_management_contract::MessageResponse;
+    use nop_management_contract::content::ContentSummary;
+    use nop_management_contract::search::{
+        SEARCH_ACTION_FIND, SEARCH_ACTION_FIND_ERR, SEARCH_ACTION_FIND_OK,
+        SEARCH_ACTION_INVALIDATE, SEARCH_ACTION_INVALIDATE_ERR, SEARCH_ACTION_INVALIDATE_OK,
+        SEARCH_ACTION_RESET, SEARCH_ACTION_RESET_ERR, SEARCH_ACTION_RESET_OK, SEARCH_DOMAIN_ID,
+        SearchFindRequest, SearchFindResponse, SearchInvalidateRequest, SearchResetRequest,
     };
 
     push_request(

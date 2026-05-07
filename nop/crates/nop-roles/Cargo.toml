@@ -1,0 +1,9 @@
+[package]
+name = "nop-roles"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+log = "0.4.29"
+nop-management-contract = { path = "../nop-management-contract" }
+serde = { version = "1.0", features = ["derive"] }

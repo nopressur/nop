@@ -9,40 +9,29 @@ use log::{Level, LevelFilter, info};
 use std::io::Write;
 use std::sync::Arc;
 
-mod acme;
-mod admin;
-mod api;
-mod app_state;
-mod bootstrap;
-mod builtin;
-mod config;
-mod content;
-mod headers;
-mod iam;
-mod login;
-mod management;
-mod public;
-mod roles;
-mod runtime_paths;
-mod search;
-mod security;
-mod templates;
-mod tls;
-mod util;
-mod well_known;
+mod daemon;
+mod pid_file;
 
-use app_state::AppState;
-use config::{AcmeChallenge, ServerProtocol, ServerRole, TlsMode, ValidatedConfig};
 use futures_util::future::try_join_all;
-use iam::UserServices;
-use iam::middleware::JwtAuthMiddlewareFactory;
-use public::page_meta_cache::PageMetaCache;
-use public::shortcode::create_default_registry_with_config;
-use runtime_paths::RuntimePaths;
-use util::log_rotation::{
+use nop_admin::WsTicketStore;
+use nop_config::{AcmeChallenge, ServerProtocol, ServerRole, TlsMode, ValidatedConfig};
+use nop_management_bus::ManagementTools;
+use nop_public::RenderTools;
+use nop_public::shortcode::create_default_registry_with_config;
+use nop_rt_csrf::{CsrfTokenStore, CsrfValidationMiddlewareFactory};
+use nop_rt_iam::UserServices;
+use nop_rt_iam::middleware::JwtAuthMiddlewareFactory;
+use nop_rt_logging::{
     DEFAULT_LOG_FILE_NAME, LogController, LogRotationSettings, LogRunMode, RotatingLogWriter,
+    init_logger,
 };
-use util::{CsrfTokenStore, CsrfValidationMiddlewareFactory, ReleaseTracker, WsTicketStore};
+use nop_rt_login::LoginState;
+use nop_rt_page_cache::PageMetaCache;
+use nop_rt_paths::RuntimePaths;
+use nop_rt_release::ReleaseTracker;
+use nop_rt_security::SecurityTools;
+use nop_rt_templates::RequestTools;
+use nop_rt_tls::{AcmeTokenStore, ensure_acme_certificate, load_rustls_config, spawn_renewal_loop};
 
 fn main() {
     let exit_code = run();
@@ -61,18 +50,19 @@ fn run() -> i32 {
     };
 
     if matches!(parsed_args.mode, RunMode::Help) {
-        print!("{}", management::cli::help_text());
+        print!("{}", nop_management_bus::cli::help_text());
         return 0;
     }
 
     if let RunMode::Cli(tokens) = parsed_args.mode {
-        return System::new()
-            .block_on(async { management::cli::run_cli(&parsed_args.runtime_root, tokens).await });
+        return System::new().block_on(async {
+            nop_management_bus::cli::run_cli(&parsed_args.runtime_root, tokens).await
+        });
     }
 
     let requested_daemon = matches!(parsed_args.mode, RunMode::Daemon);
-    let pid_path = util::pid_file::pid_file_path(&parsed_args.runtime_root);
-    let pid_status = match util::pid_file::cleanup_stale_pid_file(&pid_path) {
+    let pid_path = pid_file::pid_file_path(&parsed_args.runtime_root);
+    let pid_status = match pid_file::cleanup_stale_pid_file(&pid_path) {
         Ok(status) => status,
         Err(error) => {
             eprintln!(
@@ -84,12 +74,12 @@ fn run() -> i32 {
         }
     };
 
-    if let util::pid_file::PidFileStatus::Running { pid } = pid_status {
+    if let pid_file::PidFileStatus::Running { pid } = pid_status {
         eprintln!("❌ Server is already running (pid {}).", pid);
         return 1;
     }
 
-    let bootstrap = match bootstrap::bootstrap_runtime(&parsed_args.runtime_root) {
+    let bootstrap = match nop_rt_bootstrap::bootstrap_runtime(&parsed_args.runtime_root) {
         Ok(result) => result,
         Err(error) => {
             eprintln!("❌ Bootstrap error: {}", error);
@@ -118,14 +108,14 @@ fn run() -> i32 {
         daemon_requested = false;
     }
 
-    if daemon_requested && let Err(error) = util::daemonize_or_warn() {
+    if daemon_requested && let Err(error) = daemon::daemonize_or_warn() {
         eprintln!("❌ Failed to daemonize: {}", error);
         return 1;
     }
 
     let mut pid_guard = None;
     if daemon_requested {
-        match util::pid_file::create_pid_file(&pid_path) {
+        match pid_file::create_pid_file(&pid_path) {
             Ok(guard) => pid_guard = Some(guard),
             Err(error) => {
                 eprintln!("❌ Failed to create PID file: {}", error);
@@ -148,7 +138,7 @@ fn run() -> i32 {
 }
 
 async fn run_server(
-    bootstrap: bootstrap::BootstrapResult,
+    bootstrap: nop_rt_bootstrap::BootstrapResult,
     daemon_requested: bool,
 ) -> std::io::Result<()> {
     let validated_config = Arc::new(bootstrap.validated_config);
@@ -219,7 +209,7 @@ async fn run_server(
         })
         .build();
 
-    util::init_logger(
+    init_logger(
         vec![("html5ever".to_string(), Level::Debug, Level::Trace)],
         logger,
     )
@@ -238,7 +228,7 @@ async fn run_server(
         );
     }
 
-    let management_registry = match management::build_default_registry() {
+    let management_registry = match nop_management_bus::build_default_registry() {
         Ok(registry) => registry,
         Err(error) => {
             eprintln!("❌ Failed to initialize management registry: {}", error);
@@ -249,31 +239,27 @@ async fn run_server(
     let page_cache = Arc::new(PageMetaCache::new(
         runtime_paths.content_dir.clone(),
         runtime_paths.state_sys_dir.clone(),
-        crate::content::reserved_paths::ReservedPaths::from_config(&validated_config),
+        nop_content_store::reserved_paths::ReservedPaths::from_config(&validated_config),
     ));
 
     info!("✅ Page roles cache initialized successfully");
 
     // Initialize user services
-    let mut user_services =
-        match UserServices::new(&validated_config, runtime_paths.users_file.clone()) {
-            Ok(services) => services,
-            Err(error) => {
-                eprintln!("❌ Failed to initialize user services: {}", error);
-                eprintln!("❌ Application cannot start without user services.");
-                return Err(std::io::Error::other(error.to_string()));
-            }
-        };
+    let user_services = match UserServices::new(&validated_config, runtime_paths.users_file.clone())
+    {
+        Ok(services) => services,
+        Err(error) => {
+            eprintln!("❌ Failed to initialize user services: {}", error);
+            eprintln!("❌ Application cannot start without user services.");
+            return Err(std::io::Error::other(error.to_string()));
+        }
+    };
 
     info!("✅ User services initialized successfully");
 
-    // Set the page cache on user services so it can access content roles
-    user_services.set_page_cache(page_cache.clone());
-
-    // Convert to Arc after setting the cache
     let user_services = Arc::new(user_services);
 
-    let upload_registry = Arc::new(management::UploadRegistry::new());
+    let upload_registry = Arc::new(nop_management_bus::UploadRegistry::new());
 
     // Track the release identifier (Last Big Change) for cache busting headers.
     let release_tracker = Arc::new(ReleaseTracker::new());
@@ -282,10 +268,10 @@ async fn run_server(
         release_tracker.current_hex()
     );
 
-    let search_startup = search::initialize(
+    let search_startup = nop_rt_search_service::initialize(
         &runtime_paths,
         &validated_config.search,
-        crate::content::reserved_paths::ReservedPaths::from_config(&validated_config),
+        nop_content_store::reserved_paths::ReservedPaths::from_config(&validated_config),
         false,
     )
     .map_err(|error| {
@@ -306,7 +292,7 @@ async fn run_server(
     );
 
     let management_context =
-        match management::ManagementContext::from_components_with_user_services_and_cache_and_logs(
+        match nop_management_bus::ManagementContext::from_components_with_user_services_and_cache_and_logs(
             runtime_paths.root.clone(),
             validated_config.clone(),
             runtime_paths.clone(),
@@ -324,31 +310,36 @@ async fn run_server(
         .with_upload_registry(upload_registry.clone())
         .with_release_tracker(release_tracker.clone())
         .with_search_service(search_service.clone());
-    let management_bus = management::ManagementBus::start(management_registry, management_context);
+    let management_bus =
+        nop_management_bus::ManagementBus::start(management_registry, management_context);
 
-    let _management_socket =
-        match management::socket::ManagementSocket::start(&runtime_paths, management_bus.clone())
-            .await
-        {
-            Ok(socket) => socket,
-            Err(error) => {
-                eprintln!("❌ Failed to initialize management socket: {}", error);
-                return Err(std::io::Error::other(error.to_string()));
-            }
-        };
+    let _management_socket = match nop_management_bus::socket::ManagementSocket::start(
+        &runtime_paths,
+        management_bus.clone(),
+    )
+    .await
+    {
+        Ok(socket) => socket,
+        Err(error) => {
+            eprintln!("❌ Failed to initialize management socket: {}", error);
+            return Err(std::io::Error::other(error.to_string()));
+        }
+    };
 
-    let app_state = Arc::new(AppState::new(
-        &validated_config.app.name,
-        runtime_paths.clone(),
-        management_bus,
+    let request_tools = Arc::new(RequestTools::new(&validated_config.app.name));
+    let render_tools = Arc::new(RenderTools::new());
+    let security_tools = Arc::new(SecurityTools::new());
+    let login_state = Arc::new(LoginState::new());
+    let management_tools = Arc::new(ManagementTools::new(
+        management_bus.clone(),
         upload_registry,
     ));
     info!(
-        "✅ App state initialized with app name: {}",
+        "✅ Request tools initialized with app name: {}",
         validated_config.app.name
     );
 
-    let well_known_registry = Arc::new(well_known::WellKnownRegistry::new());
+    let well_known_registry = Arc::new(nop_rt_well_known::WellKnownRegistry::new());
 
     let acme_token_store = if validated_config
         .tls
@@ -363,14 +354,12 @@ async fn run_server(
         })
         .unwrap_or(false)
     {
-        let store = acme::AcmeTokenStore::new();
-        well_known::register_acme_http01_handler(&well_known_registry, store.clone());
+        let store = AcmeTokenStore::new();
+        nop_rt_well_known::register_acme_http01_handler(&well_known_registry, store.clone());
         Some(store)
     } else {
         None
     };
-
-    info!("✅ MIME types files initialized successfully");
 
     // Build the initial cache
     if let Err(e) = page_cache.rebuild_cache(true).await {
@@ -402,12 +391,9 @@ async fn run_server(
     let shortcode_registry = Arc::new(create_default_registry_with_config(
         &validated_config,
         &release_tracker,
-        app_state.templates.clone(),
+        request_tools.templates.clone(),
     ));
-    if let Err(e) = app_state
-        .runtime_paths
-        .ensure_shortcode_dirs(&shortcode_registry.registered_names())
-    {
+    if let Err(e) = runtime_paths.ensure_shortcode_dirs(&shortcode_registry.registered_names()) {
         eprintln!("❌ Failed to initialize shortcode state directories: {}", e);
         eprintln!("❌ Application cannot start without shortcode state directories.");
         return Err(std::io::Error::other(e.to_string()));
@@ -427,14 +413,18 @@ async fn run_server(
         let config_for_admin = validated_config.clone();
         let config_for_login = validated_config.clone();
         let release_tracker_for_app = release_tracker.clone();
-        let app_state_for_app = app_state.clone();
+        let request_tools_for_app = request_tools.clone();
+        let render_tools_for_app = render_tools.clone();
+        let security_tools_for_app = security_tools.clone();
+        let login_state_for_app = login_state.clone();
+        let management_tools_for_app = management_tools.clone();
+        let runtime_paths_for_app = runtime_paths.clone();
         let user_services = user_services.clone();
         let page_cache = page_cache.clone();
         let search_service_for_app = search_service.clone();
         let shortcode_registry = shortcode_registry.clone();
         let csrf_store = csrf_store.clone();
         let ws_ticket_store = ws_ticket_store.clone();
-
         move || {
             let admin_path_clone = admin_path.clone();
             let config_for_app = config_for_app.clone();
@@ -442,11 +432,21 @@ async fn run_server(
             let config_for_admin = config_for_admin.clone();
             let config_for_login = config_for_login.clone();
             let release_tracker_for_app = release_tracker_for_app.clone();
-            let app_state_for_app = app_state_for_app.clone();
+            let request_tools_for_app = request_tools_for_app.clone();
+            let render_tools_for_app = render_tools_for_app.clone();
+            let security_tools_for_app = security_tools_for_app.clone();
+            let login_state_for_app = login_state_for_app.clone();
+            let management_tools_for_app = management_tools_for_app.clone();
+            let runtime_paths_for_app = runtime_paths_for_app.clone();
 
             App::new()
                 .app_data(web::Data::from(config_for_app))
-                .app_data(web::Data::from(app_state_for_app))
+                .app_data(web::Data::from(request_tools_for_app))
+                .app_data(web::Data::from(render_tools_for_app))
+                .app_data(web::Data::from(security_tools_for_app))
+                .app_data(web::Data::from(login_state_for_app))
+                .app_data(web::Data::from(management_tools_for_app))
+                .app_data(web::Data::new(runtime_paths_for_app))
                 .app_data(web::Data::from(user_services.clone()))
                 .app_data(web::Data::from(page_cache.clone()))
                 .app_data(web::Data::from(search_service_for_app.clone()))
@@ -457,17 +457,19 @@ async fn run_server(
                 .wrap(Logger::new(
                     r#"%a "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#,
                 ))
-                .wrap(headers::Headers::new(
+                .wrap(nop_rt_headers::Headers::new(
                     config_for_security,
                     page_cache.clone(),
                 ))
                 .wrap(CsrfValidationMiddlewareFactory)
                 .wrap(JwtAuthMiddlewareFactory)
-                .configure(move |cfg| admin::configure(cfg, &admin_path_clone, &config_for_admin))
-                .configure(move |cfg| login::configure(cfg, &config_for_login))
-                .configure(api::configure)
-                .configure(builtin::configure)
-                .configure(public::configure)
+                .configure(move |cfg| {
+                    nop_admin::configure(cfg, &admin_path_clone, &config_for_admin)
+                })
+                .configure(move |cfg| nop_rt_login::configure(cfg, &config_for_login))
+                .configure(nop_api::configure)
+                .configure(nop_rt_builtin::configure)
+                .configure(nop_public::configure)
                 .default_service(web::route().to(default_not_found))
         }
     };
@@ -489,12 +491,12 @@ async fn run_server(
                 .wrap(Logger::new(
                     r#"%a "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#,
                 ))
-                .wrap(headers::Headers::new(
+                .wrap(nop_rt_headers::Headers::new(
                     config_for_security,
                     page_cache.clone(),
                 ));
 
-            app.configure(well_known::configure)
+            app.configure(nop_rt_well_known::configure)
                 .default_service(web::route().to(well_known_not_found))
         }
     };
@@ -507,7 +509,7 @@ async fn run_server(
         .map(|tls| tls.mode == TlsMode::Acme)
         .unwrap_or(false)
     {
-        if let Err(err) = acme::ensure_acme_certificate(
+        if let Err(err) = ensure_acme_certificate(
             &runtime_paths,
             &validated_config,
             acme_token_store.clone(),
@@ -519,7 +521,7 @@ async fn run_server(
             return Err(std::io::Error::other(err.to_string()));
         }
 
-        acme::spawn_renewal_loop(
+        spawn_renewal_loop(
             runtime_paths.clone(),
             validated_config.clone(),
             acme_token_store,
@@ -535,7 +537,7 @@ async fn run_server(
     }
 
     if !main_https_servers.is_empty() {
-        let tls_config = tls::load_rustls_config(&app_state.runtime_paths, &validated_config)?;
+        let tls_config = load_rustls_config(&runtime_paths, &validated_config)?;
         let mut https_server = HttpServer::new(main_factory.clone()).workers(workers);
         for listener in &main_https_servers {
             https_server =
@@ -584,12 +586,12 @@ fn log_startup_info(config: &ValidatedConfig, runtime_paths: &RuntimePaths) {
 
     for server in &config.servers {
         let protocol = match server.protocol {
-            config::ServerProtocol::Http => "http",
-            config::ServerProtocol::Https => "https",
+            nop_config::ServerProtocol::Http => "http",
+            nop_config::ServerProtocol::Https => "https",
         };
         let role = match server.role {
-            config::ServerRole::Main => "main",
-            config::ServerRole::WellKnown => "well-known",
+            nop_config::ServerRole::Main => "main",
+            nop_config::ServerRole::WellKnown => "well-known",
         };
         let name = server.name.as_deref().unwrap_or("listener");
         info!(
@@ -598,10 +600,10 @@ fn log_startup_info(config: &ValidatedConfig, runtime_paths: &RuntimePaths) {
         );
     }
 
-    for server in config.servers_for_role(config::ServerRole::Main, None) {
+    for server in config.servers_for_role(nop_config::ServerRole::Main, None) {
         let protocol = match server.protocol {
-            config::ServerProtocol::Http => "http",
-            config::ServerProtocol::Https => "https",
+            nop_config::ServerProtocol::Http => "http",
+            nop_config::ServerProtocol::Https => "https",
         };
         info!(
             "Admin panel available at: {}://{}:{}{}",
@@ -748,12 +750,12 @@ fn make_runtime_root_absolute(
 
 async fn default_not_found(
     req: HttpRequest,
-    app_state: web::Data<AppState>,
+    request_tools: web::Data<RequestTools>,
 ) -> Result<HttpResponse> {
-    public::error::serve_404_for_request(
+    nop_rt_templates::error::serve_404_for_request(
         &req,
-        &app_state.error_renderer,
-        Some(app_state.templates.as_ref()),
+        &request_tools.error_renderer,
+        Some(request_tools.templates.as_ref()),
     )
 }
 
@@ -761,7 +763,7 @@ async fn well_known_not_found(
     req: HttpRequest,
     config: web::Data<ValidatedConfig>,
 ) -> Result<HttpResponse> {
-    public::error::serve_404_for_request_with_app_name(&req, &config.app.name, None)
+    nop_rt_templates::error::serve_404_for_request_with_app_name(&req, &config.app.name, None)
 }
 
 #[cfg(test)]

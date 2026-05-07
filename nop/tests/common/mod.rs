@@ -9,30 +9,39 @@ pub mod ws;
 
 use actix_web::dev::{ServiceFactory, ServiceRequest, ServiceResponse};
 use actix_web::{App, HttpRequest, HttpResponse, Result, web};
-use nop::admin;
-use nop::api;
-use nop::app_state::AppState;
-use nop::builtin;
-use nop::config::{
+use nop_admin as admin;
+use nop_admin::WsTicketStore;
+use nop_api as api;
+use nop_config::{
     AdminConfig, AppConfig, JwtConfig, LoggingConfig, LoggingRotationConfig, NavigationConfig,
     PasswordHashingParams, RenderingConfig, SecurityConfig, ServerConfig, ServerListenerConfig,
     ServerProtocol, ServerRole, ShortcodeConfig, StreamingConfig, UploadConfig, ValidatedConfig,
     ValidatedLocalAuthConfig, ValidatedUsersConfig,
 };
-use nop::headers;
-use nop::iam::UserServices;
-use nop::iam::middleware::JwtAuthMiddlewareFactory;
-use nop::iam::{PasswordProviderBlock, User, build_password_provider_block};
-use nop::login;
-use nop::management::{ManagementBus, ManagementContext, UploadRegistry, build_default_registry};
-use nop::public;
-use nop::public::page_meta_cache::PageMetaCache;
-use nop::public::shortcode::create_default_registry_with_config;
-use nop::runtime_paths::RuntimePaths;
-use nop::util::CsrfValidationMiddlewareFactory;
-use nop::util::csrf_validation::CSRF_HEADER_NAME;
-use nop::util::test_fixtures::TestFixtureRoot;
-use nop::util::{CsrfTokenStore, ReleaseTracker, WsTicketStore};
+use nop_iam_passwords::{PasswordProviderBlock, build_password_provider_block};
+use nop_management_bus::ManagementTools;
+use nop_management_bus::{
+    ManagementBus, ManagementContext, UploadRegistry, build_default_registry,
+};
+use nop_public as public;
+use nop_public::RenderTools;
+use nop_public::shortcode::create_default_registry_with_config;
+use nop_rt_builtin as builtin;
+use nop_rt_csrf::CSRF_HEADER_NAME;
+use nop_rt_csrf::CsrfTokenStore;
+use nop_rt_csrf::CsrfValidationMiddlewareFactory;
+use nop_rt_headers as headers;
+use nop_rt_iam::UserServices;
+use nop_rt_iam::middleware::JwtAuthMiddlewareFactory;
+use nop_rt_iam::types::User;
+use nop_rt_login as login;
+use nop_rt_login::LoginState;
+use nop_rt_page_cache::PageMetaCache;
+use nop_rt_paths::RuntimePaths;
+use nop_rt_release::ReleaseTracker;
+use nop_rt_security::SecurityTools;
+use nop_rt_templates::RequestTools;
+use nop_testing::test_fixtures::TestFixtureRoot;
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
@@ -45,13 +54,17 @@ pub struct TestHarness {
     pub fixture: TestFixtureRoot,
     pub config: Arc<ValidatedConfig>,
     pub runtime_paths: RuntimePaths,
-    pub app_state: Arc<AppState>,
+    pub request_tools: Arc<RequestTools>,
+    pub render_tools: Arc<RenderTools>,
+    pub security_tools: Arc<SecurityTools>,
+    pub login_state: Arc<LoginState>,
+    pub management_tools: Arc<ManagementTools>,
     pub page_cache: Arc<PageMetaCache>,
     pub user_services: Arc<UserServices>,
     pub csrf_store: Arc<CsrfTokenStore>,
     pub ws_ticket_store: Arc<WsTicketStore>,
     pub release_tracker: Arc<ReleaseTracker>,
-    pub shortcode_registry: Arc<nop::public::shortcode::ShortcodeRegistry>,
+    pub shortcode_registry: Arc<nop_public::shortcode::ShortcodeRegistry>,
     pub admin_user: User,
     pub admin_password_plaintext: String,
 }
@@ -67,13 +80,18 @@ pub struct AuthSession {
 #[derive(Clone)]
 pub struct AppBundle {
     pub config: Arc<ValidatedConfig>,
-    pub app_state: Arc<AppState>,
+    pub runtime_paths: RuntimePaths,
+    pub request_tools: Arc<RequestTools>,
+    pub render_tools: Arc<RenderTools>,
+    pub security_tools: Arc<SecurityTools>,
+    pub login_state: Arc<LoginState>,
+    pub management_tools: Arc<ManagementTools>,
     pub page_cache: Arc<PageMetaCache>,
     pub user_services: Arc<UserServices>,
     pub csrf_store: Arc<CsrfTokenStore>,
     pub ws_ticket_store: Arc<WsTicketStore>,
     pub release_tracker: Arc<ReleaseTracker>,
-    pub shortcode_registry: Arc<nop::public::shortcode::ShortcodeRegistry>,
+    pub shortcode_registry: Arc<nop_public::shortcode::ShortcodeRegistry>,
     pub admin_path: String,
 }
 
@@ -111,13 +129,12 @@ impl TestHarness {
         let page_cache = Arc::new(PageMetaCache::new(
             runtime_paths.content_dir.clone(),
             runtime_paths.state_sys_dir.clone(),
-            nop::content::reserved_paths::ReservedPaths::from_config(&config),
+            nop_content_store::reserved_paths::ReservedPaths::from_config(&config),
         ));
         page_cache.rebuild_cache(true).await.expect("cache rebuild");
 
-        let mut user_services =
+        let user_services =
             UserServices::new(&config, runtime_paths.users_file.clone()).expect("user services");
-        user_services.set_page_cache(page_cache.clone());
         let user_services = Arc::new(user_services);
 
         let upload_registry = Arc::new(UploadRegistry::new());
@@ -130,19 +147,17 @@ impl TestHarness {
             upload_registry.clone(),
             release_tracker.clone(),
         );
-        let app_state = Arc::new(AppState::new(
-            &config.app.name,
-            runtime_paths.clone(),
-            management_bus,
-            upload_registry,
-        ));
+        let request_tools = Arc::new(RequestTools::new(&config.app.name));
+        let render_tools = Arc::new(RenderTools::new());
+        let security_tools = Arc::new(SecurityTools::new());
+        let login_state = Arc::new(LoginState::new());
+        let management_tools = Arc::new(ManagementTools::new(management_bus, upload_registry));
         let shortcode_registry = Arc::new(create_default_registry_with_config(
             &config,
             &release_tracker,
-            app_state.templates.clone(),
+            request_tools.templates.clone(),
         ));
-        app_state
-            .runtime_paths
+        runtime_paths
             .ensure_shortcode_dirs(&shortcode_registry.registered_names())
             .expect("shortcode dirs");
 
@@ -153,7 +168,11 @@ impl TestHarness {
             fixture,
             config,
             runtime_paths,
-            app_state,
+            request_tools,
+            render_tools,
+            security_tools,
+            login_state,
+            management_tools,
             page_cache,
             user_services,
             csrf_store,
@@ -186,7 +205,12 @@ impl TestHarness {
     pub fn app_bundle(&self) -> AppBundle {
         AppBundle {
             config: self.config.clone(),
-            app_state: self.app_state.clone(),
+            runtime_paths: self.runtime_paths.clone(),
+            request_tools: self.request_tools.clone(),
+            render_tools: self.render_tools.clone(),
+            security_tools: self.security_tools.clone(),
+            login_state: self.login_state.clone(),
+            management_tools: self.management_tools.clone(),
             page_cache: self.page_cache.clone(),
             user_services: self.user_services.clone(),
             csrf_store: self.csrf_store.clone(),
@@ -212,25 +236,29 @@ pub fn build_app_bundle_with_user_services(
         upload_registry.clone(),
         release_tracker.clone(),
     );
-    let app_state = Arc::new(AppState::new(
-        &harness.config.app.name,
-        harness.runtime_paths.clone(),
-        management_bus,
-        upload_registry,
-    ));
+    let request_tools = Arc::new(RequestTools::new(&harness.config.app.name));
+    let render_tools = Arc::new(RenderTools::new());
+    let security_tools = Arc::new(SecurityTools::new());
+    let login_state = Arc::new(LoginState::new());
+    let management_tools = Arc::new(ManagementTools::new(management_bus, upload_registry));
     let shortcode_registry = Arc::new(create_default_registry_with_config(
         &harness.config,
         &release_tracker,
-        app_state.templates.clone(),
+        request_tools.templates.clone(),
     ));
-    app_state
+    harness
         .runtime_paths
         .ensure_shortcode_dirs(&shortcode_registry.registered_names())
         .expect("shortcode dirs");
 
     AppBundle {
         config: harness.config.clone(),
-        app_state,
+        runtime_paths: harness.runtime_paths.clone(),
+        request_tools,
+        render_tools,
+        security_tools,
+        login_state,
+        management_tools,
         page_cache: harness.page_cache.clone(),
         user_services,
         csrf_store: harness.csrf_store.clone(),
@@ -280,10 +308,21 @@ pub fn build_test_app(
     let config_for_security = bundle.config.clone();
     let config_for_admin = bundle.config.clone();
     let config_for_login = bundle.config.clone();
+    let runtime_paths = bundle.runtime_paths.clone();
+    let request_tools = bundle.request_tools.clone();
+    let render_tools = bundle.render_tools.clone();
+    let security_tools = bundle.security_tools.clone();
+    let login_state = bundle.login_state.clone();
+    let management_tools = bundle.management_tools.clone();
 
     App::new()
         .app_data(web::Data::from(config_for_app))
-        .app_data(web::Data::from(bundle.app_state))
+        .app_data(web::Data::new(runtime_paths))
+        .app_data(web::Data::from(request_tools))
+        .app_data(web::Data::from(render_tools))
+        .app_data(web::Data::from(security_tools))
+        .app_data(web::Data::from(login_state))
+        .app_data(web::Data::from(management_tools))
         .app_data(web::Data::from(bundle.user_services))
         .app_data(web::Data::from(bundle.page_cache.clone()))
         .app_data(web::Data::from(bundle.shortcode_registry))
@@ -306,12 +345,12 @@ pub fn build_test_app(
 
 async fn test_default_not_found(
     req: HttpRequest,
-    app_state: web::Data<AppState>,
+    request_tools: web::Data<RequestTools>,
 ) -> Result<HttpResponse> {
-    nop::public::error::serve_404_for_request(
+    nop_rt_templates::error::serve_404_for_request(
         &req,
-        &app_state.error_renderer,
-        Some(app_state.templates.as_ref()),
+        &request_tools.error_renderer,
+        Some(request_tools.templates.as_ref()),
     )
 }
 
@@ -372,7 +411,7 @@ fn build_config() -> ValidatedConfig {
             max_violations: 10,
             cooldown_seconds: 60,
             use_forwarded_for: false,
-            login_sessions: nop::config::LoginSessionConfig::default(),
+            login_sessions: nop_config::LoginSessionConfig::default(),
             hsts_enabled: false,
             hsts_max_age: 31536000,
             hsts_include_subdomains: true,
@@ -396,7 +435,7 @@ fn build_config() -> ValidatedConfig {
         streaming: StreamingConfig { enabled: true },
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
-        search: nop::config::SearchConfig::default(),
+        search: nop_config::SearchConfig::default(),
         dev_mode: None,
     }
 }
@@ -453,7 +492,7 @@ fn seed_config_files(fixture: &TestFixtureRoot, admin_password_block: &PasswordP
 }
 
 fn seed_content(runtime_paths: &RuntimePaths) {
-    use nop::content::flat_storage::{
+    use nop_content_store::flat_storage::{
         ContentId, ContentSidecar, ContentVersion, blob_path, sidecar_path, write_sidecar_atomic,
     };
 

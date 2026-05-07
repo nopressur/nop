@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use nop::management::{
+use nop_management_contract::content::{
     BinaryPrevalidateRequest, BinaryPrevalidateResponse, BinaryUploadCommitRequest,
     BinaryUploadInitRequest, CONTENT_ACTION_BINARY_PREVALIDATE,
     CONTENT_ACTION_BINARY_PREVALIDATE_ERR, CONTENT_ACTION_BINARY_PREVALIDATE_OK,
@@ -21,32 +21,45 @@ use nop::management::{
     CONTENT_ACTION_UPLOAD_OK, CONTENT_ACTION_UPLOAD_STREAM_COMMIT,
     CONTENT_ACTION_UPLOAD_STREAM_COMMIT_ERR, CONTENT_ACTION_UPLOAD_STREAM_COMMIT_OK,
     CONTENT_ACTION_UPLOAD_STREAM_INIT, CONTENT_ACTION_UPLOAD_STREAM_INIT_ERR,
-    CONTENT_ACTION_UPLOAD_STREAM_INIT_OK, CONTENT_DOMAIN_ID, ClearLogsRequest, ClearLogsResponse,
-    ContentDeleteRequest, ContentListRequest, ContentListResponse, ContentNavIndexRequest,
-    ContentNavIndexResponse, ContentReadRequest, ContentReadResponse, ContentUpdateRequest,
+    CONTENT_ACTION_UPLOAD_STREAM_INIT_OK, CONTENT_DOMAIN_ID, ContentDeleteRequest,
+    ContentListRequest, ContentListResponse, ContentNavIndexRequest, ContentNavIndexResponse,
+    ContentReadRequest, ContentReadResponse, ContentUpdateRequest,
     ContentUpdateStreamCommitRequest, ContentUpdateStreamInitRequest, ContentUploadRequest,
     ContentUploadResponse, ContentUploadStreamCommitRequest, ContentUploadStreamInitRequest,
-    GetLoggingConfigRequest, LoggingConfigResponse, MessageResponse, PingRequest,
-    PongErrorResponse, PongResponse, ROLE_ACTION_ADD, ROLE_ACTION_ADD_ERR, ROLE_ACTION_ADD_OK,
-    ROLE_ACTION_CHANGE, ROLE_ACTION_CHANGE_ERR, ROLE_ACTION_CHANGE_OK, ROLE_ACTION_DELETE,
-    ROLE_ACTION_DELETE_ERR, ROLE_ACTION_DELETE_OK, ROLE_ACTION_LIST, ROLE_ACTION_LIST_ERR,
-    ROLE_ACTION_LIST_OK, ROLE_ACTION_SHOW, ROLE_ACTION_SHOW_ERR, ROLE_ACTION_SHOW_OK,
-    ROLES_DOMAIN_ID, RoleAddRequest, RoleChangeRequest, RoleDeleteRequest, RoleListRequest,
-    RoleListResponse, RoleShowRequest, RoleShowResponse, SEARCH_ACTION_FIND,
-    SEARCH_ACTION_FIND_ERR, SEARCH_ACTION_FIND_OK, SEARCH_ACTION_INVALIDATE,
+    UploadStreamInitResponse,
+};
+use nop_management_contract::roles::{
+    ROLE_ACTION_ADD, ROLE_ACTION_ADD_ERR, ROLE_ACTION_ADD_OK, ROLE_ACTION_CHANGE,
+    ROLE_ACTION_CHANGE_ERR, ROLE_ACTION_CHANGE_OK, ROLE_ACTION_DELETE, ROLE_ACTION_DELETE_ERR,
+    ROLE_ACTION_DELETE_OK, ROLE_ACTION_LIST, ROLE_ACTION_LIST_ERR, ROLE_ACTION_LIST_OK,
+    ROLE_ACTION_SHOW, ROLE_ACTION_SHOW_ERR, ROLE_ACTION_SHOW_OK, ROLES_DOMAIN_ID, RoleAddRequest,
+    RoleChangeRequest, RoleDeleteRequest, RoleListRequest, RoleListResponse, RoleShowRequest,
+    RoleShowResponse,
+};
+use nop_management_contract::search::{
+    SEARCH_ACTION_FIND, SEARCH_ACTION_FIND_ERR, SEARCH_ACTION_FIND_OK, SEARCH_ACTION_INVALIDATE,
     SEARCH_ACTION_INVALIDATE_ERR, SEARCH_ACTION_INVALIDATE_OK, SEARCH_ACTION_RESET,
-    SEARCH_ACTION_RESET_ERR, SEARCH_ACTION_RESET_OK, SEARCH_DOMAIN_ID, SYSTEM_ACTION_LOGGING_CLEAR,
+    SEARCH_ACTION_RESET_ERR, SEARCH_ACTION_RESET_OK, SEARCH_DOMAIN_ID, SearchFindRequest,
+    SearchFindResponse, SearchInvalidateRequest, SearchResetRequest,
+};
+use nop_management_contract::system::{
+    ClearLogsRequest, ClearLogsResponse, GetLoggingConfigRequest, LoggingConfigResponse,
+    PingRequest, PongErrorResponse, PongResponse, SYSTEM_ACTION_LOGGING_CLEAR,
     SYSTEM_ACTION_LOGGING_CLEAR_ERR, SYSTEM_ACTION_LOGGING_CLEAR_OK, SYSTEM_ACTION_LOGGING_GET,
     SYSTEM_ACTION_LOGGING_GET_ERR, SYSTEM_ACTION_LOGGING_GET_OK, SYSTEM_ACTION_LOGGING_SET,
     SYSTEM_ACTION_LOGGING_SET_ERR, SYSTEM_ACTION_LOGGING_SET_OK, SYSTEM_ACTION_PING,
-    SYSTEM_ACTION_PONG, SYSTEM_ACTION_PONG_ERROR, SYSTEM_DOMAIN_ID, SearchFindRequest,
-    SearchFindResponse, SearchInvalidateRequest, SearchResetRequest, SetLoggingConfigRequest,
+    SYSTEM_ACTION_PONG, SYSTEM_ACTION_PONG_ERROR, SYSTEM_DOMAIN_ID, SetLoggingConfigRequest,
+};
+use nop_management_contract::tags::{
     TAG_ACTION_ADD, TAG_ACTION_ADD_ERR, TAG_ACTION_ADD_OK, TAG_ACTION_CHANGE,
     TAG_ACTION_CHANGE_ERR, TAG_ACTION_CHANGE_OK, TAG_ACTION_DELETE, TAG_ACTION_DELETE_ERR,
     TAG_ACTION_DELETE_OK, TAG_ACTION_LIST, TAG_ACTION_LIST_ERR, TAG_ACTION_LIST_OK,
     TAG_ACTION_SHOW, TAG_ACTION_SHOW_ERR, TAG_ACTION_SHOW_OK, TAGS_DOMAIN_ID, TagAddRequest,
     TagChangeRequest, TagDeleteRequest, TagListRequest, TagListResponse, TagShowRequest,
-    TagShowResponse, USER_ACTION_ADD, USER_ACTION_ADD_ERR, USER_ACTION_ADD_OK, USER_ACTION_CHANGE,
+    TagShowResponse,
+};
+use nop_management_contract::users::{
+    USER_ACTION_ADD, USER_ACTION_ADD_ERR, USER_ACTION_ADD_OK, USER_ACTION_CHANGE,
     USER_ACTION_CHANGE_ERR, USER_ACTION_CHANGE_OK, USER_ACTION_DELETE, USER_ACTION_DELETE_ERR,
     USER_ACTION_DELETE_OK, USER_ACTION_LIST, USER_ACTION_LIST_ERR, USER_ACTION_LIST_OK,
     USER_ACTION_PASSWORD_SALT, USER_ACTION_PASSWORD_SALT_ERR, USER_ACTION_PASSWORD_SALT_OK,
@@ -57,11 +70,13 @@ use nop::management::{
     USER_ACTION_ROLE_ADD_OK, USER_ACTION_ROLE_REMOVE, USER_ACTION_ROLE_REMOVE_ERR,
     USER_ACTION_ROLE_REMOVE_OK, USER_ACTION_ROLES_LIST, USER_ACTION_ROLES_LIST_ERR,
     USER_ACTION_ROLES_LIST_OK, USER_ACTION_SHOW, USER_ACTION_SHOW_ERR, USER_ACTION_SHOW_OK,
-    USERS_DOMAIN_ID, UploadStreamInitResponse, UserAddRequest, UserChangeRequest,
-    UserDeleteRequest, UserListRequest, UserListResponse, UserPasswordSaltRequest,
-    UserPasswordSetRequest, UserPasswordUpdateRequest, UserPasswordValidateRequest,
-    UserRoleAddRequest, UserRoleRemoveRequest, UserRolesListRequest, UserRolesListResponse,
-    UserShowRequest, UserShowResponse, WireDecode, WireEncode, WireReader, WireResult, WireWriter,
+    USERS_DOMAIN_ID, UserAddRequest, UserChangeRequest, UserDeleteRequest, UserListRequest,
+    UserListResponse, UserPasswordSaltRequest, UserPasswordSetRequest, UserPasswordUpdateRequest,
+    UserPasswordValidateRequest, UserRoleAddRequest, UserRoleRemoveRequest, UserRolesListRequest,
+    UserRolesListResponse, UserShowRequest, UserShowResponse,
+};
+use nop_management_contract::{
+    MessageResponse, WireDecode, WireEncode, WireReader, WireResult, WireWriter,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -194,13 +209,17 @@ fn wire_vectors_match_payloads() {
                 assert_vector::<MessageResponse>(&vector, &bytes)
             }
             ("response", USERS_DOMAIN_ID, USER_ACTION_PASSWORD_SALT_OK) => {
-                assert_vector::<nop::management::PasswordSaltResponse>(&vector, &bytes)
+                assert_vector::<nop_management_contract::users::PasswordSaltResponse>(
+                    &vector, &bytes,
+                )
             }
             ("response", USERS_DOMAIN_ID, USER_ACTION_PASSWORD_SALT_ERR) => {
                 assert_vector::<MessageResponse>(&vector, &bytes)
             }
             ("response", USERS_DOMAIN_ID, USER_ACTION_PASSWORD_VALIDATE_OK) => {
-                assert_vector::<nop::management::PasswordValidateResponse>(&vector, &bytes)
+                assert_vector::<nop_management_contract::users::PasswordValidateResponse>(
+                    &vector, &bytes,
+                )
             }
             ("response", USERS_DOMAIN_ID, USER_ACTION_PASSWORD_VALIDATE_ERR) => {
                 assert_vector::<MessageResponse>(&vector, &bytes)

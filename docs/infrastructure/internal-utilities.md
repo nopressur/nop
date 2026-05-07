@@ -4,36 +4,20 @@ Status: Developed
 
 ## Objectives
 
-- Provide reusable helpers in `nop/src/util/` for CSRF, streaming, MIME detection, logging, daemonization, and color utilities.
+- Provide reusable helpers in `nop/crates/nop-rt-logging` for logging and log rotation, while keeping domain-specific helpers near their owners (CSRF in `nop/crates/nop-rt-csrf`, MIME detection in `nop/crates/nop-management-content` and re-exported via `nop-management-bus::mime`, release tracking in `nop/crates/nop-rt-release`, WebSocket tickets in `nop/crates/nop-admin/src/`, public streaming helpers, shortcode color utilities, daemon/PID helpers).
 - Capture daemon-mode logs in a canonical runtime `logs/` directory with configurable rotation while keeping foreground logging on stdout only.
 - Expose logging rotation settings through config, the management bus, CLI, and the admin UI system settings screen.
-- Keep utilities documented, stable, and aligned with platform conventions (security, logging, MIME correctness).
+- Keep utilities documented, stable, and aligned with platform conventions (security, logging).
 
 ## Technical Details
 
-### CSRF Helpers
-
-- `csrf_helper.rs` defines `CsrfTokenStore` (see `docs/infrastructure/csrf-protection.md`), providing token issuance, renewal, and cleanup. Tokens are UUID strings mapped to JWT IDs and expire after one hour.
-- `CsrfTokenStore` runs as a single-writer channel worker so token mutations do not share locks.
-- `csrf_validation.rs` exposes mid-level utilities:
-  - `CSRF_HEADER_NAME` (`X-CSRF-Token`) – required header for mutating requests.
-  - `validate_csrf_token(store, token, jwt_id)` – delegates to the store (renewing timestamps).
-  - `mark_csrf_validated(req)` – stores a marker in request extensions so downstream handlers know CSRF succeeded.
-- `csrf_middleware.rs` wires the validation into Actix. It respects the exemption list generated from templates (`/login`, `/admin/csrf-token-api`, etc.) and supports dev-mode bypass (uses `"localhost"` as JWT ID) in debug builds only; release builds ignore dev-mode.
-
 ### Streaming Helpers
 
-- `streaming_helper.rs` parses and evaluates HTTP `Range` headers to support partial content delivery:
+- `public/streaming.rs` parses and evaluates HTTP `Range` headers to support partial content delivery:
   - `parse_range_header` → `Vec<HttpRange>` (`Closed`, `Open`, `Suffix`).
   - `calculate_range_bounds(range, file_size)` → `(start, end)` if satisfiable.
   - `format_content_range_header` builds the `Content-Range` response value.
 - Public asset handlers use these helpers when `config.streaming.enabled` is true, ensuring requests for large videos/audio are served efficiently.
-
-### MIME Helpers
-
-- `mime_helper.rs` contains MIME detection helpers:
-  - `detect_mime_type(path, content)` with `infer` fallback to `mime_guess`.
-- The flat storage model stores MIME types in sidecar metadata. There are no `.mime-types` manifests.
 
 ### Logging Helpers
 
@@ -128,22 +112,22 @@ Status: Developed
 
 ### Daemonization Helper
 
-- `daemon.rs` provides `daemonize_or_warn`, which double-forks on Unix to detach the server process and falls back to a foreground warning on non-Unix builds.
+- `daemon.rs` and `pid_file.rs` provide `daemonize_or_warn` plus PID file handling for daemonized startup.
 - The helper redirects stdin/stdout/stderr to `/dev/null` and clears the umask before startup, so daemon logging must not rely on stdio.
 
 ### Color Utilities
 
-- `color_hsv.rs` offers RGB↔HSV conversion and `increase_saturation`, used by shortcodes (link cards) to derive palette-friendly backgrounds.
+- `public/shortcode/color_hsv.rs` offers RGB↔HSV conversion and `increase_saturation`, used by shortcodes (link cards) to derive palette-friendly backgrounds.
 - Helpful for generating on-the-fly color variants without bringing in heavier graphics crates.
 
 ### Module Re-exports
 
-- `util/mod.rs` re-exports the most common helpers (`CsrfTokenStore`, `CsrfValidationMiddlewareFactory`, MIME functions, range helpers, color conversions) so callers can import `crate::util::*`.
-- When adding new utilities, export them here only if they are broadly applicable.
+- `logging/mod.rs` re-exports `init_logger` for consistent log-level overrides.
+- When adding new utilities, export them here only if they are broadly applicable to non-domain code.
 
 ### Usage Guidance
 
-- Prefer these utilities over ad-hoc implementations to stay aligned with platform conventions (security, logging, MIME correctness).
+- Prefer these utilities over ad-hoc implementations to stay aligned with platform conventions (security, logging).
 - When introducing new helpers, consider concurrency requirements (many existing helpers recover from poisoned locks by clearing state) and add tests alongside the module.
 
 ### Testing Scope

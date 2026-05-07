@@ -21,7 +21,10 @@ and decisions about them.
 
 | ID | Date | Risk | Component | Status | Rationale | Mitigation / Review |
 | --- | --- | --- | --- | --- | --- | --- |
-| RR-2026-03-09-01 | 2026-03-09 | `lru` `IterMut` soundness bug via `tantivy` (RUSTSEC-2026-0002 / GHSA-rhfx-m35p-ff5j). Potential undefined behavior if the vulnerable iterator is used. | Search subsystem (Tantivy cache). | Accepted | Tantivy 0.25.0 depends on `lru` 0.12.x and does not use `IterMut` in its runtime LRU cache access paths. Risk is low and confined to search. | Monitor Tantivy for a release that upgrades `lru` to 0.16.3 or later; revisit on Tantivy upgrade. |
+| RR-2026-03-09-01 | 2026-03-09 | `lru` `IterMut` soundness bug via `tantivy` (RUSTSEC-2026-0002 / GHSA-rhfx-m35p-ff5j). Potential undefined behavior if the vulnerable iterator is used. | Search subsystem (Tantivy cache). | Resolved | Updated Tantivy to `0.26.1`, which uses `lru` `0.16.4` and is outside the vulnerable `lru` range. | Keep dependency audits in CI and recheck on future Tantivy upgrades. |
+| RR-2026-03-18-01 | 2026-03-18 | `rsa` timing side-channel advisory via `jsonwebtoken` (RUSTSEC-2023-0071). | JWT/authentication dependency graph. | Resolved | Local session JWTs use the repo-owned HS256 codec documented in `docs/infrastructure/hs256-jwt-codec.md`; `jsonwebtoken` and `rsa` are absent from the dependency graph. | Keep dependency audits in CI and recheck if JWT algorithms beyond HS256 are introduced. |
+| RR-2026-03-18-02 | 2026-03-18 | `clippy::too_many_arguments` suppressions for Actix extractor-heavy handlers may remain. | Actix handler signatures. | Accepted | Actix extractor signatures can legitimately require many parameters; refactoring to satisfy lint warnings can distort the handler design. | Limit suppressions to Actix extractor handlers (and closely related wrapper paths); avoid adding new suppressions for internal helpers. |
+| RR-2026-03-18-03 | 2026-03-18 | `lz4_flex` uninitialized buffer advisory via `tantivy` (RUSTSEC-2026-0041 / GHSA-vvp9-7p8x-rfvv). | Search subsystem (Tantivy decompression). | Resolved | Updated `lz4_flex` to `0.11.6`, eliminating the advisory on the search runtime path. | Keep dependency audits in CI and recheck on future Tantivy upgrades. |
 
 <!--
 This file is part of the product NoPressure.

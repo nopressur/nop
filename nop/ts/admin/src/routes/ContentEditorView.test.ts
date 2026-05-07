@@ -65,8 +65,69 @@ const contentMocks = vi.hoisted(() => ({
 const browserMocks = vi.hoisted(() => ({
   getLocationOrigin: vi.fn().mockReturnValue("https://example.test"),
   openNewTab: vi.fn(),
+  readClipboardText: vi.fn().mockResolvedValue(null),
   writeClipboardText: vi.fn().mockResolvedValue(true),
 }));
+
+const aceMocks = vi.hoisted(() => {
+  let value = "";
+  const indexToPosition = vi.fn((index: number) => {
+    const before = value.slice(0, index);
+    const lines = before.split("\n");
+    return {
+      row: lines.length - 1,
+      column: lines[lines.length - 1]?.length ?? 0,
+    };
+  });
+  const editor = {
+    destroy: vi.fn(),
+    focus: vi.fn(),
+    getCursorPosition: vi.fn().mockReturnValue({ row: 0, column: 0 }),
+    getValue: vi.fn(() => value),
+    insert: vi.fn(),
+    moveCursorToPosition: vi.fn(),
+    on: vi.fn(),
+    session: {
+      getDocument: vi.fn(() => ({ indexToPosition })),
+      setMode: vi.fn(),
+      setUseWorker: vi.fn(),
+    },
+    setFontSize: vi.fn(),
+    setReadOnly: vi.fn(),
+    setTheme: vi.fn(),
+    setValue: vi.fn((nextValue: string) => {
+      value = nextValue;
+    }),
+  };
+  const edit = vi.fn(() => editor);
+  return {
+    edit,
+    editor,
+    indexToPosition,
+    reset() {
+      value = "";
+      editor.destroy.mockClear();
+      editor.focus.mockClear();
+      editor.getCursorPosition.mockClear();
+      editor.getValue.mockClear();
+      editor.insert.mockClear();
+      editor.moveCursorToPosition.mockClear();
+      editor.on.mockClear();
+      editor.session.getDocument.mockClear();
+      editor.session.setMode.mockClear();
+      editor.session.setUseWorker.mockClear();
+      editor.setFontSize.mockClear();
+      editor.setReadOnly.mockClear();
+      editor.setTheme.mockClear();
+      editor.setValue.mockClear();
+      indexToPosition.mockClear();
+      edit.mockClear();
+    },
+    value() {
+      return value;
+    },
+  };
+});
 
 const searchMocks = vi.hoisted(() => ({
   findSearch: vi.fn().mockResolvedValue({ hits: [] }),
@@ -80,6 +141,7 @@ vi.mock("../services/browser", async () => {
     ...actual,
     getLocationOrigin: browserMocks.getLocationOrigin,
     openNewTab: browserMocks.openNewTab,
+    readClipboardText: browserMocks.readClipboardText,
     writeClipboardText: browserMocks.writeClipboardText,
   };
 });
@@ -154,6 +216,14 @@ describe("ContentEditorView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetContentListState();
+    aceMocks.reset();
+    Object.defineProperty(window, "ace", {
+      configurable: true,
+      value: {
+        config: { set: vi.fn() },
+        edit: aceMocks.edit,
+      },
+    });
     setAdminRuntimeConfig({
       adminPath: "/admin",
       appName: "NoPressure",
@@ -189,11 +259,13 @@ describe("ContentEditorView", () => {
       originalFilename: "file.pdf",
       content: "",
       tags: [],
+      sizeBytes: 1536,
     });
     contentMocks.prevalidateBinaryUpload.mockResolvedValue({
       accepted: true,
       message: "",
     });
+    browserMocks.readClipboardText.mockResolvedValue(null);
     tagMocks.listTags.mockResolvedValue([]);
     routerMocks.route.set({
       path: "/pages/edit/test-id",
@@ -213,6 +285,14 @@ describe("ContentEditorView", () => {
     await userEvent.type(titleInput, "Updated title");
 
     expect(getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it("shows the content size in the editor toolbar", async () => {
+    const { findByLabelText, getByText } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    expect(getByText("1.5 KB")).toBeInTheDocument();
   });
 
   it("keeps the editor open when modal cancel is selected", async () => {
@@ -327,6 +407,7 @@ describe("ContentEditorView", () => {
       originalFilename: "file.pdf",
       content: "",
       tags: [],
+      sizeBytes: 2048,
     });
 
     const { findByLabelText, getByRole } = render(ContentEditorView);
@@ -406,6 +487,7 @@ describe("ContentEditorView", () => {
       originalFilename: "file.md",
       content: "",
       tags: [],
+      sizeBytes: 1024,
     });
 
     const { findByLabelText, getByRole } = render(ContentEditorView);
@@ -436,6 +518,7 @@ describe("ContentEditorView", () => {
       originalFilename: "file.md",
       content: "",
       tags: [],
+      sizeBytes: 1024,
     });
 
     const { findByLabelText, getByRole } = render(ContentEditorView);
@@ -466,6 +549,7 @@ describe("ContentEditorView", () => {
       originalFilename: "index.md",
       content: "",
       tags: [],
+      sizeBytes: 4096,
     });
 
     const { findByLabelText, getByRole } = render(ContentEditorView);
@@ -491,6 +575,117 @@ describe("ContentEditorView", () => {
       "Failed to copy ID URL",
       "error",
     );
+  });
+
+  it("paste-merges clipboard text into markdown and moves the cursor before final references", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "Existing bird note ([Nest][1]).\n\n[1]: https://example.test/nest\n",
+      tags: [],
+      sizeBytes: 64,
+    });
+    browserMocks.readClipboardText.mockResolvedValueOnce(
+      "Pasted cat note ([Purr][1]) and orphan ([Laser][3]).\n\n[1]: https://example.test/purr\n",
+    );
+
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+    await waitFor(() => expect(aceMocks.edit).toHaveBeenCalled());
+
+    await userEvent.click(getByRole("button", { name: "Paste-Merge" }));
+
+    await waitFor(() => {
+      expect(aceMocks.value()).toContain("Pasted cat note ([Purr][2]) and orphan ([Laser][3]).");
+    });
+    expect(aceMocks.value()).toContain("[2]: https://example.test/purr");
+    expect(aceMocks.value()).not.toContain("[3]:");
+    const cursorOffset = aceMocks.value().indexOf("\n\n[1]: https://example.test/nest");
+    expect(aceMocks.indexToPosition).toHaveBeenCalledWith(cursorOffset, 0);
+    expect(aceMocks.editor.moveCursorToPosition).toHaveBeenCalled();
+    expect(notificationMocks.pushNotification).toHaveBeenCalledWith(
+      "Pasted and merged references",
+      "success",
+    );
+
+    await userEvent.click(getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(contentMocks.updateMarkdownStream).toHaveBeenCalled());
+    expect(contentMocks.updateMarkdownStream.mock.calls[0]?.[0].content).toBe(aceMocks.value());
+  });
+
+  it("reports paste-merge clipboard read failures", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "Existing content.\n",
+      tags: [],
+      sizeBytes: 18,
+    });
+    browserMocks.readClipboardText.mockResolvedValueOnce(null);
+
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    await userEvent.click(getByRole("button", { name: "Paste-Merge" }));
+
+    expect(notificationMocks.pushNotification).toHaveBeenCalledWith(
+      "Unable to read clipboard text",
+      "error",
+    );
+  });
+
+  it("reports empty paste-merge clipboard text", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "Existing content.\n",
+      tags: [],
+      sizeBytes: 18,
+    });
+    browserMocks.readClipboardText.mockResolvedValueOnce(" \n\t ");
+
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    await userEvent.click(getByRole("button", { name: "Paste-Merge" }));
+
+    expect(notificationMocks.pushNotification).toHaveBeenCalledWith(
+      "Clipboard text is empty",
+      "error",
+    );
+  });
+
+  it("disables paste-merge for non-markdown content", async () => {
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    expect(getByRole("button", { name: "Paste-Merge" })).toBeDisabled();
   });
 
   it("validates alias on change and clears the error when valid", async () => {

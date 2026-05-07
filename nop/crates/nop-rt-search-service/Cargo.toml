@@ -1,0 +1,18 @@
+[package]
+name = "nop-rt-search-service"
+version = "0.1.29"
+edition = "2024"
+
+[dependencies]
+log = "0.4.29"
+ammonia = "4.1.2"
+nop-config = { path = "../nop-config" }
+nop-content-store = { path = "../nop-content-store" }
+nop-roles = { path = "../nop-roles" }
+nop-rt-paths = { path = "../nop-rt-paths" }
+pulldown-cmark = "0.13.0"
+serde_yaml = "0.9"
+tantivy = "0.26.1"
+
+[dev-dependencies]
+uuid = { version = "1.20.0", features = ["v4"] }

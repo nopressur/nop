@@ -22,11 +22,15 @@ used across public and admin surfaces. Login flows feed into this pipeline, but 
 - `JwtAuthMiddleware` validates JWTs on every request and injects auth context.
 - `AuthRequest` provides helpers for handlers (`user_info`, `has_group`, `jwt_id`).
 - `RequireAdminMiddleware` gates admin routes based on `has_group("admin")`.
+- JWT codec requirements are owned by `docs/infrastructure/hs256-jwt-codec.md`; the local session
+  contract is HS256-only and must not introduce generic JWT algorithm negotiation.
 
 #### JWT Issuance
 
 - Login providers call `JwtService::create_token(email, user)` after identity verification.
 - Tokens embed: `sub` (email), roles, expiry, `jti`, and `password_version`.
+- Tokens are local session tokens only. The supported signing algorithm is HS256 with the
+  configured `users.local.jwt.secret`.
 - `create_auth_cookie` issues the HTTP cookie (`cookie_name`, default `nop_auth`).
 
 #### Middleware Flow

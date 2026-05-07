@@ -112,5 +112,5 @@ Notes:
 ### Testing Scope
 
 - `nop/tests/admin_themes.rs` validates create/save/delete with `.theme` files.
-- `nop/src/public/markdown/parser.rs` asserts theme injection includes the preset link and variables.
+- `nop/crates/nop-public/src/markdown/parser.rs` asserts theme injection includes the preset link and variables.
 - `tests/playwright/utils/seed.ts` seeds `default.theme` for E2E coverage.

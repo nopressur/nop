@@ -4,10 +4,18 @@ This catalog highlights repo-provided tooling that speeds up development, testin
 
 ## Rust Build Utilities
 
-- `scripts/cargo.sh`
-  - Wrapper for `cargo` that standardizes repo usage.
+- `scripts/crg.sh <crate>`
+  - Explicit crate-targeting wrapper for `cargo`.
   - Works with any cargo subcommand (build, check, test, fmt, clippy, run, etc.).
-  - Resolves the crate automatically (uses `nop/` when invoked from repo root).
+  - Accepts full package names (`nop-rt-well-known`) or short names without the `nop-`
+    prefix (`rt-well-known`); use `nop` for the root package.
+- `scripts/run-full-tests.sh`
+  - Full non-browser testing scope for the repository.
+  - Runs Rust format, test, and clippy in dependency-first order for every local path crate and
+    the root `nop` package.
+  - Runs admin/login SPA checks and tests.
+- `scripts/run-playwright.sh`
+  - Runs the Playwright browser E2E/UX scope separately.
 
 ## Asset Utilities
 
@@ -27,13 +35,13 @@ This catalog highlights repo-provided tooling that speeds up development, testin
 
 ## Usage Guidelines
 
-1. **Bootstrap**: install Rust tooling (`rustup`), ensure `scripts/cargo.sh fmt`, `scripts/cargo.sh clippy`, `scripts/cargo.sh test` succeed.
+1. **Bootstrap**: install Rust tooling (`rustup`), ensure `scripts/crg.sh nop fmt`, `scripts/crg.sh nop clippy`, `scripts/crg.sh nop test`, and `scripts/run-full-tests.sh` succeed for the relevant scope.
 2. **Manage credentials**: use `nop user` subcommands for local user hashes instead of online generators.
 3. **Frontend builds**: `build.rs` rebuilds admin/login SPA assets automatically; run `npm run build`
    in `nop/ts/admin` or `nop/ts/login` only if you need to regenerate assets manually. Login
    builds write `login.js` + `login.css` into `nop/builtin/login-<hash>` and update
    `nop/builtin/login-spa-version.txt` so the templates reference the correct versioned assets.
-4. **Ship**: use `scripts/cargo.sh build --release` before packaging binaries or images.
+4. **Ship**: use `scripts/crg.sh nop build --release` before packaging binaries or images.
 
 Each tool prints actionable output and exits with non-zero status on failure, making them safe to wire into CI or scripted workflows.
 

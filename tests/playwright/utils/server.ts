@@ -25,14 +25,14 @@ export async function launchServer(options: {
 }): Promise<ServerHandle> {
   const repoRoot = path.resolve(__dirname, "..", "..", "..");
   const nopDir = path.join(repoRoot, "nop");
-  const cargoWrapper = path.join(repoRoot, "scripts", "cargo.sh");
+  const cargoWrapper = path.join(repoRoot, "scripts", "crg.sh");
   const baseUrl = `http://127.0.0.1:${options.port}`;
   const timeoutMs = options.timeoutMs ?? 120_000;
 
   const binary = process.env.NOP_BINARY;
   const args = binary
     ? ["-C", options.runtimeRoot, "-F"]
-    : ["run", "--", "-C", options.runtimeRoot, "-F"];
+    : ["nop", "run", "--", "-C", options.runtimeRoot, "-F"];
   const command = binary ?? cargoWrapper;
   const passthroughLogs = process.env.NOP_PW_SERVER_LOG === "1";
 
@@ -91,7 +91,7 @@ export async function launchBootstrapServer(options: {
 }): Promise<ServerHandle & { bootstrapPassword: string }> {
   const repoRoot = path.resolve(__dirname, "..", "..", "..");
   const nopDir = path.join(repoRoot, "nop");
-  const cargoWrapper = path.join(repoRoot, "scripts", "cargo.sh");
+  const cargoWrapper = path.join(repoRoot, "scripts", "crg.sh");
   const baseUrl = `http://127.0.0.1:${options.port}`;
   const timeoutMs = options.timeoutMs ?? 120_000;
   const passwordTimeoutMs = options.passwordTimeoutMs ?? timeoutMs;
@@ -99,7 +99,7 @@ export async function launchBootstrapServer(options: {
   const binary = process.env.NOP_BINARY;
   const args = binary
     ? ["-C", options.runtimeRoot, "-F"]
-    : ["run", "--", "-C", options.runtimeRoot, "-F"];
+    : ["nop", "run", "--", "-C", options.runtimeRoot, "-F"];
   const command = binary ?? cargoWrapper;
   const passthroughLogs = process.env.NOP_PW_SERVER_LOG === "1";
 

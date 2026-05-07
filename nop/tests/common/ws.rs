@@ -6,8 +6,8 @@
 use actix_web::HttpServer;
 use awc::ws::{Frame as ClientFrame, Message as ClientMessage};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
-use nop::management::ws::{RequestFrame, ResponseFrame, WsFrame, decode_frame, encode_frame};
-use nop::management::{WireDecode, WireEncode, WireReader, WireWriter};
+use nop_management_bus::ws::{RequestFrame, ResponseFrame, WsFrame, decode_frame, encode_frame};
+use nop_management_contract::{WireDecode, WireEncode, WireReader, WireWriter};
 use std::net::TcpListener;
 
 pub async fn start_test_server(bundle: super::AppBundle) -> String {

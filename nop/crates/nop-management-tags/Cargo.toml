@@ -1,0 +1,13 @@
+[package]
+name = "nop-management-tags"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nop-management-contract = { path = "../nop-management-contract" }
+nop-management-errors = { path = "../nop-management-errors" }
+nop-management-workflows = { path = "../nop-management-workflows" }
+nop-management-yaml = { path = "../nop-management-yaml" }
+nop-roles = { path = "../nop-roles" }
+nop-security-paths = { path = "../nop-security-paths" }
+serde = { version = "1.0", features = ["derive"] }

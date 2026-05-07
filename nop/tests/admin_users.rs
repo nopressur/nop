@@ -9,25 +9,25 @@ use awc::Client;
 use awc::ws::Message as ClientMessage;
 use common::ws;
 use futures_util::SinkExt;
-use nop::config::PasswordHashingParams;
-use nop::iam::{
-    FileUserStore, IamError, UserServices, UserStore, UsersData, build_password_provider_block,
-    derive_front_end_hash,
+use nop_config::PasswordHashingParams;
+use nop_iam_passwords::{build_password_provider_block, derive_front_end_hash};
+use nop_management_bus::ws::{AuthFrame, WsFrame, encode_frame};
+use nop_management_contract::MessageResponse;
+use nop_management_contract::users::{
+    PasswordPayload, PasswordSaltResponse, PasswordValidateResponse, USER_ACTION_ADD,
+    USER_ACTION_ADD_ERR, USER_ACTION_ADD_OK, USER_ACTION_CHANGE, USER_ACTION_CHANGE_OK,
+    USER_ACTION_DELETE, USER_ACTION_DELETE_ERR, USER_ACTION_DELETE_OK, USER_ACTION_PASSWORD_SALT,
+    USER_ACTION_PASSWORD_SALT_OK, USER_ACTION_PASSWORD_SET, USER_ACTION_PASSWORD_SET_OK,
+    USER_ACTION_PASSWORD_UPDATE, USER_ACTION_PASSWORD_UPDATE_ERR, USER_ACTION_PASSWORD_VALIDATE,
+    USER_ACTION_PASSWORD_VALIDATE_OK, USER_ACTION_ROLE_ADD, USER_ACTION_ROLE_ADD_OK,
+    USER_ACTION_ROLE_REMOVE, USER_ACTION_ROLE_REMOVE_OK, USER_ACTION_SHOW, USER_ACTION_SHOW_OK,
+    USERS_DOMAIN_ID, UserAddRequest, UserChangeRequest, UserDeleteRequest, UserPasswordSaltRequest,
+    UserPasswordSetRequest, UserPasswordUpdateRequest, UserPasswordValidateRequest,
+    UserRoleAddRequest, UserRoleRemoveRequest, UserShowRequest, UserShowResponse,
 };
-use nop::management::ws::{AuthFrame, WsFrame, encode_frame};
-use nop::management::{
-    MessageResponse, PasswordPayload, PasswordSaltResponse, PasswordValidateResponse,
-    USER_ACTION_ADD, USER_ACTION_ADD_ERR, USER_ACTION_ADD_OK, USER_ACTION_CHANGE,
-    USER_ACTION_CHANGE_OK, USER_ACTION_DELETE, USER_ACTION_DELETE_ERR, USER_ACTION_DELETE_OK,
-    USER_ACTION_PASSWORD_SALT, USER_ACTION_PASSWORD_SALT_OK, USER_ACTION_PASSWORD_SET,
-    USER_ACTION_PASSWORD_SET_OK, USER_ACTION_PASSWORD_UPDATE, USER_ACTION_PASSWORD_UPDATE_ERR,
-    USER_ACTION_PASSWORD_VALIDATE, USER_ACTION_PASSWORD_VALIDATE_OK, USER_ACTION_ROLE_ADD,
-    USER_ACTION_ROLE_ADD_OK, USER_ACTION_ROLE_REMOVE, USER_ACTION_ROLE_REMOVE_OK, USER_ACTION_SHOW,
-    USER_ACTION_SHOW_OK, USERS_DOMAIN_ID, UserAddRequest, UserChangeRequest, UserDeleteRequest,
-    UserPasswordSaltRequest, UserPasswordSetRequest, UserPasswordUpdateRequest,
-    UserPasswordValidateRequest, UserRoleAddRequest, UserRoleRemoveRequest, UserShowRequest,
-    UserShowResponse,
-};
+use nop_rt_iam::UserServices;
+use nop_rt_iam::store::{FileUserStore, UserStore};
+use nop_rt_iam::types::{IamError, UsersData};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Notify;
@@ -636,9 +636,8 @@ async fn queue_full_returns_user_error_over_websocket() {
         gate.clone(),
         open.clone(),
     ));
-    let mut user_services =
+    let user_services =
         UserServices::new_with_store(harness.config.as_ref(), store).expect("user services");
-    user_services.set_page_cache(harness.page_cache.clone());
     let user_services = Arc::new(user_services);
 
     let bundle = common::build_app_bundle_with_user_services(&harness, user_services.clone());
@@ -672,10 +671,10 @@ async fn queue_full_returns_user_error_over_websocket() {
         tokio::spawn(async move {
             let email = format!("queued{}@example.com", idx);
             let result = services.add_user(&email, "Queued", block, Vec::new()).await;
-            if let Err(err) = result {
-                if err.to_string() == MUTATION_QUEUE_FULL_MESSAGE {
-                    busy_notify.notify_one();
-                }
+            if let Err(err) = result
+                && err.to_string() == MUTATION_QUEUE_FULL_MESSAGE
+            {
+                busy_notify.notify_one();
             }
         });
     }

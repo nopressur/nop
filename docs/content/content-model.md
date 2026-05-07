@@ -103,6 +103,57 @@ The public pipeline reads metadata from RON sidecar files.
   - Inline `style` attributes are preserved on `img`, `figure`, `figcaption`, `p`, and `h1`-`h6` tags.
     Style properties are not filtered.
 
+#### Code Block Copy Buttons
+
+- Code blocks must render with a server-generated copy button adjacent to the `<pre><code>` content.
+- The copy button markup must be generated as part of Markdown rendering in the backend (event-stream transform); it must not be created dynamically by client-side DOM injection.
+- The site bundle (`/builtin/site.js`, built from `nop/ts/site`) may attach behavior only to existing markup.
+
+Backend implementation contract (sanitization-safe wrapper injection):
+
+- The backend must not rely on the sanitizer to preserve copy-button markup.
+- Instead, the renderer injects placeholder tokens outside the code block HTML structure, then replaces them with trusted wrapper/button HTML after sanitization (same safety model as shortcode placeholder replacement).
+
+Placeholder token contract:
+
+- For every Markdown code block, the HTML stream must include:
+  - a wrapper-start placeholder token immediately before the `<pre><code...>` output
+  - a wrapper-end placeholder token immediately after the closing `</pre>`
+- Tokens must not appear inside `<code>...</code>` content.
+- Tokens include a per-render nonce to avoid accidental collisions with user content:
+  - `NOP_CODEBLOCK_WRAPPER_START_<nonce>`
+  - `NOP_CODEBLOCK_WRAPPER_END_<nonce>`
+- The nonce must be cryptographically strong, generated once per `generate_html` render, and reused for all code blocks within that render.
+  - Per-block unique nonces are not required; `START` vs `END` is sufficient to keep structure correct, and a per-render nonce is sufficient for collision resistance.
+- The replacement pass may count occurrences of the start/end tokens; if both counts are zero, it must skip wrapper replacement work entirely.
+
+Backend markup contract (the trusted HTML inserted during placeholder replacement):
+
+- A wrapper element encloses the rendered `<pre><code>` output:
+  - wrapper tag: `figure`
+  - required attribute: `data-site-code-block="true"`
+- The wrapper includes a toolbar area (caption) containing a copy button:
+  - caption tag: `figcaption`
+  - button tag: `button`
+  - required attributes:
+    - `type="button"`
+    - `data-site-code-copy="true"`
+    - `aria-label="Copy code block"`
+  - visible label: `Copy`
+
+Sanitization requirements:
+
+- The sanitizer must remain strict. The copy-button wrapper contract must not require broadening the sanitizer allowlist (the wrapper/button HTML is inserted after sanitization).
+- Existing security behavior (script/link/iframe stripping, external link hardening, link validation) remains authoritative.
+
+Site bundle requirements:
+
+- `nop/ts/site` binds a click handler to `[data-site-code-copy]` and copies the associated code text (the sibling/descendant `<pre><code>` within the same `[data-site-code-block]` wrapper).
+- The helper must not:
+  - inject new copy buttons;
+  - rewrite Markdown HTML structure;
+  - depend on framework/runtime beyond the existing site bundle patterns.
+
 ### Shortcodes
 
 - Raw Markdown is first passed through `process_text_with_shortcodes`, which replaces valid invocations with placeholders and records rendered HTML.
@@ -151,8 +202,8 @@ container is not affected.
 
 ### Error Handling
 
-- 404: `public::error::serve_404` handles missing aliases, invalid routes, and access-denied responses for authenticated users.
-- 500: `public::error::serve_500` covers filesystem read failures and unexpected panics.
+- 404: `templates::error::serve_404` handles missing aliases, invalid routes, and access-denied responses for authenticated users.
+- 500: `templates::error::serve_500` covers filesystem read failures and unexpected panics.
 - Access denial redirects anonymous users to `/login?return_path=...`.
 
 ### Extension Tips

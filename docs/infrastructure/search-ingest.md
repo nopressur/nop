@@ -36,7 +36,7 @@ and sidecars from content storage.
 ### Integration Point in the Save Pipeline
 
 - Search upsert is emitted only after the markdown blob and its sidecar have both been persisted successfully.
-- The integration point is in the existing content mutation handlers in `nop/src/management/content/mod.rs`:
+- The integration point is in the content mutation handlers in `nop/crates/nop-management-content`:
   - `handle_upload` (inline create)
   - `handle_update` (inline update)
   - `handle_upload_stream_commit` (streamed create)

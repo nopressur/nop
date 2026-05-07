@@ -1,0 +1,15 @@
+[package]
+name = "nop-management-users"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.89"
+log = "0.4.29"
+nop-config = { path = "../nop-config" }
+nop-iam-passwords = { path = "../nop-iam-passwords" }
+nop-library = { path = "../nop-library" }
+nop-management-contract = { path = "../nop-management-contract" }
+nop-management-errors = { path = "../nop-management-errors" }
+nop-management-workflows = { path = "../nop-management-workflows" }
+nop-roles = { path = "../nop-roles" }
