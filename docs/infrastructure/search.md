@@ -213,7 +213,7 @@ The search module must provide two query capabilities via `SearchService` method
    - build content query with the public profile;
    - add RBAC role filters (user roles + `__public__`) to the Tantivy query unless the caller is
      admin, in which case RBAC filtering is skipped;
-   - execute a relevance-ranked search using the content query;
+   - execute a priority-ranked search using the content query;
    - return raw hits so the public API can apply final access validation using the in-memory page
      cache (do not trust search index roles as the sole gate).
 2. `query_admin` capability for admin/management consumers:
@@ -228,6 +228,11 @@ Query profiles:
 - Public query profile:
   - includes `title`, `alias`, and `body`.
   - explicitly excludes `tags` from matching behavior.
+  - ranks title matches ahead of alias matches, and both title and alias matches ahead of body-only
+    matches.
+  - includes a lower-priority token prefix fallback for sufficiently long query tokens, so a query
+    token such as `snippet` can match an indexed token such as `snippets` without using a
+    language-specific stemming tokenizer.
 
 Required behavior:
 
@@ -239,8 +244,11 @@ Required behavior:
 - Public API query input validation must enforce `len(trim(q))` in the inclusive range `3..=256`.
 - Public query capability enforces a hard-coded maximum result size of `16` (no caller-provided limit).
 - Admin query capability enforces a hard-coded maximum result size of `128`.
-- Query results are ranked by Tantivy relevance first, then the final returned set is sorted
-  alphabetically by `title` after access filtering.
+- Public query results preserve search-service priority order through the public API access filter:
+  exact title token matches, exact alias token matches, title/alias prefix fallback matches, exact
+  body token matches, and body prefix fallback matches. Within each band, Tantivy relevance is the
+  tiebreaker.
+- Public API response assembly must not resort accessible hits alphabetically after access filtering.
 - Result payload mapping uses stored fields only (`id`, `alias`, `title`, `tags`).
 - Full content access is resolved from source files only after authorization.
 
@@ -310,7 +318,8 @@ Required behavior:
   - public RBAC-filtered, tag-excluded matching
   - public query limit fixed to `16`
   - plain-text parsing rejects/ignores operator syntax behavior
-  - title-alphabetic ordering behavior
+  - public title/alias matches rank ahead of body-only matches
+  - public prefix fallback matches longer indexed tokens without outranking exact token matches
   - stored-field-only result mapping
 - Public API tests:
   - invalid query lengths (`<3`, `>256`, blank/missing after trim) return `400`.

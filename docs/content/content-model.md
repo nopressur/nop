@@ -158,7 +158,7 @@ Site bundle requirements:
 
 - Raw Markdown is first passed through `process_text_with_shortcodes`, which replaces valid invocations with placeholders and records rendered HTML.
 - Rendered shortcode HTML is keyed by unique `SHORTCODE_HASH_*` placeholders so it can be reinserted after sanitization without escaping.
-- After Markdown rendering and sanitization, `replace_shortcode_placeholders` swaps placeholders back in.
+- After Markdown rendering and sanitization, `replace_shortcode_placeholders` substitutes placeholders in a paragraph-aware way: standalone placeholder paragraphs are replaced as a whole, while inline placeholders are replaced literally.
 - Built-in shortcodes live under `public/shortcode/` and include `start-unibox`, `video`, and `link-card`.
 - The `tag-list` shortcode renders lists of content based on tags and uses the same listing HTML style as the existing listing helpers.
 

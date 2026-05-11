@@ -15,6 +15,7 @@ use tokio::fs;
 
 use super::parser::{RenderRequest, generate_html};
 use super::render::generate_html_page_with_user;
+use super::render_pipeline_support_hooks::DefaultRenderPipelineSupportHooks;
 
 pub async fn serve_markdown_alias(
     alias: &str,
@@ -82,6 +83,7 @@ pub async fn serve_markdown_alias(
     options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_TASKLISTS);
 
+    let hooks = DefaultRenderPipelineSupportHooks;
     let rendered_html = match generate_html(&RenderRequest {
         markdown: &content,
         shortcode_registry,
@@ -91,6 +93,7 @@ pub async fn serve_markdown_alias(
         md_path: alias,
         user,
         short_paragraph_length: config.rendering.short_paragraph_length,
+        hooks: &hooks,
     }) {
         Ok(rendered) => rendered,
         Err(error) => {

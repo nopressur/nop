@@ -72,6 +72,9 @@ fn embedded_template_loader(name: &str) -> Result<Option<String>, minijinja::Err
         "public/shortcode/start_unibox.html" => Some(include_str!(
             "../../nop-public/src/shortcode/templates/start_unibox.html"
         )),
+        "public/shortcode/hero_img.html" => Some(include_str!(
+            "../../nop-public/src/shortcode/templates/hero_img.html"
+        )),
 
         _ => None,
     };

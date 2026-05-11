@@ -25,7 +25,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, TermQuery};
+use tantivy::query::{BooleanQuery, Occur, PhrasePrefixQuery, Query, QueryParser, TermQuery};
 use tantivy::schema::{
     Field, IndexRecordOption, STORED, STRING, Schema, TEXT,
     TantivyDocument as TantivyOwnedDocument, Value,
@@ -36,6 +36,7 @@ const SEARCH_ROLE_PUBLIC: &str = "__public__";
 const SEARCH_ROLE_DENY: &str = "__deny__";
 const SEARCH_PUBLIC_QUERY_LIMIT: usize = 16;
 const SEARCH_ADMIN_QUERY_LIMIT: usize = 128;
+const SEARCH_PREFIX_MIN_CHARS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReindexReason {
@@ -333,12 +334,6 @@ impl SearchService {
             return Ok(Vec::new());
         }
 
-        let index = self.reader.searcher().index().clone();
-        let content_query = build_plain_text_query(
-            &index,
-            vec![self.fields.title, self.fields.alias, self.fields.body],
-            raw,
-        )?;
         let mut role_terms = HashSet::new();
         let mut is_admin = false;
         for role in request.roles {
@@ -355,26 +350,39 @@ impl SearchService {
             }
         }
 
-        let query = if is_admin {
-            content_query
+        let role_terms = if is_admin {
+            Vec::new()
         } else {
             role_terms.insert(SEARCH_ROLE_PUBLIC.to_string());
-            let mut role_queries: Vec<(Occur, Box<dyn Query>)> =
-                Vec::with_capacity(role_terms.len());
-            for role in role_terms {
-                let term = Term::from_field_text(self.fields.roles, &role);
-                role_queries.push((
-                    Occur::Should,
-                    Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
-                ));
-            }
-
-            let mut subqueries = Vec::with_capacity(role_queries.len() + 1);
-            subqueries.push((Occur::Must, content_query));
-            subqueries.push((Occur::Must, Box::new(BooleanQuery::new(role_queries))));
-            Box::new(BooleanQuery::new(subqueries))
+            let mut role_terms = role_terms.into_iter().collect::<Vec<String>>();
+            role_terms.sort();
+            role_terms
         };
-        self.execute_query(query.as_ref(), SEARCH_PUBLIC_QUERY_LIMIT)
+
+        let index = self.reader.searcher().index().clone();
+        let content_queries = build_public_content_queries(&index, &self.fields, raw)?;
+        let mut seen = HashSet::new();
+        let mut merged = Vec::new();
+        for content_query in content_queries {
+            if merged.len() >= SEARCH_PUBLIC_QUERY_LIMIT {
+                break;
+            }
+            let query = if is_admin {
+                content_query
+            } else {
+                build_role_filtered_query(content_query, self.fields.roles, &role_terms)
+            };
+            let hits = self.execute_query(query.as_ref(), SEARCH_PUBLIC_QUERY_LIMIT)?;
+            for hit in hits {
+                if seen.insert(hit.id.clone()) {
+                    merged.push(hit);
+                    if merged.len() >= SEARCH_PUBLIC_QUERY_LIMIT {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(merged)
     }
 
     pub fn query_admin(&self, request: QueryAdminRequest) -> Result<Vec<QueryHit>, String> {
@@ -1202,6 +1210,93 @@ fn build_plain_text_query(
         .map_err(|err| format!("Search query parse failed: {}", err))
 }
 
+fn build_public_content_queries(
+    index: &Index,
+    fields: &SearchSchemaFields,
+    raw_query: &str,
+) -> Result<Vec<Box<dyn Query>>, String> {
+    let mut queries = vec![
+        build_plain_text_query(index, vec![fields.title], raw_query)?,
+        build_plain_text_query(index, vec![fields.alias], raw_query)?,
+    ];
+
+    let prefix_tokens = prefix_query_tokens(raw_query);
+    if !prefix_tokens.is_empty() {
+        queries.push(build_prefix_query(
+            vec![fields.title, fields.alias],
+            &prefix_tokens,
+        ));
+    }
+
+    queries.push(build_plain_text_query(index, vec![fields.body], raw_query)?);
+    if !prefix_tokens.is_empty() {
+        queries.push(build_prefix_query(vec![fields.body], &prefix_tokens));
+    }
+    Ok(queries)
+}
+
+fn build_role_filtered_query(
+    content_query: Box<dyn Query>,
+    roles_field: Field,
+    role_terms: &[String],
+) -> Box<dyn Query> {
+    let role_queries = role_terms
+        .iter()
+        .map(|role| {
+            let term = Term::from_field_text(roles_field, role);
+            (
+                Occur::Should,
+                Box::new(TermQuery::new(term, IndexRecordOption::Basic)) as Box<dyn Query>,
+            )
+        })
+        .collect();
+
+    Box::new(BooleanQuery::new(vec![
+        (Occur::Must, content_query),
+        (Occur::Must, Box::new(BooleanQuery::new(role_queries))),
+    ]))
+}
+
+fn build_prefix_query(fields: Vec<Field>, tokens: &[String]) -> Box<dyn Query> {
+    let mut prefix_queries = Vec::with_capacity(fields.len() * tokens.len());
+    for field in fields {
+        for token in tokens {
+            let term = Term::from_field_text(field, token);
+            prefix_queries.push((
+                Occur::Should,
+                Box::new(PhrasePrefixQuery::new_with_offset(vec![(0, term)])) as Box<dyn Query>,
+            ));
+        }
+    }
+    Box::new(BooleanQuery::new(prefix_queries))
+}
+
+fn prefix_query_tokens(raw_query: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in raw_query.trim().chars().flat_map(char::to_lowercase) {
+        if ch.is_alphanumeric() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            push_prefix_query_token(&mut tokens, &mut current);
+        }
+    }
+    if !current.is_empty() {
+        push_prefix_query_token(&mut tokens, &mut current);
+    }
+    tokens.sort();
+    tokens.dedup();
+    tokens
+}
+
+fn push_prefix_query_token(tokens: &mut Vec<String>, current: &mut String) {
+    if current.chars().count() >= SEARCH_PREFIX_MIN_CHARS {
+        tokens.push(std::mem::take(current));
+    } else {
+        current.clear();
+    }
+}
+
 fn normalize_plain_text_query(raw_query: &str) -> String {
     let lower = raw_query.trim().to_ascii_lowercase();
     escape_query_special_chars(&lower)
@@ -1667,6 +1762,172 @@ tag-c:
             })
             .expect("query tag-only");
         assert!(tag_only.is_empty());
+    }
+
+    #[test]
+    fn query_public_prioritizes_title_and_alias_before_body() {
+        let fixture = TestFixtureRoot::new_unique("search-query-public-priority").expect("fixture");
+        fixture.init_runtime_layout().expect("layout");
+        let runtime_paths = fixture.runtime_paths().expect("paths");
+
+        write_markdown(
+            &runtime_paths,
+            ContentId(20),
+            ContentVersion(1),
+            ContentSidecar {
+                alias: "docs/title-priority".to_string(),
+                title: Some("Prioritytoken Title".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: vec![],
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                original_filename: None,
+                theme: None,
+            },
+            "plain body",
+        );
+        write_markdown(
+            &runtime_paths,
+            ContentId(21),
+            ContentVersion(1),
+            ContentSidecar {
+                alias: "prioritytoken/alias".to_string(),
+                title: Some("Alias Candidate".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: vec![],
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                original_filename: None,
+                theme: None,
+            },
+            "plain body",
+        );
+        write_markdown(
+            &runtime_paths,
+            ContentId(22),
+            ContentVersion(1),
+            ContentSidecar {
+                alias: "docs/body-priority".to_string(),
+                title: Some("Body Candidate".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: vec![],
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                original_filename: None,
+                theme: None,
+            },
+            "prioritytoken prioritytoken prioritytoken prioritytoken",
+        );
+
+        let startup = initialize(
+            &runtime_paths,
+            &SearchConfig {
+                max_memory_mb: 128,
+                worker_count: 1,
+            },
+            ReservedPaths::default(),
+            false,
+        )
+        .expect("search startup");
+
+        let hits = startup
+            .service
+            .query_public(QueryPublicRequest {
+                query: "prioritytoken".to_string(),
+                roles: Vec::new(),
+            })
+            .expect("query");
+        let titles: Vec<&str> = hits.iter().map(|hit| hit.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec!["Prioritytoken Title", "Alias Candidate", "Body Candidate"]
+        );
+    }
+
+    #[test]
+    fn query_public_prefix_fallback_matches_plural_tokens_after_exact_tokens() {
+        let fixture = TestFixtureRoot::new_unique("search-query-public-prefix").expect("fixture");
+        fixture.init_runtime_layout().expect("layout");
+        let runtime_paths = fixture.runtime_paths().expect("paths");
+
+        write_markdown(
+            &runtime_paths,
+            ContentId(30),
+            ContentVersion(1),
+            ContentSidecar {
+                alias: "docs/exact-snippet".to_string(),
+                title: Some("Exact Snippet".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: vec![],
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                original_filename: None,
+                theme: None,
+            },
+            "plain body",
+        );
+        write_markdown(
+            &runtime_paths,
+            ContentId(31),
+            ContentVersion(1),
+            ContentSidecar {
+                alias: "docs/plural-snippets".to_string(),
+                title: Some("Plural Snippets".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: vec![],
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                original_filename: None,
+                theme: None,
+            },
+            "plain body",
+        );
+        write_markdown(
+            &runtime_paths,
+            ContentId(32),
+            ContentVersion(1),
+            ContentSidecar {
+                alias: "docs/body-only".to_string(),
+                title: Some("Body Only Candidate".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: vec![],
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                original_filename: None,
+                theme: None,
+            },
+            "snippet snippet snippet snippet snippet snippet snippet snippet",
+        );
+
+        let startup = initialize(
+            &runtime_paths,
+            &SearchConfig {
+                max_memory_mb: 128,
+                worker_count: 1,
+            },
+            ReservedPaths::default(),
+            false,
+        )
+        .expect("search startup");
+
+        let hits = startup
+            .service
+            .query_public(QueryPublicRequest {
+                query: "snippet".to_string(),
+                roles: Vec::new(),
+            })
+            .expect("query");
+        let titles: Vec<&str> = hits.iter().map(|hit| hit.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec!["Exact Snippet", "Plural Snippets", "Body Only Candidate"]
+        );
     }
 
     #[test]

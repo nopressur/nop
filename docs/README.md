@@ -38,7 +38,11 @@ The `nop-roles` crate owns role rules and shared role types used by IAM, search,
 - `docs/content/search-ux.md` - Public search API contract and site TypeScript search overlay behavior.
 - `docs/content/sitemap.md` - `/robots.txt` and `/sitemap.xml` behavior, crawl rules, and canonical URL rules.
 - `docs/content/themes.md` - Theme file format, palettes, and public theme rendering pipeline.
-- `docs/modules/shortcodes.md` - Parser syntax, built-in handlers, extension workflow.
+- `docs/modules/shortcodes.md` - Parser syntax, registry, substitution, render-pipeline hooks, extension workflow.
+- `docs/modules/shortcodes/navigation.md` - `link-card`, `start-unibox` shortcodes.
+- `docs/modules/shortcodes/media.md` - `video` shortcode.
+- `docs/modules/shortcodes/listings.md` - `tag-list` shortcode.
+- `docs/modules/shortcodes/hero-image.md` - `hero-img` shortcode.
 - `docs/content/public-rbac.md` - Public RBAC rules and access outcomes.
 - `docs/content/role-management.md` - Role storage, validation, CRUD, and cascades.
 

@@ -94,7 +94,6 @@ pub(super) async fn search_public(
                     filtered.push(hit);
                 }
             }
-            filtered.sort_by_cached_key(|hit| (hit.title.to_ascii_lowercase(), hit.id.clone()));
             let response: Vec<PublicSearchHitResponse> = filtered
                 .into_iter()
                 .map(|hit| PublicSearchHitResponse {

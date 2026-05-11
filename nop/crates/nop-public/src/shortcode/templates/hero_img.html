@@ -1,0 +1,17 @@
+{#
+This file is part of the product NoPressure.
+SPDX-FileCopyrightText: 2025-2026 Zivatar Limited
+All rights reserved.
+#}
+<div class="{{ wrapper_class }}">
+    <picture>
+        {% if src_dark %}<source media="(prefers-color-scheme: dark)" srcset="{{ src_dark }}">{% endif %}
+        <img src="{{ src }}" alt="{{ alt }}">
+    </picture>
+    {% if has_caption %}
+    <div class="sc-hero-img__caption">
+        {% if title %}<h2 class="sc-hero-img__title">{{ title }}</h2>{% endif %}
+        {% if subtitle %}<p class="sc-hero-img__subtitle">{{ subtitle }}</p>{% endif %}
+    </div>
+    {% endif %}
+</div>

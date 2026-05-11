@@ -125,8 +125,38 @@ async fn search_api_public_profile_does_not_match_tags() {
 }
 
 #[actix_web::test]
-async fn search_api_sorts_results_by_title_after_filtering() {
+async fn search_api_preserves_search_priority_after_filtering() {
     let harness = common::TestHarness::new().await;
+    write_markdown(
+        &harness.runtime_paths,
+        ContentId(2000),
+        "docs/priority-title",
+        Some("Prioritytoken Title"),
+        Vec::new(),
+        "plain body",
+    );
+    write_markdown(
+        &harness.runtime_paths,
+        ContentId(2001),
+        "prioritytoken/alias",
+        Some("Alias Candidate"),
+        Vec::new(),
+        "plain body",
+    );
+    write_markdown(
+        &harness.runtime_paths,
+        ContentId(2002),
+        "docs/priority-body",
+        Some("Body Candidate"),
+        Vec::new(),
+        "prioritytoken prioritytoken prioritytoken prioritytoken",
+    );
+    harness
+        .page_cache
+        .rebuild_cache(true)
+        .await
+        .expect("cache rebuild");
+
     let search_startup = nop_rt_search_service::initialize(
         &harness.runtime_paths,
         &harness.config.search,
@@ -142,7 +172,7 @@ async fn search_api_sorts_results_by_title_after_filtering() {
     let session = harness.admin_auth();
 
     let req = common::add_auth_headers(
-        test::TestRequest::get().uri("/api/search?q=page"),
+        test::TestRequest::get().uri("/api/search?q=prioritytoken"),
         &session,
         false,
     )
@@ -152,12 +182,14 @@ async fn search_api_sorts_results_by_title_after_filtering() {
     let body = test::read_body(resp).await;
     let json: Value = serde_json::from_slice(&body).expect("search json");
     let items = json.as_array().expect("array response");
-    assert_eq!(items.len(), 2);
     let titles: Vec<&str> = items
         .iter()
         .filter_map(|item| item.get("title").and_then(Value::as_str))
         .collect();
-    assert_eq!(titles, vec!["Intro", "Secret"]);
+    assert_eq!(
+        titles,
+        vec!["Prioritytoken Title", "Alias Candidate", "Body Candidate"]
+    );
 }
 
 #[actix_web::test]

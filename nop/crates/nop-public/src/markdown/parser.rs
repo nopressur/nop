@@ -4,6 +4,9 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use crate::markdown::HtmlSanitizer;
+use crate::markdown::render_pipeline_support_hooks::{
+    PageRenderHookContext, RenderPipelineSupportHooks,
+};
 use crate::shortcode::{
     ShortcodeContext, ShortcodeRegistry, process_text_with_shortcodes,
     replace_shortcode_placeholders,
@@ -53,6 +56,7 @@ pub(super) struct RenderRequest<'a> {
     pub(super) md_path: &'a str,
     pub(super) user: Option<&'a User>,
     pub(super) short_paragraph_length: usize,
+    pub(super) hooks: &'a dyn RenderPipelineSupportHooks,
 }
 
 pub(super) fn generate_html(
@@ -62,6 +66,7 @@ pub(super) fn generate_html(
     let shortcode_ctx = ShortcodeContext {
         cache: request.cache,
         user: request.user,
+        md_path: request.md_path,
     };
     let shortcode_result =
         process_text_with_shortcodes(request.markdown, request.shortcode_registry, &shortcode_ctx);
@@ -105,8 +110,14 @@ pub(super) fn generate_html(
 
     // Replace shortcode strings with their rendered HTML as the final step
 
-    let final_html =
-        replace_shortcode_placeholders(&wrapper_replaced_html, &shortcode_result.hash_to_html_map);
+    let hook_context = PageRenderHookContext { use_compact_width };
+    let final_html = replace_shortcode_placeholders(
+        &wrapper_replaced_html,
+        &shortcode_result.hash_to_html_map,
+        &shortcode_result.hash_to_type_map,
+        request.hooks,
+        &hook_context,
+    );
 
     Ok(RenderedMarkdown {
         html: final_html,
@@ -550,74 +561,41 @@ fn process_event<'a>(event: Event<'a>, current_md_path: &str, cache: &PageMetaCa
             title,
             id,
         }) => {
-            // Handle image links
             let url_str = dest_url.as_ref();
-
-            // Security check: block path traversal in image paths
-            if security::route_checks_legacy(url_str).is_some() {
-                return Event::Html("<div class=\"notification is-danger\">Error: Invalid image path detected</div>".into());
-            }
-
-            // Check if it's a /img path - show error instead
-            if url_str.starts_with("/img") {
-                return Event::Html("<div class=\"notification is-danger\">Error: /img path is invalid for images</div>".into());
-            }
-
-            // Check if it's an external URL
-            if url_str.starts_with("http://") || url_str.starts_with("https://") {
-                // External image - keep as is
-                return Event::Start(Tag::Image {
+            match super::image_source::resolve(url_str, current_md_path, cache) {
+                Ok(super::image_source::ResolvedImage::External(url)) => {
+                    Event::Start(Tag::Image {
+                        link_type,
+                        dest_url: CowStr::Boxed(url.into()),
+                        title,
+                        id,
+                    })
+                }
+                Ok(super::image_source::ResolvedImage::Local(url)) => Event::Start(Tag::Image {
                     link_type,
-                    dest_url,
+                    dest_url: CowStr::Boxed(url.into()),
                     title,
                     id,
-                });
-            }
-
-            let normalized_path = match security::normalize_relative_path(current_md_path, url_str)
-            {
-                Some(path) => path,
-                None => {
-                    return Event::Html(
-                        "<div class=\"notification is-danger\">Error: Invalid image path</div>"
-                            .into(),
-                    );
-                }
-            };
-
-            let object = match cache.get_by_alias(&normalized_path) {
-                Some(object) => object,
-                None => {
-                    return Event::Html(
-                        "<div class=\"notification is-warning\">Error: Image not found</div>"
-                            .into(),
-                    );
-                }
-            };
-
-            if !object.mime.starts_with("image/") {
-                return Event::Html(
+                }),
+                Err(super::image_source::ImageSourceError::PathTraversal) => Event::Html(
+                    "<div class=\"notification is-danger\">Error: Invalid image path detected</div>"
+                        .into(),
+                ),
+                Err(super::image_source::ImageSourceError::ReservedImgPath) => Event::Html(
+                    "<div class=\"notification is-danger\">Error: /img path is invalid for images</div>"
+                        .into(),
+                ),
+                Err(super::image_source::ImageSourceError::Empty) => Event::Html(
+                    "<div class=\"notification is-danger\">Error: Invalid image path</div>"
+                        .into(),
+                ),
+                Err(super::image_source::ImageSourceError::AliasNotFound) => Event::Html(
+                    "<div class=\"notification is-warning\">Error: Image not found</div>".into(),
+                ),
+                Err(super::image_source::ImageSourceError::NotImage) => Event::Html(
                     "<div class=\"notification is-warning\">Error: Image not found or invalid format</div>"
                         .into(),
-                );
-            }
-
-            if let Some(versioned_url) =
-                version_asset_url_if_needed(url_str, current_md_path, cache)
-            {
-                Event::Start(Tag::Image {
-                    link_type,
-                    dest_url: CowStr::Boxed(versioned_url.into()),
-                    title,
-                    id,
-                })
-            } else {
-                Event::Start(Tag::Image {
-                    link_type,
-                    dest_url,
-                    title,
-                    id,
-                })
+                ),
             }
         }
         Event::Start(Tag::Link {
@@ -758,8 +736,9 @@ mod tests {
     use super::super::render::generate_html_page_with_user;
     use super::*;
     use crate::PageRenderContext;
+    use crate::markdown::render_pipeline_support_hooks::DefaultRenderPipelineSupportHooks;
     use crate::nav::generate_navigation_with_user;
-    use crate::shortcode::{ShortcodeRegistry, link_card, video};
+    use crate::shortcode::{ShortcodeRegistry, ShortcodeType, link_card, video};
     use crate::test_support::TestFixtureRoot;
     use nop_config::{
         AdminConfig, AppConfig, LoggingConfig, LoggingRotationConfig, NavigationConfig,
@@ -788,7 +767,7 @@ mod tests {
         registry.register(
             "video",
             move |shortcode, _ctx| video::handle_video_shortcode(shortcode, video_engine.as_ref()),
-            false,
+            ShortcodeType::default(),
         );
         let link_card_engine = templates.clone();
         registry.register(
@@ -796,7 +775,7 @@ mod tests {
             move |shortcode, _ctx| {
                 link_card::handle_link_card_shortcode(shortcode, link_card_engine.as_ref())
             },
-            false,
+            ShortcodeType::default(),
         );
 
         registry
@@ -880,6 +859,7 @@ mod tests {
         md_path: &str,
         short_paragraph_length: usize,
     ) -> RenderedMarkdown {
+        let hooks = DefaultRenderPipelineSupportHooks;
         generate_html(&RenderRequest {
             markdown,
             shortcode_registry: registry,
@@ -889,6 +869,7 @@ mod tests {
             md_path,
             user: None,
             short_paragraph_length,
+            hooks: &hooks,
         })
         .expect("render markdown")
     }

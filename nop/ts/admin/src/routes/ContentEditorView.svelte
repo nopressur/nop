@@ -14,6 +14,11 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import CompactButton from "../components/CompactButton.svelte";
   import Input from "../components/Input.svelte";
   import InsertContentModal from "../components/InsertContentModal.svelte";
+  import {
+    type InsertEventDetail,
+    type InsertMode,
+    buildModalInsertSnippet,
+  } from "../services/insertSnippet";
   import UnsavedChangesModal from "../components/UnsavedChangesModal.svelte";
   import Select from "../components/Select.svelte";
   import UploadOverlay from "../components/UploadOverlay.svelte";
@@ -835,23 +840,11 @@ The code and documentation in this repository is licensed under the GNU Affero G
     queueUploadFiles(files);
   }
 
-  type InsertMode = "link" | "image" | "video";
-
-  function buildInsertSnippetForItem(item: ContentListItem, mode: InsertMode): string {
-    const displayText = item.title?.trim() || item.alias || item.id;
-    const aliasPath = item.alias ? `/${item.alias}` : `/id/${item.id}`;
-    if (mode === "image") {
-      return `![${displayText}](${aliasPath})`;
-    }
-    if (mode === "video") {
-      return `((video src="${aliasPath}"))`;
-    }
-    return `[${displayText}](${aliasPath})`;
-  }
-
-  function handleInsertContent(event: CustomEvent<{ item: ContentListItem; mode: InsertMode }>): void {
-    const { item, mode } = event.detail;
-    const snippet = buildInsertSnippetForItem(item, mode);
+  function handleInsertContent(event: CustomEvent<InsertEventDetail>): void {
+    const detail = event.detail;
+    const snippet = detail.mode === "hero"
+      ? buildModalInsertSnippet(detail.item, detail.mode, detail.hero)
+      : buildModalInsertSnippet(detail.item, detail.mode);
     try {
       if (editorRef) {
         editorRef.insert(snippet);

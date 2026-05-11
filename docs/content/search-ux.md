@@ -118,6 +118,13 @@ Overlay requirements:
 Result behavior:
 
 - Result list uses the API payload (`id`, `alias`, `title`).
+- Results preserve backend search priority order:
+  - title matches rank ahead of alias matches;
+  - title and alias matches rank ahead of body-only matches;
+  - exact token matches rank ahead of prefix fallback matches.
+- Prefix fallback treats sufficiently long query tokens as token prefixes, so a query such as
+  `snippet` can match an indexed token such as `snippets` without using a language-specific
+  stemmer. Prefix fallback is lower priority than exact token matching.
 - Navigation target resolution:
   - if `alias` is present: navigate to `/<alias>`;
   - otherwise: navigate to `/id/<id>`.
@@ -246,6 +253,8 @@ Theme variable mapping (light/dark):
   - tag-only query terms do not produce public matches;
   - response payload includes `id`, `alias`, `title` and excludes URL field.
   - invalid query lengths (`<3`, `>256`, and missing/blank after trim) return `400`.
+  - title and alias matches rank ahead of body-only matches.
+  - prefix fallback matches longer indexed tokens, while exact token matches remain higher priority.
 - Frontend TypeScript tests:
   - typing trigger opens/focuses search overlay;
   - search button opens overlay;

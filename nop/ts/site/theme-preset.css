@@ -34,19 +34,20 @@ body {
     transition: color 0.3s ease;
 }
 
-figure[data-site-code-block="true"] {
+.content figure[data-site-code-block="true"] {
     position: relative;
     margin: 1.25rem 0;
+    text-align: left;
 }
 
-figure[data-site-code-block="true"] > figcaption {
+.content figure[data-site-code-block="true"] > figcaption {
     position: absolute;
     top: 0.6rem;
     right: 0.6rem;
     z-index: 2;
 }
 
-figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="true"] {
+.content figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="true"] {
     border: 1px solid var(--color-border-light);
     border-radius: 8px;
     background-color: var(--color-content-background-light);
@@ -58,17 +59,18 @@ figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="t
     cursor: pointer;
 }
 
-figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="true"]:hover {
+.content figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="true"]:hover {
     color: var(--color-text-primary-light);
 }
 
-figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="true"]:focus-visible {
+.content figure[data-site-code-block="true"] > figcaption > button[data-site-code-copy="true"]:focus-visible {
     outline: 2px solid var(--color-content-link-light);
     outline-offset: 1px;
 }
 
-figure[data-site-code-block="true"] pre {
+.content figure[data-site-code-block="true"] pre {
     padding-top: 2.2rem;
+    text-align: left;
 }
 
 .navbar {
@@ -751,5 +753,108 @@ figure[data-site-code-block="true"] pre {
 
     .breadcrumb li a {
         color: var(--color-breadcrumb-link-dark);
+    }
+}
+
+/* ============================================================
+ * Shortcode: hero-img
+ *
+ * Full-viewport-width hero block. The image fills the wrapper
+ * via object-fit: cover; the caption block is centred over the
+ * image. Optional flag classes toggle filters and text haloes.
+ * All theme variables fall back to inline defaults so the
+ * shortcode renders without any theme configuration.
+ * ============================================================ */
+
+.sc-hero-img {
+    position: relative;
+    width: 100vw;
+    height: var(--sc-hero-img-size-height, 45vh);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem 1.5rem;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.sc-hero-img > picture {
+    display: contents;
+}
+
+.sc-hero-img > picture > img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+}
+
+.sc-hero-img__caption {
+    position: relative;
+    z-index: 1;
+    max-width: 1152px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+.sc-hero-img__title {
+    font-family: var(--sc-hero-img-font-title-family, var(--font-body-family));
+    font-size: var(--sc-hero-img-font-title-size, 3rem);
+    color: var(--sc-hero-img-color-text-light, var(--color-text-primary-light));
+    margin: 0;
+}
+
+.sc-hero-img__subtitle {
+    font-family: var(--sc-hero-img-font-subtitle-family, var(--font-body-family));
+    font-size: var(--sc-hero-img-font-subtitle-size, 1.25rem);
+    color: var(--sc-hero-img-color-text-light, var(--color-text-primary-light));
+    margin: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+    .sc-hero-img__title {
+        color: var(--sc-hero-img-color-text-dark, var(--color-text-primary-dark));
+    }
+
+    .sc-hero-img__subtitle {
+        color: var(--sc-hero-img-color-text-dark, var(--color-text-primary-dark));
+    }
+}
+
+/* lightify: image filter applied in light mode only */
+.sc-hero-img--lightify > picture > img {
+    filter: var(--sc-hero-img-filter-lightify, brightness(1.15));
+}
+
+@media (prefers-color-scheme: dark) {
+    /* In dark mode, lightify is not applied; darkify takes over if set. */
+    .sc-hero-img--lightify > picture > img {
+        filter: none;
+    }
+
+    .sc-hero-img--darkify > picture > img {
+        filter: var(--sc-hero-img-filter-darkify, brightness(0.7));
+    }
+}
+
+/* light-shadow: subtle light halo around title/subtitle in light mode (dark text gains contrast) */
+.sc-hero-img--light-shadow .sc-hero-img__title,
+.sc-hero-img--light-shadow .sc-hero-img__subtitle {
+    text-shadow: var(--sc-hero-img-shadow-light, 0 0 12px rgba(255, 255, 255, 0.6));
+}
+
+@media (prefers-color-scheme: dark) {
+    /* In dark mode, light-shadow is not applied; dark-shadow takes over if set. */
+    .sc-hero-img--light-shadow .sc-hero-img__title,
+    .sc-hero-img--light-shadow .sc-hero-img__subtitle {
+        text-shadow: none;
+    }
+
+    /* dark-shadow: subtle dark halo around title/subtitle in dark mode (light text gains contrast) */
+    .sc-hero-img--dark-shadow .sc-hero-img__title,
+    .sc-hero-img--dark-shadow .sc-hero-img__subtitle {
+        text-shadow: var(--sc-hero-img-shadow-dark, 0 0 12px rgba(0, 0, 0, 0.6));
     }
 }

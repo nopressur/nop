@@ -1,6 +1,6 @@
 # Shortcode System
 
-> **Note:** The canonical documentation now lives in `docs/public/shortcodes.md`. Keep this README for quick component-level review.
+> **Note:** The canonical documentation lives in `docs/modules/shortcodes.md`, including the authoritative description of the `RenderPipelineSupportHooks` interface and the paragraph-aware substitution semantics. Keep this README for quick component-level review.
 
 This module implements a lightweight shortcode system for embedding dynamic content in markdown files. Shortcodes provide a way to include rich media and interactive elements while maintaining clean, readable markdown.
 
@@ -42,12 +42,14 @@ Shortcodes use double parentheses syntax: `((shortcode-name attribute="value"))`
 
 ## Built-in Shortcodes
 
-### Dynamic flag
+### Shortcode type
 
-- The registry stores a `dynamic` flag per shortcode so future caching layers can detect handlers that depend on external, runtime-changing data.
-- Only mark a handler as dynamic when it relies on something outside Markdown and configuration that was loaded during startup (e.g., databases, external APIs, clocks).
-- If the output is fully determined by the shortcode markup and the startup configuration, the handler remains static.
-- The flag does not alter the current render or caching behaviour; it is metadata for upcoming features.
+- The registry stores a `ShortcodeType` value per shortcode that captures the special treatment the handler requires. The struct exposes two booleans today:
+  - `dynamic`: set when the handler depends on something outside Markdown and the startup configuration (e.g. content metadata read at render time, databases, clocks). Handlers whose output is fully determined by the shortcode markup and startup configuration leave this `false`. The flag has two effects today:
+    - Within-page render caching is bypassed: when the same dynamic shortcode appears multiple times on a page, the handler runs once per occurrence rather than reusing the first render.
+    - The page's HTML response is served with `Cache-Control: no-store` and no ETag. The flag flows through `RenderedMarkdown::contains_dynamic_shortcodes` into the HTML cache envelope, which forces the no-store directive in `finalize_html_response` (`crates/nop-public/src/cache.rs`).
+  - `container_escape`: declares that the shortcode's output is meant to escape the page's content container. When the placeholder is the sole content of its paragraph, substitution wraps the rendered HTML with the render-pipeline support hooks; inline occurrences are substituted literally because they cannot break out from surrounding text.
+- `ShortcodeType::default()` returns both fields set to `false`.
 
 ### Video Shortcode
 
@@ -85,7 +87,7 @@ Creates styled link cards with automatic color generation and responsive design.
 ((link-card title="Internal Link" link="/page" noblank))
 ```
 
-**Current classification:** `video`, `link-card`, and `start-unibox` are registered as static handlers.
+**Current classification:** `video`, `link-card`, and `start-unibox` are registered with the default `ShortcodeType` (neither `dynamic` nor `container_escape`).
 
 ## Processing Flow
 
@@ -402,7 +404,7 @@ pub fn create_default_registry(template_engine: Arc<dyn TemplateEngine>) -> Shor
     registry.register(
         "my-shortcode",
         move |shortcode| my_shortcode::handle_my_shortcode(shortcode, template_engine.as_ref()),
-        false,
+        ShortcodeType::default(),
     );
     // ... other registrations
     registry

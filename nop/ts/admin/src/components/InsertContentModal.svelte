@@ -14,13 +14,17 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import { findSearch } from "../services/search";
   import type { ContentListItem } from "../services/content";
   import {
+    type HeroOptions,
+    type InsertEventDetail,
+    type InsertMode,
+    defaultHeroOptions,
+  } from "../services/insertSnippet";
+  import {
     clearBrowserTimeout,
     getDocument,
     setBrowserTimeout,
   } from "../services/browser";
   import { pushNotification } from "../stores/notifications";
-
-  type InsertMode = "link" | "image" | "video";
 
   export let open = false;
   export let tags: string[] = [];
@@ -28,7 +32,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
   const dispatch = createEventDispatcher<{
     close: void;
-    insert: { item: ContentListItem; mode: InsertMode };
+    insert: InsertEventDetail;
   }>();
 
   let query = "";
@@ -39,6 +43,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let loading = false;
   let selectedIndex = -1;
   let mode: InsertMode = "link";
+  let lastMode: InsertMode = "link";
+  let hero: HeroOptions = defaultHeroOptions();
   let searchTimer: number | null = null;
   let wasOpen = false;
   let listRef: HTMLDivElement | null = null;
@@ -50,6 +56,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   const pageSize = 25;
   const MIN_QUERY_CHARS = 3;
   const MAX_QUERY_CHARS = 256;
+  const HERO_TEXT_MAXLENGTH = 200;
 
   $: if (open && !wasOpen) {
     wasOpen = true;
@@ -60,6 +67,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     selectedIndex = -1;
     lastQuery = query;
     lastTag = tag;
+    hero = defaultHeroOptions();
     void loadResults();
     void focusSearch();
   }
@@ -85,9 +93,19 @@ The code and documentation in this repository is licensed under the GNU Affero G
   $: if (selectedItem && selectedItem.id !== lastSelectedId) {
     lastSelectedId = selectedItem.id;
     mode = availableModes[0];
+    hero = defaultHeroOptions();
   } else if (!selectedItem && lastSelectedId) {
     lastSelectedId = "";
     mode = "link";
+    hero = defaultHeroOptions();
+  }
+
+  // Reset hero options when the user switches away from `hero` mode.
+  $: if (mode !== lastMode) {
+    if (lastMode === "hero" && mode !== "hero") {
+      hero = defaultHeroOptions();
+    }
+    lastMode = mode;
   }
 
   $: if (open && query !== lastQuery) {
@@ -117,7 +135,11 @@ The code and documentation in this repository is licensed under the GNU Affero G
       return;
     }
     open = false;
-    dispatch("insert", { item: selectedItem, mode });
+    if (mode === "hero") {
+      dispatch("insert", { item: selectedItem, mode, hero });
+    } else {
+      dispatch("insert", { item: selectedItem, mode });
+    }
     dispatch("close");
   }
 
@@ -217,12 +239,19 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
   function modesForItem(item: ContentListItem): InsertMode[] {
     if (item.mime.startsWith("image/")) {
-      return ["image", "link"];
+      return ["image", "hero", "link"];
     }
     if (item.mime.startsWith("video/")) {
       return ["video", "link"];
     }
     return ["link"];
+  }
+
+  function modeLabel(option: InsertMode): string {
+    if (option === "image") return "Image";
+    if (option === "video") return "Video";
+    if (option === "hero") return "Hero";
+    return "Link";
   }
 
   function handleModeKeydown(event: KeyboardEvent): void {
@@ -389,6 +418,52 @@ The code and documentation in this repository is licensed under the GNU Affero G
       </div>
     </div>
 
+    {#if mode === "hero"}
+      <div class="mt-4 rounded-lg border border-border bg-surface-2 p-3" data-testid="hero-options">
+        <div class="text-[10px] uppercase tracking-[0.3em] text-muted">Hero options</div>
+        <div class="mt-3 grid gap-3 md:grid-cols-2">
+          <label class="flex flex-col text-xs text-muted">
+            <span class="text-[11px] uppercase tracking-[0.3em]">Title</span>
+            <input
+              type="text"
+              class="mt-1 rounded-md border border-border bg-surface px-2 py-1 text-sm text-text"
+              bind:value={hero.title}
+              maxlength={HERO_TEXT_MAXLENGTH}
+              data-testid="hero-title"
+            />
+          </label>
+          <label class="flex flex-col text-xs text-muted">
+            <span class="text-[11px] uppercase tracking-[0.3em]">Subtitle</span>
+            <input
+              type="text"
+              class="mt-1 rounded-md border border-border bg-surface px-2 py-1 text-sm text-text"
+              bind:value={hero.subtitle}
+              maxlength={HERO_TEXT_MAXLENGTH}
+              data-testid="hero-subtitle"
+            />
+          </label>
+        </div>
+        <div class="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-text">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={hero.lightify} data-testid="hero-lightify" />
+            <span>Lightify</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={hero.darkify} data-testid="hero-darkify" />
+            <span>Darkify</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={hero.lightShadow} data-testid="hero-light-shadow" />
+            <span>Light shadow</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={hero.darkShadow} data-testid="hero-dark-shadow" />
+            <span>Dark shadow</span>
+          </label>
+        </div>
+      </div>
+    {/if}
+
     <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
       <div>
         <div class="text-[10px] uppercase tracking-[0.3em] text-muted">Insert as</div>
@@ -416,7 +491,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
               disabled={availableModes.length < 2}
               on:click={() => (mode = option)}
             >
-              {option === "image" ? "Image" : option === "video" ? "Video" : "Link"}
+              {modeLabel(option)}
             </button>
           {/each}
         </div>

@@ -4,9 +4,7 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use crate::markdown::listing::{DirectoryItem, generate_tag_listing_html};
-use crate::shortcode::{Shortcode, ShortcodeContext};
-use nop_content_store::flat_storage::content_id_hex;
-use nop_rt_page_cache::TagMatch;
+use crate::shortcode::{Shortcode, ShortcodeContext, TagMatch};
 
 pub fn handle_tag_list_shortcode(
     shortcode: &Shortcode,
@@ -39,15 +37,7 @@ pub fn handle_tag_list_shortcode(
         TagMatch::Any
     };
 
-    let mut objects = ctx.cache.list_by_tags(&tag_ids, match_rule);
-    objects.retain(|object| object.is_markdown);
-    objects.retain(|object| {
-        let route_alias = object_route_alias(object);
-        let user_roles = ctx.user.map(|user| user.roles.as_slice());
-        ctx.cache
-            .user_has_access(&route_alias, user_roles)
-            .unwrap_or(false)
-    });
+    let mut pages = ctx.list_accessible_pages_by_tags(&tag_ids, match_rule);
 
     if let Some(limit) = shortcode.attributes.get("limit") {
         let limit_value = limit
@@ -57,20 +47,19 @@ pub fn handle_tag_list_shortcode(
         if limit_value == 0 {
             return Err("tag-list limit must be a positive integer".to_string());
         }
-        if objects.len() > limit_value {
-            objects.truncate(limit_value);
+        if pages.len() > limit_value {
+            pages.truncate(limit_value);
         }
     }
 
-    let items: Vec<DirectoryItem> = objects
+    let items: Vec<DirectoryItem> = pages
         .into_iter()
-        .map(|object| {
-            let route_alias = object_route_alias(&object);
-            DirectoryItem {
-                title: object.title.unwrap_or_else(|| humanize_alias(&route_alias)),
-                path: format!("/{}", route_alias),
-                is_directory: false,
-            }
+        .map(|page| DirectoryItem {
+            title: page
+                .title
+                .unwrap_or_else(|| humanize_alias(&page.route_alias)),
+            path: format!("/{}", page.route_alias),
+            is_directory: false,
         })
         .collect();
 
@@ -116,14 +105,6 @@ fn humanize_alias(alias: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn object_route_alias(object: &nop_rt_page_cache::CachedObject) -> String {
-    if object.alias.trim().is_empty() {
-        format!("id/{}", content_id_hex(object.key.id))
-    } else {
-        object.alias.clone()
-    }
 }
 
 #[cfg(test)]
@@ -261,6 +242,7 @@ blog:
         let ctx = ShortcodeContext {
             cache: &harness.cache,
             user: Some(&harness.user),
+            md_path: "test.md",
         };
 
         let html = handle_tag_list_shortcode(&shortcode, &ctx).expect("tag list html");
@@ -276,6 +258,7 @@ blog:
         let ctx = ShortcodeContext {
             cache: &harness.cache,
             user: Some(&harness.user),
+            md_path: "test.md",
         };
 
         let html = handle_tag_list_shortcode(&shortcode, &ctx).expect("tag list html");
@@ -290,10 +273,73 @@ blog:
         let ctx = ShortcodeContext {
             cache: &harness.cache,
             user: Some(&harness.user),
+            md_path: "test.md",
         };
 
         let html = handle_tag_list_shortcode(&shortcode, &ctx).expect("tag list html");
         let matches = html.matches("href=\"/docs/").count();
         assert_eq!(matches, 1);
+    }
+
+    #[test]
+    fn resolve_image_source_passes_external_urls_through_unchanged() {
+        let harness = build_cache();
+        let ctx = ShortcodeContext {
+            cache: &harness.cache,
+            user: Some(&harness.user),
+            md_path: "any/page",
+        };
+
+        let result = ctx
+            .resolve_image_source("https://example.com/banner.png?theme=dark")
+            .expect("external resolves");
+
+        match result {
+            crate::shortcode::ResolvedImage::External(url) => {
+                assert_eq!(url, "https://example.com/banner.png?theme=dark");
+            }
+            other => panic!("expected External, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resolve_image_source_rejects_non_image_alias() {
+        let harness = build_cache();
+        let ctx = ShortcodeContext {
+            cache: &harness.cache,
+            user: Some(&harness.user),
+            md_path: "docs/getting-started",
+        };
+
+        // The fixture's "docs/advanced" is a markdown page, not an image,
+        // so the resolver must reject it via NotImage.
+        let err = ctx
+            .resolve_image_source("/docs/advanced")
+            .expect_err("non-image alias must error");
+
+        assert_eq!(err, crate::shortcode::ImageSourceError::NotImage);
+    }
+
+    #[test]
+    fn list_accessible_pages_by_tags_returns_titled_summaries_filtered_by_access() {
+        let harness = build_cache();
+        let ctx = ShortcodeContext {
+            cache: &harness.cache,
+            user: Some(&harness.user),
+            md_path: "test.md",
+        };
+
+        let pages = ctx.list_accessible_pages_by_tags(&["docs".to_string()], TagMatch::Any);
+
+        let aliases: Vec<String> = pages.iter().map(|p| p.route_alias.clone()).collect();
+        assert!(aliases.contains(&"docs/getting-started".to_string()));
+        assert!(aliases.contains(&"docs/advanced".to_string()));
+        assert!(!aliases.contains(&"blog/post".to_string()));
+
+        let getting_started = pages
+            .iter()
+            .find(|p| p.route_alias == "docs/getting-started")
+            .expect("getting-started page");
+        assert_eq!(getting_started.title.as_deref(), Some("Getting Started"));
     }
 }
