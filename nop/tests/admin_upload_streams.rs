@@ -5,15 +5,20 @@
 
 mod common;
 
-use common::TestHarness;
+use actix_web::{body::to_bytes, http::StatusCode, test};
+use common::{TestHarness, build_test_app};
+use nop_content_store::flat_storage::{ContentVersion, blob_path, parse_content_id_hex};
 use nop_management_contract::content::{
     BinaryPrevalidateRequest, BinaryUploadCommitRequest, BinaryUploadInitRequest,
-    CONTENT_ACTION_BINARY_PREVALIDATE_OK, CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK,
+    CONTENT_ACTION_ALIAS_STATUS_OK, CONTENT_ACTION_BINARY_PREVALIDATE_OK,
+    CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK, CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
     CONTENT_ACTION_BINARY_UPLOAD_INIT_OK, CONTENT_ACTION_READ_OK,
     CONTENT_ACTION_UPDATE_STREAM_COMMIT_OK, CONTENT_ACTION_UPDATE_STREAM_INIT_OK,
-    CONTENT_ACTION_UPLOAD_STREAM_COMMIT_OK, CONTENT_ACTION_UPLOAD_STREAM_INIT_OK, ContentCommand,
+    CONTENT_ACTION_UPLOAD_OK, CONTENT_ACTION_UPLOAD_STREAM_COMMIT_OK,
+    CONTENT_ACTION_UPLOAD_STREAM_INIT_OK, ContentAliasStatusRequest, ContentCommand,
     ContentReadRequest, ContentUpdateStreamCommitRequest, ContentUpdateStreamInitRequest,
-    ContentUploadStreamCommitRequest, ContentUploadStreamInitRequest,
+    ContentUploadRequest, ContentUploadResponse, ContentUploadStreamCommitRequest,
+    ContentUploadStreamInitRequest, ContentWidthMode,
 };
 use nop_management_contract::{ManagementCommand, ManagementRequest, ResponsePayload};
 use nop_rt_page_cache::is_temp_upload_name;
@@ -47,6 +52,72 @@ fn collect_temp_uploads(content_dir: &Path) -> Vec<PathBuf> {
         }
     }
     results
+}
+
+async fn upload_binary_stream(
+    harness: &TestHarness,
+    connection_id: u32,
+    alias: &str,
+    filename: &str,
+    payload: &[u8],
+) -> ContentUploadResponse {
+    let bus = harness.management_tools.management_bus.clone();
+    let upload_registry = harness.management_tools.upload_registry.clone();
+    let init_response = bus
+        .send_request(ManagementRequest {
+            workflow_id: 1,
+            connection_id,
+            command: ManagementCommand::Content(ContentCommand::BinaryUploadInit(
+                BinaryUploadInitRequest {
+                    alias: Some(alias.to_string()),
+                    title: Some("Streamed".to_string()),
+                    tags: vec!["docs".to_string()],
+                    filename: filename.to_string(),
+                    mime: "application/octet-stream".to_string(),
+                    size_bytes: payload.len() as u64,
+                },
+            )),
+            actor_email: None,
+        })
+        .await
+        .expect("init response");
+
+    assert_eq!(
+        init_response.action_id,
+        CONTENT_ACTION_BINARY_UPLOAD_INIT_OK
+    );
+    let init_payload = match init_response.payload {
+        ResponsePayload::ContentUploadStreamInit(payload) => payload,
+        other => panic!("unexpected payload: {:?}", other),
+    };
+
+    upload_registry
+        .append_chunk(init_payload.stream_id, payload.to_vec(), true, false)
+        .await
+        .expect("append chunk");
+
+    let commit_response = bus
+        .send_request(ManagementRequest {
+            workflow_id: 2,
+            connection_id,
+            command: ManagementCommand::Content(ContentCommand::BinaryUploadCommit(
+                BinaryUploadCommitRequest {
+                    upload_id: init_payload.upload_id,
+                },
+            )),
+            actor_email: None,
+        })
+        .await
+        .expect("commit response");
+
+    assert_eq!(
+        commit_response.action_id,
+        CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK
+    );
+    match commit_response.payload {
+        ResponsePayload::ContentUpload(payload) => payload,
+        other => panic!("unexpected payload: {:?}", other),
+    }
 }
 
 #[actix_web::test]
@@ -180,6 +251,246 @@ async fn binary_stream_upload_commits() {
 }
 
 #[actix_web::test]
+async fn binary_stream_upload_same_alias_creates_new_version() {
+    let harness = TestHarness::new().await;
+    let bus = harness.management_tools.management_bus.clone();
+    let alias = "files/versioned.bin";
+
+    let first = upload_binary_stream(&harness, 31, alias, "versioned.bin", b"version-one").await;
+    let content_id = parse_content_id_hex(&first.id).expect("content id");
+    let first_object = harness
+        .page_cache
+        .get_by_alias(alias)
+        .expect("first upload in cache");
+    assert_eq!(first_object.key.id, content_id);
+    assert_eq!(first_object.key.version, ContentVersion(1));
+
+    let status_response = bus
+        .send_request(ManagementRequest {
+            workflow_id: 3,
+            connection_id: 31,
+            command: ManagementCommand::Content(ContentCommand::AliasStatus(
+                ContentAliasStatusRequest {
+                    alias: alias.to_string(),
+                },
+            )),
+            actor_email: None,
+        })
+        .await
+        .expect("alias status response");
+    assert_eq!(status_response.action_id, CONTENT_ACTION_ALIAS_STATUS_OK);
+    let status = match status_response.payload {
+        ResponsePayload::ContentAliasStatus(payload) => payload,
+        other => panic!("unexpected payload: {:?}", other),
+    };
+    assert!(status.exists);
+    assert_eq!(status.id.as_deref(), Some(first.id.as_str()));
+    assert_eq!(status.version, Some(1));
+    assert_eq!(status.is_markdown, Some(false));
+
+    let second = upload_binary_stream(&harness, 32, alias, "versioned.bin", b"version-two").await;
+    assert_eq!(second.id, first.id);
+
+    let second_object = harness
+        .page_cache
+        .get_by_alias(alias)
+        .expect("second upload in cache");
+    assert_eq!(second_object.key.id, content_id);
+    assert_eq!(second_object.key.version, ContentVersion(2));
+
+    let first_blob = blob_path(
+        &harness.runtime_paths.content_dir,
+        content_id,
+        ContentVersion(1),
+    );
+    let second_blob = blob_path(
+        &harness.runtime_paths.content_dir,
+        content_id,
+        ContentVersion(2),
+    );
+    assert_eq!(
+        fs::read(first_blob).expect("read first blob"),
+        b"version-one"
+    );
+    assert_eq!(
+        fs::read(second_blob).expect("read second blob"),
+        b"version-two"
+    );
+
+    let app = test::init_service(build_test_app(harness.app_bundle())).await;
+    let alias_response = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/files/versioned.bin")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(alias_response.status(), StatusCode::OK);
+    let alias_body = to_bytes(alias_response.into_body())
+        .await
+        .expect("alias body");
+    assert_eq!(alias_body.as_ref(), b"version-two");
+
+    let id_response = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/id/{}", first.id))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(id_response.status(), StatusCode::OK);
+    let id_body = to_bytes(id_response.into_body()).await.expect("id body");
+    assert_eq!(id_body.as_ref(), b"version-two");
+}
+
+#[actix_web::test]
+async fn binary_stream_upload_same_alias_pending_uploads_reserve_distinct_versions() {
+    let harness = TestHarness::new().await;
+    let bus = harness.management_tools.management_bus.clone();
+    let upload_registry = harness.management_tools.upload_registry.clone();
+    let alias = "files/race.bin";
+
+    let first = upload_binary_stream(&harness, 51, alias, "race.bin", b"version-one").await;
+    let content_id = parse_content_id_hex(&first.id).expect("content id");
+
+    let init_pending = |connection_id: u32, workflow_id: u32| {
+        let bus = bus.clone();
+        let alias = alias.to_string();
+        async move {
+            let response = bus
+                .send_request(ManagementRequest {
+                    workflow_id,
+                    connection_id,
+                    command: ManagementCommand::Content(ContentCommand::BinaryUploadInit(
+                        BinaryUploadInitRequest {
+                            alias: Some(alias),
+                            title: Some("Race".to_string()),
+                            tags: vec![],
+                            filename: "race.bin".to_string(),
+                            mime: "application/octet-stream".to_string(),
+                            size_bytes: 11,
+                        },
+                    )),
+                    actor_email: None,
+                })
+                .await
+                .expect("init response");
+            assert_eq!(response.action_id, CONTENT_ACTION_BINARY_UPLOAD_INIT_OK);
+            match response.payload {
+                ResponsePayload::ContentUploadStreamInit(payload) => payload,
+                other => panic!("unexpected payload: {:?}", other),
+            }
+        }
+    };
+
+    let second_init = init_pending(52, 2).await;
+    let third_init = init_pending(53, 3).await;
+
+    upload_registry
+        .append_chunk(second_init.stream_id, b"version-two".to_vec(), true, false)
+        .await
+        .expect("append second");
+    upload_registry
+        .append_chunk(third_init.stream_id, b"version-3!!".to_vec(), true, false)
+        .await
+        .expect("append third");
+
+    for (connection_id, upload_id) in [(52, second_init.upload_id), (53, third_init.upload_id)] {
+        let response = bus
+            .send_request(ManagementRequest {
+                workflow_id: 4,
+                connection_id,
+                command: ManagementCommand::Content(ContentCommand::BinaryUploadCommit(
+                    BinaryUploadCommitRequest { upload_id },
+                )),
+                actor_email: None,
+            })
+            .await
+            .expect("commit response");
+        assert_eq!(response.action_id, CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK);
+    }
+
+    let second_blob = blob_path(
+        &harness.runtime_paths.content_dir,
+        content_id,
+        ContentVersion(2),
+    );
+    let third_blob = blob_path(
+        &harness.runtime_paths.content_dir,
+        content_id,
+        ContentVersion(3),
+    );
+    assert_eq!(
+        fs::read(second_blob).expect("read second blob"),
+        b"version-two"
+    );
+    assert_eq!(
+        fs::read(third_blob).expect("read third blob"),
+        b"version-3!!"
+    );
+    let latest = harness
+        .page_cache
+        .get_by_alias(alias)
+        .expect("latest object in cache");
+    assert_eq!(latest.key.version, ContentVersion(3));
+}
+
+#[actix_web::test]
+async fn binary_stream_upload_rejects_existing_markdown_alias() {
+    let harness = TestHarness::new().await;
+    let bus = harness.management_tools.management_bus.clone();
+    let alias = "docs/markdown-alias";
+
+    let create_response = bus
+        .send_request(ManagementRequest {
+            workflow_id: 1,
+            connection_id: 41,
+            command: ManagementCommand::Content(ContentCommand::Upload(ContentUploadRequest {
+                alias: Some(alias.to_string()),
+                title: Some("Markdown Alias".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: vec!["docs".to_string()],
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                original_filename: None,
+                theme: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: ContentWidthMode::Auto,
+                content: b"# Markdown Alias\n".to_vec(),
+            })),
+            actor_email: None,
+        })
+        .await
+        .expect("markdown create response");
+    assert_eq!(create_response.action_id, CONTENT_ACTION_UPLOAD_OK);
+
+    let init_response = bus
+        .send_request(ManagementRequest {
+            workflow_id: 2,
+            connection_id: 41,
+            command: ManagementCommand::Content(ContentCommand::BinaryUploadInit(
+                BinaryUploadInitRequest {
+                    alias: Some(alias.to_string()),
+                    title: Some("Binary".to_string()),
+                    tags: vec![],
+                    filename: "binary.bin".to_string(),
+                    mime: "application/octet-stream".to_string(),
+                    size_bytes: 6,
+                },
+            )),
+            actor_email: None,
+        })
+        .await
+        .expect("binary init response");
+    assert_eq!(
+        init_response.action_id,
+        CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR
+    );
+}
+
+#[actix_web::test]
 async fn upload_cleanup_removes_temp_files_on_disconnect() {
     let harness = TestHarness::new().await;
     let bus = harness.management_tools.management_bus.clone();
@@ -258,6 +569,9 @@ async fn markdown_stream_create_and_update() {
         nav_parent_id: None,
         nav_order: None,
         theme: None,
+        disable_navbar: false,
+        disable_floating_nav: false,
+        content_width: Default::default(),
         size_bytes: content_bytes.len() as u64,
     };
 
@@ -341,6 +655,9 @@ async fn markdown_stream_create_and_update() {
         nav_parent_id: None,
         nav_order: None,
         theme: None,
+        disable_navbar: None,
+        disable_floating_nav: None,
+        content_width: Default::default(),
         size_bytes: updated_bytes.len() as u64,
     };
 

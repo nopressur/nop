@@ -20,22 +20,7 @@ include!(concat!(env!("OUT_DIR"), "/builtin_files.rs"));
 include!(concat!(env!("OUT_DIR"), "/login_spa_version.rs"));
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.route("/favicon.ico", web::get().to(serve_favicon));
     cfg.route("/builtin/{filename:.*}", web::get().to(serve_builtin_file));
-}
-
-async fn serve_favicon(_req: HttpRequest) -> Result<HttpResponse> {
-    #[cfg(debug_assertions)]
-    {
-        // Development mode: serve from filesystem
-        serve_from_filesystem("favicon.ico", &_req).await
-    }
-
-    #[cfg(not(debug_assertions))]
-    {
-        // Release mode: serve from embedded compressed data
-        serve_from_embedded("favicon.ico").await
-    }
 }
 
 async fn serve_builtin_file(req: HttpRequest) -> Result<HttpResponse> {
@@ -47,16 +32,21 @@ async fn serve_builtin_file(req: HttpRequest) -> Result<HttpResponse> {
         }
     };
 
+    serve_builtin_asset(&filename, &req).await
+}
+
+pub async fn serve_builtin_asset(filename: &str, req: &HttpRequest) -> Result<HttpResponse> {
     #[cfg(debug_assertions)]
     {
         // Development mode: serve from filesystem
-        serve_from_filesystem(&filename, &req).await
+        serve_from_filesystem(filename, req).await
     }
 
     #[cfg(not(debug_assertions))]
     {
         // Release mode: serve from embedded compressed data
-        serve_from_embedded(&filename).await
+        let _ = req;
+        serve_from_embedded(filename).await
     }
 }
 
@@ -117,5 +107,22 @@ async fn serve_from_embedded(filename: &str) -> Result<HttpResponse> {
         }
     } else {
         Ok(HttpResponse::NotFound().finish())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::serve_builtin_asset;
+    use actix_web::http::StatusCode;
+    use actix_web::test::TestRequest;
+
+    #[actix_web::test]
+    async fn missing_builtin_asset_returns_404() {
+        let req = TestRequest::default().to_http_request();
+        let response = serve_builtin_asset("missing-fallback-file.ico", &req)
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

@@ -9,7 +9,7 @@ use super::{markdown, shortcode::ShortcodeRegistry};
 use crate::RenderTools;
 use actix_web::{HttpRequest, HttpResponse, Result, body::SizedStream, http, web};
 use log::debug;
-use nop_config::ValidatedConfig;
+use nop_config::{RuntimeSettings, ValidatedConfig};
 use nop_content_store::flat_storage::{
     blob_path, canonicalize_alias, content_id_hex, parse_content_id_hex,
 };
@@ -31,6 +31,7 @@ const CACHE_CONTROL_IMMUTABLE: &str = "public, max-age=31536000, immutable";
 pub async fn index(
     req: HttpRequest,
     config: web::Data<ValidatedConfig>,
+    runtime_settings: web::Data<RuntimeSettings>,
     cache: web::Data<PageMetaCache>,
     shortcode_registry: web::Data<ShortcodeRegistry>,
     release_tracker: web::Data<ReleaseTracker>,
@@ -65,6 +66,7 @@ pub async fn index(
 
     let ctx = PublicRequestContext::new(
         config.as_ref(),
+        runtime_settings.as_ref(),
         cache.as_ref(),
         shortcode_registry.as_ref(),
         release_tracker.as_ref(),
@@ -82,6 +84,7 @@ pub async fn index(
 pub async fn handle_route(
     req: HttpRequest,
     config: web::Data<ValidatedConfig>,
+    runtime_settings: web::Data<RuntimeSettings>,
     cache: web::Data<PageMetaCache>,
     shortcode_registry: web::Data<ShortcodeRegistry>,
     release_tracker: web::Data<ReleaseTracker>,
@@ -133,6 +136,7 @@ pub async fn handle_route(
 
     let ctx = PublicRequestContext::new(
         config.as_ref(),
+        runtime_settings.as_ref(),
         cache.as_ref(),
         shortcode_registry.as_ref(),
         release_tracker.as_ref(),
@@ -142,6 +146,12 @@ pub async fn handle_route(
         &req,
         req.user_info(),
     );
+
+    if let Some(response) =
+        crate::special_files::maybe_serve_special_fallback_file(&canonical_alias, &ctx).await
+    {
+        return response;
+    }
 
     let user = ctx.user();
 
@@ -207,7 +217,7 @@ fn canonicalize_route_path(raw_path: &str) -> Option<String> {
     canonicalize_alias(trimmed).ok()
 }
 
-async fn serve_object_blob(
+pub(crate) async fn serve_object_blob(
     object: &nop_rt_page_cache::CachedObject,
     ctx: &PublicRequestContext<'_>,
 ) -> Result<HttpResponse> {
@@ -226,7 +236,7 @@ async fn serve_object_blob(
         Some(&ctx.config.app.name),
     ) {
         Ok(path) => path,
-        Err(error_response) => return error_response,
+        Err(error_response) => return *error_response,
     };
 
     if ctx.config.streaming.enabled {

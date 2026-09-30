@@ -7,7 +7,7 @@ use actix_web::HttpRequest;
 
 use crate::RenderTools;
 use crate::shortcode::ShortcodeRegistry;
-use nop_config::ValidatedConfig;
+use nop_config::{RuntimeSettings, ValidatedConfig};
 use nop_rt_iam::types::User;
 use nop_rt_page_cache::PageMetaCache;
 use nop_rt_paths::RuntimePaths;
@@ -17,6 +17,7 @@ use nop_rt_templates::TemplateEngine;
 
 pub struct PublicRequestContext<'a> {
     pub config: &'a ValidatedConfig,
+    pub runtime_settings: &'a RuntimeSettings,
     pub cache: &'a PageMetaCache,
     pub shortcode_registry: &'a ShortcodeRegistry,
     pub release_tracker: &'a ReleaseTracker,
@@ -31,6 +32,7 @@ impl<'a> PublicRequestContext<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &'a ValidatedConfig,
+        runtime_settings: &'a RuntimeSettings,
         cache: &'a PageMetaCache,
         shortcode_registry: &'a ShortcodeRegistry,
         release_tracker: &'a ReleaseTracker,
@@ -42,6 +44,7 @@ impl<'a> PublicRequestContext<'a> {
     ) -> Self {
         Self {
             config,
+            runtime_settings,
             cache,
             shortcode_registry,
             release_tracker,
@@ -60,8 +63,11 @@ impl<'a> PublicRequestContext<'a> {
 
 pub struct PageRenderContext<'a> {
     pub config: &'a ValidatedConfig,
+    pub runtime_settings: &'a RuntimeSettings,
     pub runtime_paths: &'a RuntimePaths,
     pub theme: Option<&'a str>,
     pub release_tracker: &'a ReleaseTracker,
     pub template_engine: &'a dyn TemplateEngine,
+    pub app_version: &'a str,
+    pub show_admin_version_footer: bool,
 }

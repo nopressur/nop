@@ -33,6 +33,9 @@ export interface SearchListItem {
   navParentId: string | null;
   navOrder: number | null;
   originalFilename: string | null;
+  disableNavbar: boolean;
+  disableFloatingNav: boolean;
+  contentWidth: ContentWidthMode;
   isMarkdown: boolean;
 }
 
@@ -58,6 +61,16 @@ function readStringVec(reader: WireReader): string[] {
   return reader.readVec((itemReader) => itemReader.readString());
 }
 
+type ContentWidthMode = "auto" | "wide" | "narrow";
+
+function readContentWidthMode(reader: WireReader): ContentWidthMode {
+  const value = reader.readString();
+  if (value !== "auto" && value !== "wide" && value !== "narrow") {
+    throw new Error(`Unknown content width mode ${value}`);
+  }
+  return value;
+}
+
 function readSearchListItem(reader: WireReader): SearchListItem {
   const flags = OptionMap.read(reader, 5);
   const id = reader.readString();
@@ -69,6 +82,9 @@ function readSearchListItem(reader: WireReader): SearchListItem {
   const navParentId = flags[2] ? reader.readString() : null;
   const navOrder = flags[3] ? reader.readI32() : null;
   const originalFilename = flags[4] ? reader.readString() : null;
+  const disableNavbar = reader.readBool();
+  const disableFloatingNav = reader.readBool();
+  const contentWidth = readContentWidthMode(reader);
   const isMarkdown = reader.readBool();
   return {
     id,
@@ -80,6 +96,9 @@ function readSearchListItem(reader: WireReader): SearchListItem {
     navParentId,
     navOrder,
     originalFilename,
+    disableNavbar,
+    disableFloatingNav,
+    contentWidth,
     isMarkdown,
   };
 }

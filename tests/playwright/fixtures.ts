@@ -15,6 +15,8 @@ export type HarnessFixture = {
   runtimeRoot: string;
   users: Awaited<ReturnType<typeof seedFixtureData>>["users"];
   smoke: Awaited<ReturnType<typeof seedFixtureData>>["smoke"];
+  theme: Awaited<ReturnType<typeof seedFixtureData>>["theme"];
+  publicRenderFixtures: Awaited<ReturnType<typeof seedFixtureData>>["publicRenderFixtures"];
 };
 
 export const test = base.extend<{
@@ -36,6 +38,8 @@ export const test = base.extend<{
         runtimeRoot: tempRoot.rootDir,
         users: seeded.users,
         smoke: seeded.smoke,
+        theme: seeded.theme,
+        publicRenderFixtures: seeded.publicRenderFixtures,
       });
     } finally {
       await server.stop();

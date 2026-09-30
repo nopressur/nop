@@ -14,6 +14,13 @@ Status: Developed
 
 This document is the single source of truth for how NoPressure stores and manages content on disk. Other documentation should link here for storage details instead of restating them.
 
+### Page Width Metadata
+
+- Markdown sidecars may store `content_width` as `auto`, `wide`, or `narrow`.
+- Missing `content_width` values default to `auto` for backward compatibility.
+- `content_width` is mutable metadata and must be updated atomically with the rest of the sidecar.
+- `content_width` applies to Markdown public rendering only; binary assets may omit it.
+
 ### ID-Only Identity and Optional Aliases
 
 - Content IDs are the only identifiers on the management bus and in internal APIs; aliases are
@@ -55,8 +62,15 @@ content/aa/<id>.<version>.ron
 ### Versioned Blobs
 
 - File versions are encoded in the blob filename: `<id>.<version>` where version is `0`, `1`, `2`, and so on.
-- Metadata is mutable; updating alias, title, tags, or navbar metadata does not create a new blob version.
+- Metadata is mutable; updating alias, title, tags, navbar metadata, theme, `disable_navbar`, or `content_width` does not create a new blob version.
 - Content updates create a new blob version and a new sidecar for that version.
+- Binary uploads with an alias that resolves to an existing non-Markdown object create a new blob
+  version under that object's existing content ID. Alias and `/id/<hex>` routing resolve to the
+  highest committed version for the ID.
+- Binary uploads must not create a new version under a Markdown content ID. Markdown versioning is
+  handled only by Markdown update/create flows.
+- Pending binary upload versions use temp filenames beside the final blob path and are not visible
+  to the public cache until the final blob and sidecar are committed.
 
 ### Sidecar Metadata (RON)
 
@@ -71,6 +85,13 @@ Fields:
 - `nav_title` (optional string; presence includes the item in navigation)
 - `nav_parent_id` (optional ContentId hex string; defines parent/child grouping)
 - `nav_order` (optional integer; controls ordering within root and child lists)
+- `disable_navbar` (boolean; optional on disk, defaults to `false` when missing; omits the public
+  navbar on that markdown page when `true`)
+- `disable_floating_nav` (boolean; optional on disk, defaults to `false` when missing; omits the
+  floating document navigation panel and narrow hamburger heading links on that markdown page when
+  `true`)
+- `content_width` (optional enum string for Markdown pages; `auto`, `wide`, or `narrow`; defaults
+  to `auto` when missing)
 - `original_filename` (optional string; preserved from upload)
 - `theme` (optional string; selects `<runtime-root>/themes/<theme>.theme`, see
   `docs/content/themes.md`)
@@ -91,6 +112,9 @@ Example:
     nav_title: Some("Getting Started"),
     nav_parent_id: None,
     nav_order: Some(10),
+    disable_navbar: false,
+    disable_floating_nav: false,
+    content_width: "auto",
     original_filename: "getting-started.md",
     theme: Some("minimal"),
 )
@@ -110,6 +134,10 @@ Example:
   - Ignore trailing slash for lookup (`docs` == `docs/`).
 - Alias changes take effect immediately; old aliases do not redirect.
 - For non-Markdown assets, the cache also exposes `id/<hex>` as a stable download alias.
+- Live metadata updates must refresh public alias routing without restarting the executable. If two
+  binary assets temporarily move aliases through an intermediate alias, each final alias resolves to
+  the content ID currently recorded in sidecar metadata, while `/id/<hex>` URLs continue to serve the
+  same object bytes.
 
 ### MIME Type Handling
 
@@ -126,7 +154,7 @@ Example:
 
 - The in-memory cache scans sidecars and builds:
   - Alias to object mapping.
-  - Title and navbar metadata for listing.
+  - Title, navbar metadata, and page-level render flags for listing and public rendering.
   - Tag membership for access checks and tag-list shortcodes.
   - Resolved access roles per object (derived from tags).
 

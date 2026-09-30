@@ -219,10 +219,10 @@ mod tests {
                 hsts_preload: false,
             },
             tls: None,
-            app: AppConfig {
+            app: Some(AppConfig {
                 name: "Test App".to_string(),
                 description: "Test Description".to_string(),
-            },
+            }),
             upload: UploadConfig {
                 max_file_size_mb: 100,
                 allowed_extensions: vec!["md".to_string()],
@@ -231,6 +231,7 @@ mod tests {
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
             search: nop_config::SearchConfig::default(),
+            settings: Default::default(),
             dev_mode: None,
         };
         let content = serde_yaml::to_string(&config).expect("serialize config");
@@ -315,6 +316,9 @@ mod tests {
             nav_title: None,
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: Some("tagged.md".to_string()),
             theme: None,
         };
@@ -372,6 +376,9 @@ mod tests {
             nav_title: None,
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: Some("rename.md".to_string()),
             theme: None,
         };

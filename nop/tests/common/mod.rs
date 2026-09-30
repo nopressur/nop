@@ -14,9 +14,9 @@ use nop_admin::WsTicketStore;
 use nop_api as api;
 use nop_config::{
     AdminConfig, AppConfig, JwtConfig, LoggingConfig, LoggingRotationConfig, NavigationConfig,
-    PasswordHashingParams, RenderingConfig, SecurityConfig, ServerConfig, ServerListenerConfig,
-    ServerProtocol, ServerRole, ShortcodeConfig, StreamingConfig, UploadConfig, ValidatedConfig,
-    ValidatedLocalAuthConfig, ValidatedUsersConfig,
+    PasswordHashingParams, RenderingConfig, RuntimeSettings, SecurityConfig, ServerConfig,
+    ServerListenerConfig, ServerProtocol, ServerRole, ShortcodeConfig, StreamingConfig,
+    UploadConfig, ValidatedConfig, ValidatedLocalAuthConfig, ValidatedUsersConfig,
 };
 use nop_iam_passwords::{PasswordProviderBlock, build_password_provider_block};
 use nop_management_bus::ManagementTools;
@@ -53,6 +53,7 @@ const ADMIN_PASSWORD: &str = "admin-password";
 pub struct TestHarness {
     pub fixture: TestFixtureRoot,
     pub config: Arc<ValidatedConfig>,
+    pub runtime_settings: Arc<RuntimeSettings>,
     pub runtime_paths: RuntimePaths,
     pub request_tools: Arc<RequestTools>,
     pub render_tools: Arc<RenderTools>,
@@ -80,6 +81,7 @@ pub struct AuthSession {
 #[derive(Clone)]
 pub struct AppBundle {
     pub config: Arc<ValidatedConfig>,
+    pub runtime_settings: Arc<RuntimeSettings>,
     pub runtime_paths: RuntimePaths,
     pub request_tools: Arc<RequestTools>,
     pub render_tools: Arc<RenderTools>,
@@ -101,6 +103,7 @@ impl TestHarness {
         fixture.init_runtime_layout().expect("fixture layout");
 
         let config = Arc::new(build_config());
+        let runtime_settings = Arc::new(RuntimeSettings::new(&config.settings));
         let admin_password_plaintext = ADMIN_PASSWORD.to_string();
         let password_params = config
             .users
@@ -141,13 +144,17 @@ impl TestHarness {
         let release_tracker = Arc::new(ReleaseTracker::new());
         let management_bus = build_management_bus(
             &config,
+            runtime_settings.clone(),
             &runtime_paths,
             user_services.clone(),
             page_cache.clone(),
             upload_registry.clone(),
             release_tracker.clone(),
         );
-        let request_tools = Arc::new(RequestTools::new(&config.app.name));
+        let request_tools = Arc::new(RequestTools::new_with_version(
+            &config.app.name,
+            "Release 1",
+        ));
         let render_tools = Arc::new(RenderTools::new());
         let security_tools = Arc::new(SecurityTools::new());
         let login_state = Arc::new(LoginState::new());
@@ -167,6 +174,7 @@ impl TestHarness {
         Self {
             fixture,
             config,
+            runtime_settings,
             runtime_paths,
             request_tools,
             render_tools,
@@ -202,9 +210,52 @@ impl TestHarness {
         }
     }
 
+    pub async fn user_auth_with_roles(
+        &self,
+        email: &str,
+        name: &str,
+        roles: Vec<String>,
+    ) -> AuthSession {
+        let password_params = self
+            .config
+            .users
+            .local()
+            .expect("local auth config")
+            .password
+            .clone();
+        let password_block = build_password_provider_block("user-password", &password_params)
+            .expect("password block");
+        self.user_services
+            .add_user(email, name, password_block, roles)
+            .await
+            .expect("add user");
+
+        let user = self
+            .user_services
+            .get_user(email)
+            .expect("get user")
+            .expect("user exists");
+        let jwt_service = self.user_services.jwt_service().expect("jwt service");
+        let token = jwt_service
+            .create_token(&user.email, &user)
+            .expect("jwt token");
+        let claims = jwt_service.verify_token(&token).expect("jwt claims");
+        let cookie = jwt_service.create_auth_cookie(&token).into_owned();
+        let csrf_token = self.csrf_store.get_or_refresh_token(&claims.jti);
+
+        AuthSession {
+            user,
+            jwt_token: token,
+            jwt_id: claims.jti,
+            cookie,
+            csrf_token,
+        }
+    }
+
     pub fn app_bundle(&self) -> AppBundle {
         AppBundle {
             config: self.config.clone(),
+            runtime_settings: self.runtime_settings.clone(),
             runtime_paths: self.runtime_paths.clone(),
             request_tools: self.request_tools.clone(),
             render_tools: self.render_tools.clone(),
@@ -230,13 +281,17 @@ pub fn build_app_bundle_with_user_services(
     let release_tracker = Arc::new(ReleaseTracker::new());
     let management_bus = build_management_bus(
         &harness.config,
+        harness.runtime_settings.clone(),
         &harness.runtime_paths,
         user_services.clone(),
         harness.page_cache.clone(),
         upload_registry.clone(),
         release_tracker.clone(),
     );
-    let request_tools = Arc::new(RequestTools::new(&harness.config.app.name));
+    let request_tools = Arc::new(RequestTools::new_with_version(
+        &harness.config.app.name,
+        env!("CARGO_PKG_VERSION"),
+    ));
     let render_tools = Arc::new(RenderTools::new());
     let security_tools = Arc::new(SecurityTools::new());
     let login_state = Arc::new(LoginState::new());
@@ -253,6 +308,7 @@ pub fn build_app_bundle_with_user_services(
 
     AppBundle {
         config: harness.config.clone(),
+        runtime_settings: harness.runtime_settings.clone(),
         runtime_paths: harness.runtime_paths.clone(),
         request_tools,
         render_tools,
@@ -271,6 +327,7 @@ pub fn build_app_bundle_with_user_services(
 
 fn build_management_bus(
     config: &Arc<ValidatedConfig>,
+    runtime_settings: Arc<RuntimeSettings>,
     runtime_paths: &RuntimePaths,
     user_services: Arc<UserServices>,
     page_cache: Arc<PageMetaCache>,
@@ -288,6 +345,7 @@ fn build_management_bus(
     .expect("management context");
     let context = context
         .with_upload_registry(upload_registry)
+        .with_runtime_settings(runtime_settings)
         .with_release_tracker(release_tracker);
     ManagementBus::start(registry, context)
 }
@@ -305,6 +363,7 @@ pub fn build_test_app(
 > {
     let admin_path = bundle.admin_path;
     let config_for_app = bundle.config.clone();
+    let runtime_settings = bundle.runtime_settings.clone();
     let config_for_security = bundle.config.clone();
     let config_for_admin = bundle.config.clone();
     let config_for_login = bundle.config.clone();
@@ -317,6 +376,7 @@ pub fn build_test_app(
 
     App::new()
         .app_data(web::Data::from(config_for_app))
+        .app_data(web::Data::from(runtime_settings))
         .app_data(web::Data::new(runtime_paths))
         .app_data(web::Data::from(request_tools))
         .app_data(web::Data::from(render_tools))
@@ -436,6 +496,7 @@ fn build_config() -> ValidatedConfig {
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
         search: nop_config::SearchConfig::default(),
+        settings: Default::default(),
         dev_mode: None,
     }
 }
@@ -531,6 +592,9 @@ fn seed_content(runtime_paths: &RuntimePaths) {
             nav_title: None,
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: None,
             theme: None,
         };

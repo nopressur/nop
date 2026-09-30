@@ -31,6 +31,7 @@ RUST_CRATES=(
   "nop-management-yaml:${NOP_DIR}/crates/nop-management-yaml"
   "nop-management-roles:${NOP_DIR}/crates/nop-management-roles"
   "nop-management-search:${NOP_DIR}/crates/nop-management-search"
+  "nop-management-settings:${NOP_DIR}/crates/nop-management-settings"
   "nop-rt-logging:${NOP_DIR}/crates/nop-rt-logging"
   "nop-management-system:${NOP_DIR}/crates/nop-management-system"
   "nop-management-tags:${NOP_DIR}/crates/nop-management-tags"

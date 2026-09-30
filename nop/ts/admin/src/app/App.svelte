@@ -20,6 +20,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import ThemeListView from "../routes/ThemeListView.svelte";
   import UserEditorView from "../routes/UserEditorView.svelte";
   import UserListView from "../routes/UserListView.svelte";
+  import SettingsView from "../routes/SettingsView.svelte";
   import SystemSettingsView from "../routes/SystemSettingsView.svelte";
   import { enforceAdminRoute } from "../routes/routeValidation";
   import { addWindowListener, removeWindowListener } from "../services/browser";
@@ -34,6 +35,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     { label: "Roles", path: "/roles" },
     { label: "Themes", path: "/themes" },
     { label: "Users", path: "/users", gated: true },
+    { label: "Settings", path: "/settings" },
     { label: "System", path: "/system" }
   ];
 
@@ -114,7 +116,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
   <div class="relative flex flex-1 min-h-0 items-stretch">
     <aside
-      class={`fixed inset-y-0 left-0 z-30 w-[220px] border-r border-border bg-surface px-5 py-6 transition-transform lg:static lg:translate-x-0 lg:shrink-0 ${
+      class={`fixed inset-y-0 left-0 z-30 flex w-[220px] flex-col border-r border-border bg-surface px-5 py-6 transition-transform lg:static lg:translate-x-0 lg:shrink-0 ${
         navOpen ? "translate-x-0" : "-translate-x-full"
       }`}
     >
@@ -141,6 +143,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
           {/if}
         {/each}
       </nav>
+      <div class="mt-3 px-4 text-[10px] leading-4 text-muted/70" data-admin-version>
+        NoPressure {config.version}
+      </div>
     </aside>
 
     <main class="relative flex min-w-0 flex-1 flex-col px-6 pb-8 pt-6 min-h-0">
@@ -165,6 +170,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
           <UserEditorView />
         {:else if currentPath.startsWith("/users")}
           <UserListView />
+        {:else if currentPath.startsWith("/settings")}
+          <SettingsView />
         {:else if currentPath.startsWith("/system")}
           <SystemSettingsView />
         {:else}

@@ -542,6 +542,9 @@ mod tests {
                 nav_title: None,
                 nav_parent_id: None,
                 nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
                 original_filename: None,
                 theme: None,
             };
@@ -626,6 +629,7 @@ mod tests {
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
             search: nop_config::SearchConfig::default(),
+            settings: Default::default(),
             dev_mode: None,
         }
     }

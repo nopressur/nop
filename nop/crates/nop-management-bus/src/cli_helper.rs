@@ -509,6 +509,31 @@ fn output_response(response: &ManagementResponse, success_actions: &[DomainActio
                 1
             }
         }
+        ResponsePayload::ContentAliasStatus(payload) => {
+            if is_success {
+                println!("Alias: {}", payload.canonical_alias);
+                println!("Exists: {}", payload.exists);
+                if let Some(id) = &payload.id {
+                    println!("Id: {}", id);
+                }
+                if let Some(version) = payload.version {
+                    println!("Version: {}", version);
+                }
+                if let Some(mime) = &payload.mime {
+                    println!("Mime: {}", mime);
+                }
+                if let Some(is_markdown) = payload.is_markdown {
+                    println!("Markdown: {}", is_markdown);
+                }
+                if let Some(title) = &payload.title {
+                    println!("Title: {}", title);
+                }
+                0
+            } else {
+                eprintln!("Content alias status failed");
+                1
+            }
+        }
         ResponsePayload::ContentUploadStreamInit(payload) => {
             if is_success {
                 println!(
@@ -527,6 +552,23 @@ fn output_response(response: &ManagementResponse, success_actions: &[DomainActio
                 0
             } else {
                 eprintln!("Search failed");
+                1
+            }
+        }
+        ResponsePayload::Settings(payload) => {
+            if is_success {
+                println!("name={}", payload.name);
+                match payload.title.as_deref() {
+                    Some(title) => println!("title={}", title),
+                    None => println!("title=<unset>"),
+                }
+                match payload.description.as_deref() {
+                    Some(description) => println!("description={}", description),
+                    None => println!("description=<unset>"),
+                }
+                0
+            } else {
+                eprintln!("Settings request failed");
                 1
             }
         }
@@ -663,6 +705,8 @@ fn print_content_read(payload: &nop_management_contract::content::ContentReadRes
     if let Some(theme) = &payload.theme {
         println!("Theme: {}", theme);
     }
+    println!("Disable navbar: {}", payload.disable_navbar);
+    println!("Disable floating nav: {}", payload.disable_floating_nav);
     if let Some(name) = &payload.original_filename {
         println!("Original filename: {}", name);
     }
@@ -807,10 +851,10 @@ mod tests {
                 hsts_preload: false,
             },
             tls: None,
-            app: AppConfig {
+            app: Some(AppConfig {
                 name: "Test App".to_string(),
                 description: "Test Description".to_string(),
-            },
+            }),
             upload: UploadConfig {
                 max_file_size_mb: 100,
                 allowed_extensions: vec!["md".to_string()],
@@ -819,6 +863,7 @@ mod tests {
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
             search: nop_config::SearchConfig::default(),
+            settings: Default::default(),
             dev_mode: None,
         };
 

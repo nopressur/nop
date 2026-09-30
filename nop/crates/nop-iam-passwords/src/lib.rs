@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
 use nop_config::{Argon2Params, PasswordHashingParams};
-use password_hash::rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -54,11 +54,9 @@ pub fn derive_back_end_hash(
 ) -> Result<String, PasswordError> {
     let front_end_bytes = decode_hex(front_end_hash)?;
     let salt_bytes = decode_hex(back_end_salt)?;
-    let salt = SaltString::encode_b64(&salt_bytes)
-        .map_err(|err| PasswordError::HashError(err.to_string()))?;
     let argon2 = build_argon2(params)?;
     let hash = argon2
-        .hash_password(&front_end_bytes, &salt)
+        .hash_password_with_salt(&front_end_bytes, &salt_bytes)
         .map_err(|err| PasswordError::HashError(err.to_string()))?;
     Ok(hash.to_string())
 }
@@ -68,10 +66,11 @@ pub fn verify_front_end_hash(
     stored_hash: &str,
 ) -> Result<bool, PasswordError> {
     let front_end_bytes = decode_hex(front_end_hash)?;
-    let parsed =
-        PasswordHash::new(stored_hash).map_err(|err| PasswordError::HashError(err.to_string()))?;
+    PasswordHash::new(stored_hash).map_err(|err| PasswordError::HashError(err.to_string()))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, Params::default());
-    Ok(argon2.verify_password(&front_end_bytes, &parsed).is_ok())
+    Ok(argon2
+        .verify_password(&front_end_bytes, stored_hash)
+        .is_ok())
 }
 
 pub fn build_password_provider_block(
@@ -108,7 +107,7 @@ fn build_argon2(params: &Argon2Params) -> Result<Argon2<'static>, PasswordError>
 
 pub fn generate_salt_hex(length: u32) -> Result<String, PasswordError> {
     let mut bytes = vec![0u8; length as usize];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).map_err(|err| PasswordError::HashError(err.to_string()))?;
     Ok(hex::encode(bytes))
 }
 
@@ -266,6 +265,31 @@ mod tests {
         let stored = derive_back_end_hash(&front_end, &back_end_salt, &params).expect("stored");
         let valid = verify_front_end_hash(&front_end, &stored).expect("verify");
         assert!(valid);
+    }
+
+    /// Known-answer vectors generated under argon2 0.5. Major argon2 upgrades
+    /// must reproduce these byte-for-byte: the front-end hash feeds the login
+    /// SPA equivalence contract and stored hashes must keep verifying.
+    #[test]
+    fn argon2_version_matches_known_answers() {
+        let params = test_params();
+        let front = derive_front_end_hash(
+            "vector-horse-battery",
+            "00112233445566778899aabbccddeeff",
+            &params,
+        )
+        .expect("front");
+        assert_eq!(
+            front,
+            "42736237afc0599624d1b7691a49d0a403a3f16afcc20173767b09be867ce558"
+        );
+        let stored = derive_back_end_hash(&front, "ffeeddccbbaa99887766554433221100", &params)
+            .expect("stored");
+        assert_eq!(
+            stored,
+            "$argon2id$v=19$m=32768,t=2,p=1$/+7dzLuqmYh3ZlVEMyIRAA$TUG1VVXhI2N5EvraZ2Xt9HgeKuzcB/Ja2vMb7fFVJSk"
+        );
+        assert!(verify_front_end_hash(&front, &stored).expect("verify"));
     }
 
     #[test]

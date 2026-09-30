@@ -27,15 +27,15 @@ pub fn canonical_path_checks(
     file_path: &std::path::Path,
     content_dir: &str,
     app_name: Option<&str>,
-) -> std::result::Result<std::path::PathBuf, Result<HttpResponse>> {
+) -> std::result::Result<std::path::PathBuf, Box<Result<HttpResponse>>> {
     let canonical_file_path = match file_path.canonicalize() {
         Ok(path) => path,
-        Err(_) => return Err(not_found(app_name)),
+        Err(_) => return Err(Box::new(not_found(app_name))),
     };
 
     let canonical_content_dir = match std::path::Path::new(content_dir).canonicalize() {
         Ok(path) => path,
-        Err(_) => return Err(internal_error(app_name)),
+        Err(_) => return Err(Box::new(internal_error(app_name))),
     };
 
     // Use strip_prefix for more robust path validation with strict checking
@@ -54,7 +54,7 @@ pub fn canonical_path_checks(
                     "🚨 SECURITY: Suspicious remaining path after strip_prefix: {}",
                     remaining_str
                 );
-                return Err(not_found(app_name));
+                return Err(Box::new(not_found(app_name)));
             }
 
             // Path is safely within the content directory
@@ -66,7 +66,7 @@ pub fn canonical_path_checks(
                 "🚨 SECURITY: Path traversal attempt - file outside content directory: {:?} not in {:?}",
                 canonical_file_path, canonical_content_dir
             );
-            Err(not_found(app_name))
+            Err(Box::new(not_found(app_name)))
         }
     }
 }
@@ -164,7 +164,7 @@ mod tests {
             Some("Test App"),
         );
         assert!(result.is_err(), "Expected outside file to be rejected");
-        let response = result.err().unwrap().unwrap();
+        let response = (*result.err().unwrap()).unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
@@ -192,7 +192,7 @@ mod tests {
             Some("Test App"),
         );
         assert!(result.is_err(), "Expected symlink escape to be rejected");
-        let response = result.err().unwrap().unwrap();
+        let response = (*result.err().unwrap()).unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

@@ -5,7 +5,7 @@
 
 use crate::UploadRegistry;
 use crate::blocking::BlockingPool;
-use nop_config::{ValidatedConfig, ValidatedUsersConfig};
+use nop_config::{RuntimeSettings, ValidatedConfig, ValidatedUsersConfig};
 use nop_management_errors::{ManagementError, ManagementErrorKind};
 use nop_management_roles::RoleStore;
 use nop_management_tags::TagStore;
@@ -111,6 +111,7 @@ pub struct ManagementContext {
     pub blocking_pool: BlockingPool,
     pub runtime_root: PathBuf,
     pub config: Arc<ValidatedConfig>,
+    pub runtime_settings: Arc<RuntimeSettings>,
     pub runtime_paths: RuntimePaths,
     pub log_controller: LogController,
     pub user_services: Option<Arc<UserServices>>,
@@ -192,11 +193,13 @@ impl ManagementContext {
                     format!("Role store error: {}", err),
                 )
             })?;
+        let runtime_settings = Arc::new(RuntimeSettings::new(&config.settings));
         Ok(Self {
             version: VersionInfo::from_pkg_version()?,
             blocking_pool: BlockingPool::default_pool(),
             runtime_root,
             config,
+            runtime_settings,
             runtime_paths,
             log_controller,
             user_services,
@@ -255,6 +258,11 @@ impl ManagementContext {
 
     pub fn with_search_service(mut self, search_service: Arc<SearchService>) -> Self {
         self.search_service = Some(search_service);
+        self
+    }
+
+    pub fn with_runtime_settings(mut self, runtime_settings: Arc<RuntimeSettings>) -> Self {
+        self.runtime_settings = runtime_settings;
         self
     }
 }

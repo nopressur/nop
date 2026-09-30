@@ -23,8 +23,8 @@ This document walks through the NoPressure entrypoint so contributors understand
    - If daemonization is requested on non-Unix builds, warn and continue in foreground mode.
    - Create `<runtime-root>/nop.pid` only after daemonizing.
 7. **Resolve log level** from `config.logging.level`, defaulting to `info`. Logging targets stdout in foreground mode and rotating log files in daemon mode.
-8. **Install custom logger** via `logging::init_logger`, which applies rule-based level overrides (currently bumping `html5ever` trace noise down to debug).
-9. **Emit startup telemetry** through `log_startup_info`, including canonical runtime paths and the resolved admin URL.
+8. **Install custom logger** via `logging::init_logger`, which applies rule-based level overrides (currently bumping `html5ever` trace noise down to debug). Daemon file logging writes a raw identity banner (product, binary path, PID, version) as the first bytes of a new or rotated `nopressure.log` before formatted lines begin.
+9. **Emit startup telemetry** through `log_startup_info`, starting with product, binary path, PID, and version, then canonical runtime paths and the resolved admin URL.
 10. **Build the management registry** via `nop_management_bus::build_default_registry`.
 11. **Instantiate the page metadata cache** (`page_meta_cache::PageMetaCache`) pointed at the canonical content directory.
 12. **Create `UserServices`** using the validated config and `users.yaml` path. This wires auth backends (local users or OIDC).
@@ -34,7 +34,8 @@ This document walks through the NoPressure entrypoint so contributors understand
 16. **Build the management context** with runtime paths, validated config, user services, page cache, and log controller; then attach the upload registry, release tracker, and search service.
 17. **Start the management bus and socket** (`ManagementBus::start`, `ManagementSocket::start`).
 18. **Initialize request/system tool bags** (`RequestTools`, `RenderTools`, `SecurityTools`,
-    `LoginState`, `ManagementTools`) using the app name and management bus.
+    `LoginState`, `ManagementTools`) using the Website Name from runtime settings and the
+    management bus.
 19. **Initialize the well-known registry** and register ACME HTTP-01 handlers when configured.
 20. **Warm the page metadata cache** by calling `PageMetaCache::rebuild_cache()`. Any error is fatal.
 21. **Prepare ancillary singletons**:
@@ -44,6 +45,19 @@ This document walks through the NoPressure entrypoint so contributors understand
     - Instantiate the CSRF token store (`csrf::CsrfTokenStore::new`), seeding exempt endpoints from configuration.
 
 Everything above happens before binding sockets so failures are visible immediately.
+
+### Website Identity Settings
+
+- Runtime website identity comes from `settings.name`, `settings.title`, and
+  `settings.description`.
+- `RuntimeSettings` carries the live website identity snapshot used by public rendering.
+- Successful management changes to `settings.name`, `settings.title`, or `settings.description`
+  bump the website-wide release epoch after the canonical config write and runtime snapshot update.
+- Admin, login, and profile shells receive Website Name and Website Title from the validated
+  settings snapshot used to render each shell.
+- The legacy top-level `app` section is compatibility input. New bootstrap output writes website
+  identity under `settings`.
+- Startup logs use Website Name and Website Description after validation.
 
 ## HTTP Server Construction
 
@@ -67,7 +81,7 @@ Everything above happens before binding sockets so failures are visible immediat
 
 - **Middleware stack (outermost first)**:
   1. `Logger` using Apache-style access logs (`%a "%r" %s ... %T`).
-  2. `headers::Headers` – centralizes security header injection (CSP, Referrer-Policy, Permissions-Policy) and cache directives, with per-route CSP overrides for login/admin shells.
+  2. `headers::Headers` – centralizes security header injection (CSP, Referrer-Policy, Permissions-Policy) and cache directives, with per-route CSP overrides for login/admin shells. The default and strict CSP policies include `font-src 'self'` so uploaded same-origin theme fonts can load.
   3. `JwtAuthMiddlewareFactory` – enforces JWT auth for protected routes via `iam`.
   4. `CsrfValidationMiddlewareFactory` – validates CSRF tokens for state-changing requests, consulting the shared token store.
 

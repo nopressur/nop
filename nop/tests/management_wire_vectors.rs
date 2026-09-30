@@ -5,7 +5,8 @@
 
 use nop_management_contract::content::{
     BinaryPrevalidateRequest, BinaryPrevalidateResponse, BinaryUploadCommitRequest,
-    BinaryUploadInitRequest, CONTENT_ACTION_BINARY_PREVALIDATE,
+    BinaryUploadInitRequest, CONTENT_ACTION_ALIAS_STATUS, CONTENT_ACTION_ALIAS_STATUS_ERR,
+    CONTENT_ACTION_ALIAS_STATUS_OK, CONTENT_ACTION_BINARY_PREVALIDATE,
     CONTENT_ACTION_BINARY_PREVALIDATE_ERR, CONTENT_ACTION_BINARY_PREVALIDATE_OK,
     CONTENT_ACTION_BINARY_UPLOAD_COMMIT, CONTENT_ACTION_BINARY_UPLOAD_COMMIT_ERR,
     CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK, CONTENT_ACTION_BINARY_UPLOAD_INIT,
@@ -21,12 +22,12 @@ use nop_management_contract::content::{
     CONTENT_ACTION_UPLOAD_OK, CONTENT_ACTION_UPLOAD_STREAM_COMMIT,
     CONTENT_ACTION_UPLOAD_STREAM_COMMIT_ERR, CONTENT_ACTION_UPLOAD_STREAM_COMMIT_OK,
     CONTENT_ACTION_UPLOAD_STREAM_INIT, CONTENT_ACTION_UPLOAD_STREAM_INIT_ERR,
-    CONTENT_ACTION_UPLOAD_STREAM_INIT_OK, CONTENT_DOMAIN_ID, ContentDeleteRequest,
-    ContentListRequest, ContentListResponse, ContentNavIndexRequest, ContentNavIndexResponse,
-    ContentReadRequest, ContentReadResponse, ContentUpdateRequest,
-    ContentUpdateStreamCommitRequest, ContentUpdateStreamInitRequest, ContentUploadRequest,
-    ContentUploadResponse, ContentUploadStreamCommitRequest, ContentUploadStreamInitRequest,
-    UploadStreamInitResponse,
+    CONTENT_ACTION_UPLOAD_STREAM_INIT_OK, CONTENT_DOMAIN_ID, ContentAliasStatusRequest,
+    ContentAliasStatusResponse, ContentDeleteRequest, ContentListRequest, ContentListResponse,
+    ContentNavIndexRequest, ContentNavIndexResponse, ContentReadRequest, ContentReadResponse,
+    ContentUpdateRequest, ContentUpdateStreamCommitRequest, ContentUpdateStreamInitRequest,
+    ContentUploadRequest, ContentUploadResponse, ContentUploadStreamCommitRequest,
+    ContentUploadStreamInitRequest, UploadStreamInitResponse,
 };
 use nop_management_contract::roles::{
     ROLE_ACTION_ADD, ROLE_ACTION_ADD_ERR, ROLE_ACTION_ADD_OK, ROLE_ACTION_CHANGE,
@@ -41,6 +42,14 @@ use nop_management_contract::search::{
     SEARCH_ACTION_INVALIDATE_ERR, SEARCH_ACTION_INVALIDATE_OK, SEARCH_ACTION_RESET,
     SEARCH_ACTION_RESET_ERR, SEARCH_ACTION_RESET_OK, SEARCH_DOMAIN_ID, SearchFindRequest,
     SearchFindResponse, SearchInvalidateRequest, SearchResetRequest,
+};
+use nop_management_contract::settings::{
+    SETTINGS_ACTION_GET, SETTINGS_ACTION_GET_ERR, SETTINGS_ACTION_GET_OK,
+    SETTINGS_ACTION_SET_DESCRIPTION, SETTINGS_ACTION_SET_DESCRIPTION_ERR,
+    SETTINGS_ACTION_SET_DESCRIPTION_OK, SETTINGS_ACTION_SET_NAME, SETTINGS_ACTION_SET_NAME_ERR,
+    SETTINGS_ACTION_SET_NAME_OK, SETTINGS_ACTION_SET_TITLE, SETTINGS_ACTION_SET_TITLE_ERR,
+    SETTINGS_ACTION_SET_TITLE_OK, SETTINGS_DOMAIN_ID, SettingsGetRequest, SettingsResponse,
+    SettingsSetDescriptionRequest, SettingsSetNameRequest, SettingsSetTitleRequest,
 };
 use nop_management_contract::system::{
     ClearLogsRequest, ClearLogsResponse, GetLoggingConfigRequest, LoggingConfigResponse,
@@ -389,6 +398,9 @@ fn wire_vectors_match_payloads() {
             ("request", CONTENT_DOMAIN_ID, CONTENT_ACTION_UPDATE_STREAM_COMMIT) => {
                 assert_vector::<ContentUpdateStreamCommitRequest>(&vector, &bytes)
             }
+            ("request", CONTENT_DOMAIN_ID, CONTENT_ACTION_ALIAS_STATUS) => {
+                assert_vector::<ContentAliasStatusRequest>(&vector, &bytes)
+            }
             ("response", CONTENT_DOMAIN_ID, CONTENT_ACTION_LIST_OK) => {
                 assert_vector::<ContentListResponse>(&vector, &bytes)
             }
@@ -467,6 +479,12 @@ fn wire_vectors_match_payloads() {
             ("response", CONTENT_DOMAIN_ID, CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR) => {
                 assert_vector::<MessageResponse>(&vector, &bytes)
             }
+            ("response", CONTENT_DOMAIN_ID, CONTENT_ACTION_ALIAS_STATUS_OK) => {
+                assert_vector::<ContentAliasStatusResponse>(&vector, &bytes)
+            }
+            ("response", CONTENT_DOMAIN_ID, CONTENT_ACTION_ALIAS_STATUS_ERR) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
             ("request", SEARCH_DOMAIN_ID, SEARCH_ACTION_FIND) => {
                 assert_vector::<SearchFindRequest>(&vector, &bytes)
             }
@@ -492,6 +510,42 @@ fn wire_vectors_match_payloads() {
                 assert_vector::<MessageResponse>(&vector, &bytes)
             }
             ("response", SEARCH_DOMAIN_ID, SEARCH_ACTION_RESET_ERR) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
+            ("request", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_GET) => {
+                assert_vector::<SettingsGetRequest>(&vector, &bytes)
+            }
+            ("request", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_SET_NAME) => {
+                assert_vector::<SettingsSetNameRequest>(&vector, &bytes)
+            }
+            ("request", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_SET_TITLE) => {
+                assert_vector::<SettingsSetTitleRequest>(&vector, &bytes)
+            }
+            ("request", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_SET_DESCRIPTION) => {
+                assert_vector::<SettingsSetDescriptionRequest>(&vector, &bytes)
+            }
+            ("response", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_GET_OK) => {
+                assert_vector::<SettingsResponse>(&vector, &bytes)
+            }
+            ("response", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_GET_ERR) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
+            ("response", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_SET_NAME_OK) => {
+                assert_vector::<SettingsResponse>(&vector, &bytes)
+            }
+            ("response", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_SET_NAME_ERR) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
+            ("response", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_SET_TITLE_OK) => {
+                assert_vector::<SettingsResponse>(&vector, &bytes)
+            }
+            ("response", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_SET_TITLE_ERR) => {
+                assert_vector::<MessageResponse>(&vector, &bytes)
+            }
+            ("response", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_SET_DESCRIPTION_OK) => {
+                assert_vector::<SettingsResponse>(&vector, &bytes)
+            }
+            ("response", SETTINGS_DOMAIN_ID, SETTINGS_ACTION_SET_DESCRIPTION_ERR) => {
                 assert_vector::<MessageResponse>(&vector, &bytes)
             }
             _ => panic!(

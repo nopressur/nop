@@ -17,6 +17,7 @@ const outDir = process.env.LOGIN_SPA_OUT_DIR
   ? path.resolve(process.env.LOGIN_SPA_OUT_DIR)
   : defaultOutDir;
 const base = process.env.LOGIN_SPA_BASE ?? defaultBase;
+const legacyBrowserPrelude = `;(function(){var g;if(typeof globalThis==="object"){g=globalThis}else if(typeof self==="object"){g=self}else if(typeof window==="object"){g=window}else{g=Function("return this")()}try{if(g&&!g.globalThis){g.globalThis=g}}catch(e){}if(g){var needsEventTarget=typeof g.EventTarget!=="function";if(!needsEventTarget){try{needsEventTarget=!(g.document instanceof g.EventTarget)&&!(g.window instanceof g.EventTarget)}catch(e){needsEventTarget=true}}if(needsEventTarget){if(typeof g.Node==="function"){g.EventTarget=g.Node}else if(typeof g.Element==="function"){g.EventTarget=g.Element}else{g.EventTarget=function EventTarget(){}}}}}());`;
 
 function copyFontsourceFiles(outputDir: string) {
   return {
@@ -37,9 +38,23 @@ function copyFontsourceFiles(outputDir: string) {
   };
 }
 
+function copyArgon2AsmFallback(outputDir: string) {
+  return {
+    name: 'copy-argon2-asm-fallback',
+    async closeBundle() {
+      const source = path.resolve(__dirname, 'argon2-asm/dist/argon2id.asm.js');
+      const manifest = path.resolve(__dirname, 'argon2-asm/argon2id.asm.manifest.json');
+      const target = path.resolve(outputDir, 'argon2id.asm.js');
+      await fs.access(source);
+      await fs.access(manifest);
+      await fs.copyFile(source, target);
+    }
+  };
+}
+
 export default defineConfig({
   base,
-  plugins: [svelte(), copyFontsourceFiles(outDir)],
+  plugins: [svelte(), copyFontsourceFiles(outDir), copyArgon2AsmFallback(outDir)],
   resolve: {
     conditions: ['browser']
   },
@@ -57,9 +72,13 @@ export default defineConfig({
   build: {
     outDir,
     emptyOutDir: true,
+    target: 'esnext',
+    minify: 'terser',
+    modulePreload: false,
     cssCodeSplit: false,
     rollupOptions: {
       output: {
+        banner: legacyBrowserPrelude,
         entryFileNames: 'login.js',
         chunkFileNames: 'login-[name].js',
         assetFileNames: (assetInfo) => {

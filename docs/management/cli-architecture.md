@@ -19,6 +19,8 @@ Status: Developed
 - Domain CLI modules register their commands and aliases through the shared CLI helper.
 - `help` is a top-level command that prints CLI usage without loading runtime configuration.
 - `-h` and `--help` display the same help output regardless of other arguments.
+- The Settings CLI domain is defined by `docs/admin/settings.md` and follows the same domain
+  registration, alias, prefix inference, socket, and bypass rules as other management domains.
 
 ### CLI Helper Module
 

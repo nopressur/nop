@@ -26,6 +26,9 @@ Helper functions produce ready-to-render contexts:
 - Public user menus are no longer server-rendered. The public layout includes a placeholder
   container only; the client fetches `GET /api/profile` to build the dropdown menu at runtime.
   The dropdown title uses the `display_name` field from the profile response.
+- Public Markdown pages receive a page footer from Rust with a `reload` link
+  (`[data-site-asset-reload]`). Authenticated admin users also get the binary version in that
+  footer. The public site bundle binds the reload link.
 - Each context sets asset URLs (`/builtin/...`), ensuring dev-mode and release builds use the same paths (served by `builtin.rs`).
 - Login SPA shells should receive the versioned login asset directory name and inject stable
   filenames under that directory (see `docs/iam/modular-login.md`).
@@ -36,6 +39,9 @@ Helper functions produce ready-to-render contexts:
   The build script embeds these into release binaries.
 - Public layout behavior (navbar toggles/dropdowns) is provided by `/builtin/site.js`, generated
   from `nop/ts/site` and injected by `public/templates/main_layout.html`.
+- Public theme rendering injects `/builtin/theme-preset.css?v=<release>` plus one inline theme
+  style block. The style block may contain validated `@font-face` rules before the `:root`
+  variable declarations.
 - Login/profile SPA assets live under a versioned directory (for example `/builtin/login-<hash>/`)
   with stable filenames that the login shell injects.
   `build.rs` writes `login-spa-version.txt` and a compiled `LOGIN_SPA_DIR` constant so the context

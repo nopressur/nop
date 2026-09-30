@@ -25,6 +25,7 @@ Status: Developed
   - Currently bumps `html5ever` trace noise down to debug.
   - Use this hook when integrating noisy dependencies that should be quieter in production.
 - Log formatting remains aligned with the existing `env_logger` setup in `main.rs` (UTC timestamp, level, target, message).
+- Every new log file and every new logging session starts with a raw identity banner, independent of log level: product (`NoPressure server log`), absolute binary path, PID, and package version. Rotation and `ClearLogs` write the same banner as the first bytes of the new active file. Foreground stdout emits the same four facts as the first `info` lines after logger install.
 - Log rotation uses a single-writer worker behind a channel to avoid shared-lock state.
 
 ### Logging Configuration
@@ -135,6 +136,7 @@ Status: Developed
 - Verify root guard acceptance of `logs/` and ensure unexpected entries still fail fast.
 - Validate that daemon mode selects the file logger while foreground mode keeps stdout logging and does not create log files.
 - Exercise log rotation with a small test size limit to confirm rollover naming, retention count, and size caps.
+- Confirm a new log file, a rotated active file, and a cleared active file each start with the identity banner (product, binary, pid, version).
 - Add management bus + CLI + WebSocket tests for `GetLoggingConfig`, `SetLoggingConfig`, and `ClearLogs`.
 
 <!--

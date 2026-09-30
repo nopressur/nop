@@ -74,32 +74,39 @@ Behavioral requirements:
 
 ### Frontend Search UX
 
-The public site supports two entry paths into search:
+The public site supports these entry paths into search:
 
-1. Passive typing trigger:
-   - when a public page is open, user typing is interpreted as the start of a search query.
-2. Explicit trigger:
+1. Passive typing trigger (desktop only):
+   - when a public page is open at `>=1280px`, user typing is interpreted as the start of a
+     search query.
+2. Explicit trigger (desktop only):
    - a search button opens the search overlay.
-3. Keyboard shortcuts:
-   - `/` opens the overlay without seeding a query and works even when focus is on `audio` or
-     `video` elements.
-   - `Ctrl+/` or `Cmd+/` opens the overlay from any focus target, including inputs and selects.
+3. Inline drawer field (below `1280px`):
+   - the menu drawer opens with the search entry field at the top, followed by inline results.
+4. Keyboard shortcuts:
+   - `/` opens the overlay without seeding a query at `>=1280px` (and works even when focus is on
+     `audio` or `video` elements); below `1280px` it opens the menu drawer and focuses the inline
+     field instead.
+   - `Ctrl+/` or `Cmd+/` opens the overlay from any focus target, including inputs and selects,
+     wherever the overlay is initialized.
+
+The desktop overlay initializes only at `>=1280px` (`main.ts` gates on viewport width and syncs on
+resize). Pages with `disable_navbar = true` have no visible navbar search button; below `1280px`
+they also have no top bar or drawers, so those pages offer no search entry path.
 
 Responsive trigger rules:
 
-- Desktop/tablet:
+- At `>=1280px`:
   - passive typing trigger is enabled;
   - search button is also available.
-- Mobile:
-  - search button is available and visible;
-  - passive typing trigger remains enabled when keyboard input events are available (for example,
-    external keyboard use on phone/tablet).
+- Below `1280px`:
+  - there is no search button and no overlay dialog;
+  - the drawer inline field is the entry path, with `/` as its keyboard shortcut.
 
 Search button placement:
 
-- Search button is always visible in the navbar at every breakpoint.
-- Search button must not be placed inside the hamburger/collapsed menu.
-- In mobile view, the search button remains directly accessible without opening the menu.
+- Search button is always visible in the navbar at `>=1280px`.
+- When the navbar is omitted by `disable_navbar`, there is no search button on that page.
 - Button visual is icon-only (magnifying glass).
 - Icon source is inline SVG in the site template/component (theme-colored via `currentColor`), not a
   Unicode glyph.
@@ -128,6 +135,20 @@ Result behavior:
 - Navigation target resolution:
   - if `alias` is present: navigate to `/<alias>`;
   - otherwise: navigate to `/id/<id>`.
+
+### Narrow Inline Search
+
+- Below `1280px` there is no search trigger button and no overlay dialog: the menu drawer opens
+  with an inline search entry field at the top, followed by inline results.
+- The inline field reuses the full search contract unchanged: `/api/search` endpoint, `3`/`256`
+  bounds, `250ms` trailing debounce, in-flight cancellation, keyboard interaction (`ArrowUp`/
+  `ArrowDown` wrap, `Enter` navigates, `Escape` clears and returns focus to the field), and the
+  `No results` / `Search didn't work.` states.
+- Passive typing and `/` / `Ctrl+/` shortcuts keep working where a keyboard exists on desktop;
+  below `1280px`, `/` opens the menu drawer and focuses the inline field instead. On touch-only
+  narrow screens the drawer field is the entry path.
+- Theme styling follows the existing overlay variable mapping so the inline field matches the
+  desktop overlay appearance.
 
 ### Frontend Integration (No Framework Addition)
 
@@ -258,10 +279,11 @@ Theme variable mapping (light/dark):
 - Frontend TypeScript tests:
   - typing trigger opens/focuses search overlay;
   - search button opens overlay;
-  - search button remains visible at mobile breakpoints and is not moved into hamburger content;
-  - `/` opens the overlay (including when focus is on `audio`/`video`);
-  - `Ctrl+/` and `Cmd+/` open the overlay from editable targets;
-  - passive typing trigger remains available when keyboard input events are produced on mobile/tablet;
+  - no search button renders below `1280px`; the menu drawer carries the inline field instead;
+  - `/` opens the overlay at `>=1280px` (including when focus is on `audio`/`video`) and opens
+    the menu drawer with the inline field focused below `1280px`;
+  - `Ctrl+/` and `Cmd+/` open the overlay from editable targets wherever it is initialized;
+  - passive typing trigger remains a desktop-only behavior;
   - passive typing guard ignores key events from
     `input`/`textarea`/`select`/`video`/`audio`/`contenteditable` targets;
   - query threshold (`>= 3`) gates network requests;

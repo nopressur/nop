@@ -16,6 +16,48 @@ pub use log_level_changer::init_logger;
 
 pub const DEFAULT_LOG_FILE_NAME: &str = "nopressure.log";
 
+/// Process identity written at the start of every new log file and logging session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogIdentity {
+    pub product: String,
+    pub binary: PathBuf,
+    pub pid: u32,
+    pub version: String,
+}
+
+impl LogIdentity {
+    /// Identity of the running NoPressure process.
+    pub fn for_current_process(version: impl Into<String>) -> Self {
+        Self {
+            product: "NoPressure".to_string(),
+            binary: current_binary_path(),
+            pid: std::process::id(),
+            version: version.into(),
+        }
+    }
+
+    /// Banner written as the first bytes of a new log file, and at each new logging session.
+    pub fn format_intro(&self) -> String {
+        format!(
+            "{} server log\nbinary: {}\npid: {}\n{}\n",
+            self.product,
+            self.binary.display(),
+            self.pid,
+            self.version
+        )
+    }
+}
+
+fn current_binary_path() -> PathBuf {
+    if let Ok(path) = std::env::current_exe() {
+        return path;
+    }
+    std::env::args_os()
+        .next()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("nop"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogRunMode {
     Foreground,
@@ -52,6 +94,7 @@ struct RotatingLogWriterInner {
     max_files: u32,
     file: fs::File,
     size: u64,
+    identity: LogIdentity,
 }
 
 enum LogWriterCommand {
@@ -76,6 +119,7 @@ impl RotatingLogWriter {
         log_dir: PathBuf,
         base_name: impl Into<String>,
         settings: LogRotationSettings,
+        identity: LogIdentity,
     ) -> io::Result<Self> {
         let created = !log_dir.exists();
         fs::create_dir_all(&log_dir)?;
@@ -84,14 +128,16 @@ impl RotatingLogWriter {
         }
         let base_name = base_name.into();
         let (file, size) = open_log_file(&log_dir, &base_name)?;
-        let inner = RotatingLogWriterInner {
+        let mut inner = RotatingLogWriterInner {
             log_dir,
             base_name,
             max_bytes: settings.max_size_bytes(),
             max_files: settings.max_files.max(1),
             file,
             size,
+            identity,
         };
+        inner.write_intro()?;
         let sender = start_log_writer(inner)?;
         Ok(Self { sender })
     }
@@ -163,7 +209,20 @@ impl RotatingLogWriterInner {
         self.size = 0;
         let mut stats = clear_rotated_logs(&self.log_dir, &self.base_name)?;
         stats.deleted_bytes = stats.deleted_bytes.saturating_add(base_size);
+        self.write_intro()?;
         Ok(stats)
+    }
+
+    fn write_intro(&mut self) -> io::Result<()> {
+        let mut banner = self.identity.format_intro();
+        if self.size > 0 {
+            banner.insert(0, '\n');
+        }
+        let bytes = banner.as_bytes();
+        self.file.write_all(bytes)?;
+        self.size = self.size.saturating_add(bytes.len() as u64);
+        self.file.flush()?;
+        Ok(())
     }
 
     fn rotate_if_needed(&mut self, incoming: u64) -> io::Result<()> {
@@ -182,9 +241,7 @@ impl RotatingLogWriterInner {
         let max_files = self.max_files.max(1);
         if max_files <= 1 {
             let _ = remove_if_exists(&self.log_path());
-            let (file, size) = open_log_file(&self.log_dir, &self.base_name)?;
-            self.file = file;
-            self.size = size;
+            self.reopen_active_file()?;
             return Ok(());
         }
 
@@ -204,10 +261,15 @@ impl RotatingLogWriterInner {
             let _ = fs::rename(base_path, self.rotated_path(1));
         }
 
+        self.reopen_active_file()?;
+        Ok(())
+    }
+
+    fn reopen_active_file(&mut self) -> io::Result<()> {
         let (file, size) = open_log_file(&self.log_dir, &self.base_name)?;
         self.file = file;
         self.size = size;
-        Ok(())
+        self.write_intro()
     }
 
     fn log_path(&self) -> PathBuf {
@@ -485,6 +547,80 @@ mod tests {
         writer.flush().unwrap();
     }
 
+    fn test_identity() -> LogIdentity {
+        LogIdentity {
+            product: "NoPressure".to_string(),
+            binary: PathBuf::from("/opt/nop/nop"),
+            pid: 4242,
+            version: "0.1.49".to_string(),
+        }
+    }
+
+    fn assert_intro(contents: &str, identity: &LogIdentity) {
+        assert!(contents.contains("NoPressure server log"));
+        assert!(contents.contains(&format!("binary: {}", identity.binary.display())));
+        assert!(contents.contains(&format!("pid: {}", identity.pid)));
+        assert!(contents.contains(&identity.version));
+        assert!(!contents.contains("version: "));
+    }
+
+    #[test]
+    fn format_intro_names_product_binary_pid_and_release_label() {
+        let identity = test_identity();
+        let intro = identity.format_intro();
+        assert_eq!(
+            intro,
+            "NoPressure server log\nbinary: /opt/nop/nop\npid: 4242\n0.1.49\n"
+        );
+    }
+
+    #[test]
+    fn new_log_file_starts_with_process_intro() {
+        let fixture = temp_root("log-intro");
+        let log_dir = fixture.path().join("logs");
+        let identity = test_identity();
+        let mut writer = RotatingLogWriter::new(
+            log_dir.clone(),
+            DEFAULT_LOG_FILE_NAME,
+            LogRotationSettings {
+                max_size_mb: 16,
+                max_files: 10,
+            },
+            identity.clone(),
+        )
+        .expect("writer");
+        writer.flush().unwrap();
+
+        let contents = fs::read_to_string(log_dir.join(DEFAULT_LOG_FILE_NAME)).unwrap();
+        assert!(contents.starts_with(&identity.format_intro()));
+        assert_intro(&contents, &identity);
+    }
+
+    #[test]
+    fn rotated_log_file_starts_with_process_intro() {
+        let fixture = temp_root("log-rotate-intro");
+        let log_dir = fixture.path().join("logs");
+        let identity = test_identity();
+        let settings = LogRotationSettings {
+            max_size_mb: 1,
+            max_files: 2,
+        };
+        let mut writer = RotatingLogWriter::new(
+            log_dir.clone(),
+            DEFAULT_LOG_FILE_NAME,
+            settings,
+            identity.clone(),
+        )
+        .expect("writer");
+
+        write_bytes(&mut writer, 512 * 1024);
+        write_bytes(&mut writer, 700 * 1024);
+
+        let active = fs::read_to_string(log_dir.join(DEFAULT_LOG_FILE_NAME)).unwrap();
+        assert!(active.starts_with(&identity.format_intro()));
+        assert_intro(&active, &identity);
+    }
+
     #[test]
     fn rotating_writer_rotates_and_prunes() {
         let fixture = temp_root("log-rotate");
@@ -493,8 +629,13 @@ mod tests {
             max_size_mb: 1,
             max_files: 2,
         };
-        let mut writer = RotatingLogWriter::new(log_dir.clone(), DEFAULT_LOG_FILE_NAME, settings)
-            .expect("writer");
+        let mut writer = RotatingLogWriter::new(
+            log_dir.clone(),
+            DEFAULT_LOG_FILE_NAME,
+            settings,
+            test_identity(),
+        )
+        .expect("writer");
 
         write_bytes(&mut writer, 512 * 1024);
         write_bytes(&mut writer, 700 * 1024);
@@ -551,5 +692,36 @@ mod tests {
         assert!(!base.exists());
         assert!(!rotated.exists());
         assert!(log_dir.exists());
+    }
+
+    #[test]
+    fn clearing_active_log_rewrites_process_intro() {
+        let fixture = temp_root("log-clear-intro");
+        let log_dir = fixture.path().join("logs");
+        let identity = test_identity();
+        let writer = RotatingLogWriter::new(
+            log_dir.clone(),
+            DEFAULT_LOG_FILE_NAME,
+            LogRotationSettings {
+                max_size_mb: 16,
+                max_files: 10,
+            },
+            identity.clone(),
+        )
+        .expect("writer");
+        let controller = LogController::new(
+            LogRunMode::Daemon,
+            log_dir.clone(),
+            DEFAULT_LOG_FILE_NAME,
+            LogRotationSettings {
+                max_size_mb: 16,
+                max_files: 10,
+            },
+            Some(writer),
+        );
+
+        controller.clear_logs().expect("clear logs");
+        let contents = fs::read_to_string(log_dir.join(DEFAULT_LOG_FILE_NAME)).unwrap();
+        assert_eq!(contents, identity.format_intro());
     }
 }

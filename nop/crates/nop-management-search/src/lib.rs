@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use nop_content_store::flat_storage::{ContentId, content_id_hex, parse_content_id_hex};
-use nop_management_contract::content::ContentSummary;
+use nop_content_store::flat_storage::{
+    ContentId, ContentWidthMode as StoreContentWidthMode, content_id_hex, parse_content_id_hex,
+};
+use nop_management_contract::content::{ContentSummary, ContentWidthMode};
 pub use nop_management_contract::search::{
     SEARCH_ACTION_FIND, SEARCH_ACTION_FIND_ERR, SEARCH_ACTION_FIND_OK, SEARCH_ACTION_INVALIDATE,
     SEARCH_ACTION_INVALIDATE_ERR, SEARCH_ACTION_INVALIDATE_OK, SEARCH_ACTION_RESET,
@@ -40,6 +42,14 @@ pub trait SearchContext: ConfigAccess + PageCacheAccess + SearchServiceAccess {}
 
 impl<T> SearchContext for T where T: ConfigAccess + PageCacheAccess + SearchServiceAccess {}
 
+fn contract_width_mode(value: StoreContentWidthMode) -> ContentWidthMode {
+    match value {
+        StoreContentWidthMode::Auto => ContentWidthMode::Auto,
+        StoreContentWidthMode::Wide => ContentWidthMode::Wide,
+        StoreContentWidthMode::Narrow => ContentWidthMode::Narrow,
+    }
+}
+
 fn content_summary_from_object(object: &CachedObject) -> ContentSummary {
     ContentSummary {
         id: content_id_hex(object.key.id),
@@ -50,6 +60,9 @@ fn content_summary_from_object(object: &CachedObject) -> ContentSummary {
         nav_title: object.nav_title.clone(),
         nav_parent_id: object.nav_parent_id.clone(),
         nav_order: object.nav_order,
+        disable_navbar: object.disable_navbar,
+        disable_floating_nav: object.disable_floating_nav,
+        content_width: contract_width_mode(object.content_width),
         original_filename: object.original_filename.clone(),
         is_markdown: object.is_markdown,
     }
@@ -668,6 +681,9 @@ mod tests {
                 nav_title: None,
                 nav_parent_id: None,
                 nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
                 original_filename: None,
                 is_markdown: true,
             }
@@ -720,6 +736,9 @@ mod tests {
                 nav_title: None,
                 nav_parent_id: None,
                 nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
                 original_filename: None,
                 theme: None,
             },
@@ -737,6 +756,9 @@ mod tests {
                 nav_title: None,
                 nav_parent_id: None,
                 nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
                 original_filename: None,
                 theme: None,
             },
@@ -754,6 +776,9 @@ mod tests {
                 nav_title: None,
                 nav_parent_id: None,
                 nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
                 original_filename: None,
                 theme: None,
             },

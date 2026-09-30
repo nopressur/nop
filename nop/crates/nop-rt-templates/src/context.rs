@@ -41,6 +41,7 @@ impl ErrorPageContext {
 #[derive(Debug, Clone)]
 pub struct AdminSpaShellContext {
     app_name: String,
+    app_title: String,
     admin_path: String,
     runtime_config_json: String,
     bootstrap_json: String,
@@ -50,6 +51,7 @@ pub struct AdminSpaShellContext {
 impl AdminSpaShellContext {
     pub fn new(
         app_name: &str,
+        app_title: &str,
         admin_path: &str,
         runtime_config_json: &str,
         bootstrap_json: &str,
@@ -57,6 +59,7 @@ impl AdminSpaShellContext {
     ) -> Self {
         Self {
             app_name: app_name.to_string(),
+            app_title: app_title.to_string(),
             admin_path: admin_path.to_string(),
             runtime_config_json: runtime_config_json.to_string(),
             bootstrap_json: bootstrap_json.to_string(),
@@ -70,6 +73,7 @@ impl AdminSpaShellContext {
             admin_spa_css => ADMIN_SPA_CSS,
             admin_spa_js => ADMIN_SPA_JS,
             app_name => &self.app_name,
+            app_title => &self.app_title,
             runtime_config_json => &self.runtime_config_json,
             bootstrap_json => &self.bootstrap_json,
             csp_nonce => &self.csp_nonce
@@ -80,14 +84,21 @@ impl AdminSpaShellContext {
 #[derive(Debug, Clone)]
 pub struct LoginSpaShellContext {
     app_name: String,
+    app_title: String,
     runtime_config_json: String,
     csp_nonce: String,
 }
 
 impl LoginSpaShellContext {
-    pub fn new(app_name: &str, runtime_config_json: &str, csp_nonce: &str) -> Self {
+    pub fn new(
+        app_name: &str,
+        app_title: &str,
+        runtime_config_json: &str,
+        csp_nonce: &str,
+    ) -> Self {
         Self {
             app_name: app_name.to_string(),
+            app_title: app_title.to_string(),
             runtime_config_json: runtime_config_json.to_string(),
             csp_nonce: csp_nonce.to_string(),
         }
@@ -98,6 +109,7 @@ impl LoginSpaShellContext {
         let login_spa_js = login_spa_js_path();
         context! {
             app_name => &self.app_name,
+            app_title => &self.app_title,
             login_spa_css => login_spa_css,
             login_spa_js => login_spa_js,
             runtime_config_json => &self.runtime_config_json,

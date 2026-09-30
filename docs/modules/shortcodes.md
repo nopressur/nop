@@ -37,6 +37,7 @@ Per-shortcode reference docs live in `docs/modules/shortcodes/`:
 - `docs/modules/shortcodes/navigation.md` — `link-card`, `start-unibox`.
 - `docs/modules/shortcodes/media.md` — `video`.
 - `docs/modules/shortcodes/listings.md` — `tag-list`.
+- `docs/modules/shortcodes/hero-image.md` — `hero-img`.
 
 This document covers only the mechanism (parser, registry, substitution, hooks, safety).
 
@@ -118,6 +119,11 @@ Each shortcode ships its own defaults via fallback values inside its preset CSS 
 
 The render pipeline exposes an interface, `RenderPipelineSupportHooks`, that lets the layout layer hand the markdown renderer two functions used by shortcodes whose output must escape the page's content container.
 
+The page renderer carries an extensible `PageRenderState` bucket for layout-affecting facts that
+need to travel through rendering. The state is initialized from page metadata, then markdown and
+shortcode processing can adjust it before the final layout template is rendered. The hook-specific
+`PageRenderHookContext` is derived from that state for each container escape operation.
+
 **Trait shape** (`nop/crates/nop-public/src/markdown/render_pipeline_support_hooks.rs`):
 
 ```rust
@@ -154,11 +160,17 @@ impl RenderPipelineSupportHooks for DefaultRenderPipelineSupportHooks {
 
 **Plumbing.** A reference to a `dyn RenderPipelineSupportHooks` lives on `RenderRequest` (`markdown/parser.rs`). The production caller in `markdown/handlers.rs::serve_markdown_alias` constructs `DefaultRenderPipelineSupportHooks` and passes it through. Test helpers in `markdown/parser.rs` do the same. Implementations carry their own state, so theme-aware or page-kind-aware fragments can be added without changing the call site.
 
-**Context construction.** `should_use_compact_width` runs inside `generate_html` before the substitution step. The substitution step builds a `PageRenderHookContext { use_compact_width: <decided value> }` and hands the same context into both `escape_container` and `return_to_container` for every breakout on that page.
+**Context construction.** `should_use_compact_width` runs inside `generate_html` before the substitution step and updates `PageRenderState.use_compact_width`. The substitution step builds a `PageRenderHookContext { use_compact_width: state.use_compact_width }` and hands the same context into both `escape_container` and `return_to_container` for every breakout on that page.
 
 **Contract.** `escape_container(ctx) + content + return_to_container(ctx)` must be well-formed at the close/reopen boundary. Implementations decide the specific tag shape; the markdown layer treats both methods as opaque HTML strings.
 
-**Default impl.** `DefaultRenderPipelineSupportHooks` mirrors `main_layout.html` nesting and reads `ctx.use_compact_width` to choose the matching `max-width` (960px compact, 1152px wide). The outermost `.content-wrapper` is full-viewport-width already and is not escaped or reopened.
+**Default impl.** `DefaultRenderPipelineSupportHooks` mirrors `main_layout.html` nesting and reads `ctx.use_compact_width` to choose the matching `max-width` (960px compact, 1152px wide). The outermost `.content-wrapper` is full-viewport-width already and is not escaped or reopened. The normal page-layout container and every reopened container after a `container_escape` shortcode must derive their markup from the same width decision so hero and other breakout shortcodes cannot lose the page's compact/wide content width.
+
+**Page-boundary suppression.** After placeholder replacement, markdown rendering compares the final
+HTML against the same hook fragments. A leading `escape_container(ctx)` is stripped and recorded as
+`PageRenderState.suppress_initial_content_container = true`; a trailing `return_to_container(ctx)`
+is stripped and recorded as `PageRenderState.suppress_final_content_container = true`. This prevents
+empty layout containers around a full-width shortcode when it is the first or last rendered block.
 
 ### Paragraph-aware substitution
 

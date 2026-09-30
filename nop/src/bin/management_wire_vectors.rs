@@ -34,6 +34,7 @@ fn main() {
     role_entries(&mut entries);
     content_entries(&mut entries);
     search_entries(&mut entries);
+    settings_entries(&mut entries);
 
     let file = VectorFile {
         version: 1,
@@ -938,7 +939,8 @@ fn role_entries(entries: &mut Vec<VectorEntry>) {
 fn content_entries(entries: &mut Vec<VectorEntry>) {
     use nop_management_contract::content::{
         BinaryPrevalidateRequest, BinaryPrevalidateResponse, BinaryUploadCommitRequest,
-        BinaryUploadInitRequest, CONTENT_ACTION_BINARY_PREVALIDATE,
+        BinaryUploadInitRequest, CONTENT_ACTION_ALIAS_STATUS, CONTENT_ACTION_ALIAS_STATUS_ERR,
+        CONTENT_ACTION_ALIAS_STATUS_OK, CONTENT_ACTION_BINARY_PREVALIDATE,
         CONTENT_ACTION_BINARY_PREVALIDATE_ERR, CONTENT_ACTION_BINARY_PREVALIDATE_OK,
         CONTENT_ACTION_BINARY_UPLOAD_COMMIT, CONTENT_ACTION_BINARY_UPLOAD_COMMIT_ERR,
         CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK, CONTENT_ACTION_BINARY_UPLOAD_INIT,
@@ -955,12 +957,13 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         CONTENT_ACTION_UPLOAD_STREAM_COMMIT, CONTENT_ACTION_UPLOAD_STREAM_COMMIT_ERR,
         CONTENT_ACTION_UPLOAD_STREAM_COMMIT_OK, CONTENT_ACTION_UPLOAD_STREAM_INIT,
         CONTENT_ACTION_UPLOAD_STREAM_INIT_ERR, CONTENT_ACTION_UPLOAD_STREAM_INIT_OK,
-        CONTENT_DOMAIN_ID, ContentDeleteRequest, ContentListRequest, ContentListResponse,
-        ContentNavIndexEntry, ContentNavIndexRequest, ContentNavIndexResponse, ContentReadRequest,
-        ContentReadResponse, ContentSortDirection, ContentSortField, ContentSummary,
-        ContentUpdateRequest, ContentUpdateStreamCommitRequest, ContentUpdateStreamInitRequest,
-        ContentUploadRequest, ContentUploadResponse, ContentUploadStreamCommitRequest,
-        ContentUploadStreamInitRequest, UploadStreamInitResponse,
+        CONTENT_DOMAIN_ID, ContentAliasStatusRequest, ContentAliasStatusResponse,
+        ContentDeleteRequest, ContentListRequest, ContentListResponse, ContentNavIndexEntry,
+        ContentNavIndexRequest, ContentNavIndexResponse, ContentReadRequest, ContentReadResponse,
+        ContentSortDirection, ContentSortField, ContentSummary, ContentUpdateRequest,
+        ContentUpdateStreamCommitRequest, ContentUpdateStreamInitRequest, ContentUploadRequest,
+        ContentUploadResponse, ContentUploadStreamCommitRequest, ContentUploadStreamInitRequest,
+        ContentWidthMode, UploadStreamInitResponse,
     };
 
     push_request(
@@ -1012,6 +1015,9 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             nav_parent_id: None,
             nav_order: Some(2),
             theme: Some("default".to_string()),
+            disable_navbar: Some(true),
+            disable_floating_nav: Some(true),
+            content_width: Some(ContentWidthMode::Narrow),
             content: Some("# Hello".to_string()),
         },
     );
@@ -1039,6 +1045,9 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             nav_order: Some(1),
             original_filename: Some("new.md".to_string()),
             theme: Some("default".to_string()),
+            disable_navbar: true,
+            disable_floating_nav: false,
+            content_width: ContentWidthMode::Wide,
             content: vec![1, 2, 3, 4],
         },
     );
@@ -1094,6 +1103,9 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             nav_parent_id: None,
             nav_order: None,
             theme: Some("default".to_string()),
+            disable_navbar: true,
+            disable_floating_nav: false,
+            content_width: ContentWidthMode::Narrow,
             size_bytes: 777,
         },
     );
@@ -1118,6 +1130,9 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             nav_parent_id: None,
             nav_order: None,
             theme: None,
+            disable_navbar: Some(false),
+            disable_floating_nav: Some(false),
+            content_width: Some(ContentWidthMode::Auto),
             size_bytes: 777,
         },
     );
@@ -1127,6 +1142,15 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         CONTENT_DOMAIN_ID,
         CONTENT_ACTION_UPDATE_STREAM_COMMIT,
         ContentUpdateStreamCommitRequest { upload_id: 10 },
+    );
+    push_request(
+        entries,
+        "content.alias_status.request",
+        CONTENT_DOMAIN_ID,
+        CONTENT_ACTION_ALIAS_STATUS,
+        ContentAliasStatusRequest {
+            alias: "images/photo".to_string(),
+        },
     );
 
     push_response(
@@ -1148,6 +1172,9 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
                 nav_parent_id: None,
                 nav_order: Some(1),
                 original_filename: Some("intro.md".to_string()),
+                disable_navbar: true,
+                disable_floating_nav: false,
+                content_width: ContentWidthMode::Wide,
                 is_markdown: true,
             }],
         },
@@ -1177,6 +1204,9 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             nav_order: Some(1),
             original_filename: Some("intro.md".to_string()),
             theme: Some("default".to_string()),
+            disable_navbar: true,
+            disable_floating_nav: false,
+            content_width: ContentWidthMode::Wide,
             content: Some("# Intro".to_string()),
             stream_id: None,
             chunk_bytes: None,
@@ -1199,6 +1229,9 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             nav_order: None,
             original_filename: Some("sample.bin".to_string()),
             theme: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: ContentWidthMode::Auto,
             content: None,
             stream_id: Some(42),
             chunk_bytes: Some(nop_management_bus::ws::WS_MAX_STREAM_CHUNK_BYTES as u32),
@@ -1294,6 +1327,45 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
         CONTENT_ACTION_NAV_INDEX_ERR,
         nop_management_contract::MessageResponse {
             message: "nav index failed".to_string(),
+        },
+    );
+    push_response(
+        entries,
+        "content.alias_status_ok.response",
+        CONTENT_DOMAIN_ID,
+        CONTENT_ACTION_ALIAS_STATUS_OK,
+        ContentAliasStatusResponse {
+            canonical_alias: "images/photo".to_string(),
+            exists: true,
+            id: Some("0000000000000003".to_string()),
+            version: Some(2),
+            mime: Some("image/png".to_string()),
+            is_markdown: Some(false),
+            title: Some("Photo".to_string()),
+        },
+    );
+    push_response(
+        entries,
+        "content.alias_status_missing.response",
+        CONTENT_DOMAIN_ID,
+        CONTENT_ACTION_ALIAS_STATUS_OK,
+        ContentAliasStatusResponse {
+            canonical_alias: "images/new".to_string(),
+            exists: false,
+            id: None,
+            version: None,
+            mime: None,
+            is_markdown: None,
+            title: None,
+        },
+    );
+    push_response(
+        entries,
+        "content.alias_status_err.response",
+        CONTENT_DOMAIN_ID,
+        CONTENT_ACTION_ALIAS_STATUS_ERR,
+        nop_management_contract::MessageResponse {
+            message: "alias status failed".to_string(),
         },
     );
     push_response(
@@ -1442,7 +1514,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
 
 fn search_entries(entries: &mut Vec<VectorEntry>) {
     use nop_management_contract::MessageResponse;
-    use nop_management_contract::content::ContentSummary;
+    use nop_management_contract::content::{ContentSummary, ContentWidthMode};
     use nop_management_contract::search::{
         SEARCH_ACTION_FIND, SEARCH_ACTION_FIND_ERR, SEARCH_ACTION_FIND_OK,
         SEARCH_ACTION_INVALIDATE, SEARCH_ACTION_INVALIDATE_ERR, SEARCH_ACTION_INVALIDATE_OK,
@@ -1494,6 +1566,9 @@ fn search_entries(entries: &mut Vec<VectorEntry>) {
                 nav_parent_id: None,
                 nav_order: Some(1),
                 original_filename: Some("intro.md".to_string()),
+                disable_navbar: true,
+                disable_floating_nav: false,
+                content_width: ContentWidthMode::Wide,
                 is_markdown: true,
             }],
         },
@@ -1541,6 +1616,148 @@ fn search_entries(entries: &mut Vec<VectorEntry>) {
         SEARCH_ACTION_RESET_ERR,
         MessageResponse {
             message: "search reset error".to_string(),
+        },
+    );
+}
+
+fn settings_entries(entries: &mut Vec<VectorEntry>) {
+    use nop_management_contract::MessageResponse;
+    use nop_management_contract::settings::{
+        SETTINGS_ACTION_GET, SETTINGS_ACTION_GET_ERR, SETTINGS_ACTION_GET_OK,
+        SETTINGS_ACTION_SET_DESCRIPTION, SETTINGS_ACTION_SET_DESCRIPTION_ERR,
+        SETTINGS_ACTION_SET_DESCRIPTION_OK, SETTINGS_ACTION_SET_NAME, SETTINGS_ACTION_SET_NAME_ERR,
+        SETTINGS_ACTION_SET_NAME_OK, SETTINGS_ACTION_SET_TITLE, SETTINGS_ACTION_SET_TITLE_ERR,
+        SETTINGS_ACTION_SET_TITLE_OK, SETTINGS_DOMAIN_ID, SettingsGetRequest, SettingsResponse,
+        SettingsSetDescriptionRequest, SettingsSetNameRequest, SettingsSetTitleRequest,
+    };
+
+    push_request(
+        entries,
+        "settings.get.request",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_GET,
+        SettingsGetRequest {},
+    );
+    push_request(
+        entries,
+        "settings.set_name.request",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_NAME,
+        SettingsSetNameRequest {
+            name: "Example".to_string(),
+        },
+    );
+    push_request(
+        entries,
+        "settings.set_title.request",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_TITLE,
+        SettingsSetTitleRequest {
+            title: Some("Example Site".to_string()),
+        },
+    );
+    push_request(
+        entries,
+        "settings.clear_title.request",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_TITLE,
+        SettingsSetTitleRequest { title: None },
+    );
+    push_request(
+        entries,
+        "settings.set_description.request",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_DESCRIPTION,
+        SettingsSetDescriptionRequest {
+            description: Some("Example description".to_string()),
+        },
+    );
+    push_request(
+        entries,
+        "settings.clear_description.request",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_DESCRIPTION,
+        SettingsSetDescriptionRequest { description: None },
+    );
+
+    push_response(
+        entries,
+        "settings.get_ok.response",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_GET_OK,
+        SettingsResponse {
+            name: "Example".to_string(),
+            title: Some("Example Site".to_string()),
+            description: Some("Example description".to_string()),
+        },
+    );
+    push_response(
+        entries,
+        "settings.get_err.response",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_GET_ERR,
+        MessageResponse {
+            message: "settings unavailable".to_string(),
+        },
+    );
+    push_response(
+        entries,
+        "settings.set_name_ok.response",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_NAME_OK,
+        SettingsResponse {
+            name: "Example".to_string(),
+            title: Some("Example Site".to_string()),
+            description: Some("Example description".to_string()),
+        },
+    );
+    push_response(
+        entries,
+        "settings.set_title_ok.response",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_TITLE_OK,
+        SettingsResponse {
+            name: "Example".to_string(),
+            title: Some("Example Site".to_string()),
+            description: Some("Example description".to_string()),
+        },
+    );
+    push_response(
+        entries,
+        "settings.set_title_err.response",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_TITLE_ERR,
+        MessageResponse {
+            message: "invalid title".to_string(),
+        },
+    );
+    push_response(
+        entries,
+        "settings.set_name_err.response",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_NAME_ERR,
+        MessageResponse {
+            message: "invalid name".to_string(),
+        },
+    );
+    push_response(
+        entries,
+        "settings.set_description_ok.response",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_DESCRIPTION_OK,
+        SettingsResponse {
+            name: "Example".to_string(),
+            title: Some("Example Site".to_string()),
+            description: Some("Example description".to_string()),
+        },
+    );
+    push_response(
+        entries,
+        "settings.set_description_err.response",
+        SETTINGS_DOMAIN_ID,
+        SETTINGS_ACTION_SET_DESCRIPTION_ERR,
+        MessageResponse {
+            message: "invalid description".to_string(),
         },
     );
 }

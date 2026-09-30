@@ -21,6 +21,9 @@ import {
   parseU64,
 } from "./fixtures";
 import {
+  CONTENT_ACTION_ALIAS_STATUS,
+  CONTENT_ACTION_ALIAS_STATUS_ERR,
+  CONTENT_ACTION_ALIAS_STATUS_OK,
   CONTENT_ACTION_BINARY_PREVALIDATE,
   CONTENT_ACTION_BINARY_PREVALIDATE_ERR,
   CONTENT_ACTION_BINARY_PREVALIDATE_OK,
@@ -63,6 +66,7 @@ import {
   CONTENT_DOMAIN_ID,
   type ContentSortDirection,
   type ContentSortField,
+  decodeContentAliasStatusResponse,
   decodeBinaryPrevalidateResponse,
   decodeContentListResponse,
   decodeContentNavIndexResponse,
@@ -73,6 +77,7 @@ import {
   encodeBinaryPrevalidateRequest,
   encodeBinaryUploadCommitRequest,
   encodeBinaryUploadInitRequest,
+  encodeContentAliasStatusRequest,
   encodeContentDeleteRequest,
   encodeContentListRequest,
   encodeContentNavIndexRequest,
@@ -143,6 +148,16 @@ function encodeRequest(
         navParentId: parseOptionalString(payload.nav_parent_id, `${name}.nav_parent_id`),
         navOrder: parseOptionalNumber(payload.nav_order, `${name}.nav_order`),
         theme: parseOptionalString(payload.theme, `${name}.theme`),
+        disableNavbar: parseOptionalBool(payload.disable_navbar, `${name}.disable_navbar`),
+        disableFloatingNav: parseOptionalBool(
+          payload.disable_floating_nav,
+          `${name}.disable_floating_nav`,
+        ),
+        contentWidth: parseOptionalString(payload.content_width, `${name}.content_width`) as
+          | "auto"
+          | "wide"
+          | "narrow"
+          | null,
         content: parseOptionalString(payload.content, `${name}.content`),
       });
     case CONTENT_ACTION_DELETE:
@@ -163,10 +178,23 @@ function encodeRequest(
           `${name}.original_filename`,
         ),
         theme: parseOptionalString(payload.theme, `${name}.theme`),
+        disableNavbar: parseBool(payload.disable_navbar, `${name}.disable_navbar`),
+        disableFloatingNav: parseBool(
+          payload.disable_floating_nav,
+          `${name}.disable_floating_nav`,
+        ),
+        contentWidth: parseString(payload.content_width, `${name}.content_width`) as
+          | "auto"
+          | "wide"
+          | "narrow",
         content: parseBytes(payload.content, `${name}.content`),
       });
     case CONTENT_ACTION_NAV_INDEX:
       return encodeContentNavIndexRequest();
+    case CONTENT_ACTION_ALIAS_STATUS:
+      return encodeContentAliasStatusRequest({
+        alias: parseString(payload.alias, `${name}.alias`),
+      });
     case CONTENT_ACTION_BINARY_PREVALIDATE:
       return encodeBinaryPrevalidateRequest({
         filename: parseString(payload.filename, `${name}.filename`),
@@ -195,6 +223,15 @@ function encodeRequest(
         navParentId: parseOptionalString(payload.nav_parent_id, `${name}.nav_parent_id`),
         navOrder: parseOptionalNumber(payload.nav_order, `${name}.nav_order`),
         theme: parseOptionalString(payload.theme, `${name}.theme`),
+        disableNavbar: parseBool(payload.disable_navbar, `${name}.disable_navbar`),
+        disableFloatingNav: parseBool(
+          payload.disable_floating_nav,
+          `${name}.disable_floating_nav`,
+        ),
+        contentWidth: parseString(payload.content_width, `${name}.content_width`) as
+          | "auto"
+          | "wide"
+          | "narrow",
         sizeBytes: parseU64(payload.size_bytes, `${name}.size_bytes`),
       });
     case CONTENT_ACTION_UPLOAD_STREAM_COMMIT:
@@ -211,6 +248,16 @@ function encodeRequest(
         navParentId: parseOptionalString(payload.nav_parent_id, `${name}.nav_parent_id`),
         navOrder: parseOptionalNumber(payload.nav_order, `${name}.nav_order`),
         theme: parseOptionalString(payload.theme, `${name}.theme`),
+        disableNavbar: parseOptionalBool(payload.disable_navbar, `${name}.disable_navbar`),
+        disableFloatingNav: parseOptionalBool(
+          payload.disable_floating_nav,
+          `${name}.disable_floating_nav`,
+        ),
+        contentWidth: parseOptionalString(payload.content_width, `${name}.content_width`) as
+          | "auto"
+          | "wide"
+          | "narrow"
+          | null,
         sizeBytes: parseU64(payload.size_bytes, `${name}.size_bytes`),
       });
     case CONTENT_ACTION_UPDATE_STREAM_COMMIT:
@@ -240,6 +287,7 @@ function decodeResponse(actionId: number, bytes: Uint8Array): unknown {
     case CONTENT_ACTION_UPDATE_STREAM_INIT_ERR:
     case CONTENT_ACTION_UPDATE_STREAM_COMMIT_OK:
     case CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR:
+    case CONTENT_ACTION_ALIAS_STATUS_ERR:
       return decodeMessageResponse(bytes);
     case CONTENT_ACTION_LIST_OK:
       return normalizeContentListResponse(decodeContentListResponse(bytes));
@@ -251,6 +299,8 @@ function decodeResponse(actionId: number, bytes: Uint8Array): unknown {
       return normalizeContentUploadResponse(decodeContentUploadResponse(bytes));
     case CONTENT_ACTION_NAV_INDEX_OK:
       return normalizeContentNavIndexResponse(decodeContentNavIndexResponse(bytes));
+    case CONTENT_ACTION_ALIAS_STATUS_OK:
+      return normalizeContentAliasStatusResponse(decodeContentAliasStatusResponse(bytes));
     case CONTENT_ACTION_BINARY_PREVALIDATE_OK:
       return decodeBinaryPrevalidateResponse(bytes);
     case CONTENT_ACTION_BINARY_UPLOAD_INIT_OK:
@@ -276,6 +326,9 @@ function normalizeContentListResponse(response: {
     navParentId: string | null;
     navOrder: number | null;
     originalFilename: string | null;
+    disableNavbar: boolean;
+    disableFloatingNav: boolean;
+    contentWidth: "auto" | "wide" | "narrow";
     isMarkdown: boolean;
   }[];
 }): unknown {
@@ -293,6 +346,9 @@ function normalizeContentListResponse(response: {
       nav_parent_id: item.navParentId,
       nav_order: item.navOrder,
       original_filename: item.originalFilename,
+      disable_navbar: item.disableNavbar,
+      disable_floating_nav: item.disableFloatingNav,
+      content_width: item.contentWidth,
       is_markdown: item.isMarkdown,
     })),
   };
@@ -309,6 +365,9 @@ function normalizeContentReadResponse(response: {
   navOrder: number | null;
   originalFilename: string | null;
   theme: string | null;
+  disableNavbar: boolean;
+  disableFloatingNav: boolean;
+  contentWidth: "auto" | "wide" | "narrow";
   content: string | null;
   streamId: number | null;
   chunkBytes: number | null;
@@ -325,6 +384,9 @@ function normalizeContentReadResponse(response: {
     nav_order: response.navOrder,
     original_filename: response.originalFilename,
     theme: response.theme,
+    disable_navbar: response.disableNavbar,
+    disable_floating_nav: response.disableFloatingNav,
+    content_width: response.contentWidth,
     content: response.content,
     stream_id: response.streamId,
     chunk_bytes: response.chunkBytes,
@@ -365,6 +427,26 @@ function normalizeContentNavIndexResponse(response: {
       nav_parent_id: item.navParentId,
       nav_order: item.navOrder,
     })),
+  };
+}
+
+function normalizeContentAliasStatusResponse(response: {
+  canonicalAlias: string;
+  exists: boolean;
+  id: string | null;
+  version: number | null;
+  mime: string | null;
+  isMarkdown: boolean | null;
+  title: string | null;
+}): unknown {
+  return {
+    canonical_alias: response.canonicalAlias,
+    exists: response.exists,
+    id: response.id,
+    version: response.version,
+    mime: response.mime,
+    is_markdown: response.isMarkdown,
+    title: response.title,
   };
 }
 

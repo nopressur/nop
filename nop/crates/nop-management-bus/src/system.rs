@@ -200,10 +200,10 @@ mod tests {
                 hsts_preload: false,
             },
             tls: None,
-            app: AppConfig {
+            app: Some(AppConfig {
                 name: "Test App".to_string(),
                 description: "Test Description".to_string(),
-            },
+            }),
             upload: UploadConfig {
                 max_file_size_mb: 100,
                 allowed_extensions: vec!["md".to_string()],
@@ -212,6 +212,7 @@ mod tests {
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
             search: SearchConfig::default(),
+            settings: Default::default(),
             dev_mode: None,
         }
     }
@@ -259,6 +260,7 @@ mod tests {
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
             search: SearchConfig::default(),
+            settings: Default::default(),
             dev_mode: None,
         }
     }

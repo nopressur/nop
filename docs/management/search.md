@@ -85,7 +85,8 @@ Search results are assembled in two phases and merged:
 - Admin content list search routes through `search.find` instead of `content.list` query filtering.
 - Search results must be mapped to content list rows without losing required metadata for list rendering.
 - Admin UI results use the same `128`-hit cap as the search domain.
-- The admin UI applies the selected column sort to the returned results.
+- The admin UI preserves returned search ordering for the default `title` ascending sort and applies
+  local column sorting only when the active sort differs from that default.
 - System settings gains a `Search Reset` section with a reset action that triggers `search.reset`.
 
 ### CLI Integration
@@ -109,3 +110,10 @@ Search results are assembled in two phases and merged:
 - `id` follows the same validation as content IDs in the content management domain.
 - `query` length limits must be enforced in codecs and in-domain validation.
 - Response hit counts are capped at `128` per request.
+
+<!--
+This file is part of the product NoPressure.
+SPDX-FileCopyrightText: 2025-2026 Zivatar Limited
+SPDX-License-Identifier: AGPL-3.0-or-later
+The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
+-->

@@ -61,6 +61,9 @@ fn embedded_template_loader(name: &str) -> Result<Option<String>, minijinja::Err
         }
 
         "public/nav.html" => Some(include_str!("../../nop-public/src/templates/nav.html")),
+        "public/navbar_layout.html" => Some(include_str!(
+            "../../nop-public/src/templates/navbar_layout.html"
+        )),
 
         // Public shortcode templates
         "public/shortcode/video.html" => Some(include_str!(

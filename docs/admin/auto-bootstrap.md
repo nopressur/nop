@@ -85,6 +85,7 @@ Required defaults:
 - TLS domains: `localhost` (or another safe default for SANs)
 - Admin path: `/admin`
 - Local auth enabled with a generated JWT secret
+- Website Title unset under the `settings` section
 - TLS is always enabled for auto-generated config (HTTPS main + HTTP well-known).
 
 Proposed template (exact keys to match validation rules):
@@ -98,6 +99,11 @@ server:
 
 admin:
   path: "/admin"
+
+settings:
+  name: "NoPressure"
+  title: null
+  description: "The AI native tiny little website system"
 
 tls:
   mode: "self-signed"
@@ -116,9 +122,6 @@ logging:
     max_size_mb: 16
     max_files: 10
 
-app:
-  name: "NoPressure"
-  description: "The AI native tiny little website system"
 ```
 
 Notes:

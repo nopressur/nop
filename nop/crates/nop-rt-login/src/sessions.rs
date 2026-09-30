@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use argon2::password_hash::rand_core::{OsRng, RngCore};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use nop_config::LoginSessionConfig;
 use std::collections::{HashMap, VecDeque};
@@ -335,7 +334,7 @@ impl LoginSessionState {
 
 fn generate_session_id() -> String {
     let mut bytes = [0u8; 18];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("secure random session id");
     format!("lsn_{}", URL_SAFE_NO_PAD.encode(bytes))
 }
 

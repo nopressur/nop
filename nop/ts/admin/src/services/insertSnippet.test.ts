@@ -22,6 +22,9 @@ function makeItem(overrides: Partial<ContentListItem> = {}): ContentListItem {
     navParentId: null,
     navOrder: null,
     originalFilename: null,
+    disableNavbar: false,
+    disableFloatingNav: false,
+    contentWidth: "auto",
     isMarkdown: false,
     ...overrides,
   };

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -14,6 +14,58 @@ pub struct ContentId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ContentVersion(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ContentWidthMode {
+    #[default]
+    Auto,
+    Wide,
+    Narrow,
+}
+
+impl ContentWidthMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ContentWidthMode::Auto => "auto",
+            ContentWidthMode::Wide => "wide",
+            ContentWidthMode::Narrow => "narrow",
+        }
+    }
+}
+
+impl std::str::FromStr for ContentWidthMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "auto" => Ok(ContentWidthMode::Auto),
+            "wide" => Ok(ContentWidthMode::Wide),
+            "narrow" => Ok(ContentWidthMode::Narrow),
+            _ => Err(format!("invalid content width mode '{}'", value)),
+        }
+    }
+}
+
+impl Serialize for ContentWidthMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ContentWidthMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value
+            .parse()
+            .map_err(<D::Error as serde::de::Error>::custom)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentSidecar {
@@ -29,6 +81,12 @@ pub struct ContentSidecar {
     pub nav_parent_id: Option<String>,
     #[serde(default)]
     pub nav_order: Option<i32>,
+    #[serde(default)]
+    pub disable_navbar: bool,
+    #[serde(default)]
+    pub disable_floating_nav: bool,
+    #[serde(default)]
+    pub content_width: ContentWidthMode,
     #[serde(default)]
     pub original_filename: Option<String>,
     #[serde(default)]
@@ -368,6 +426,9 @@ mod tests {
             nav_title: None,
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: None,
             theme: None,
         };
@@ -387,6 +448,9 @@ mod tests {
             nav_title: Some("Docs".to_string()),
             nav_parent_id: None,
             nav_order: Some(1),
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: Some("intro.md".to_string()),
             theme: Some("minimal".to_string()),
         };
@@ -401,6 +465,74 @@ mod tests {
     }
 
     #[test]
+    fn sidecar_defaults_render_flags_to_false_when_missing() {
+        let serialized = r#"(
+            alias: "docs/intro",
+            title: Some("Intro"),
+            mime: "text/markdown",
+            tags: [],
+            nav_title: None,
+            nav_parent_id: None,
+            nav_order: None,
+            original_filename: None,
+            theme: None,
+        )"#;
+
+        let parsed: ContentSidecar = ron::from_str(serialized).expect("parse sidecar");
+        assert!(!parsed.disable_navbar);
+        assert!(!parsed.disable_floating_nav);
+        assert_eq!(parsed.content_width, ContentWidthMode::Auto);
+    }
+
+    #[test]
+    fn sidecar_roundtrips_content_width_as_string() {
+        let sidecar = ContentSidecar {
+            alias: "docs/intro".to_string(),
+            title: Some("Intro".to_string()),
+            mime: "text/markdown".to_string(),
+            tags: vec![],
+            nav_title: None,
+            nav_parent_id: None,
+            nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: ContentWidthMode::Wide,
+            original_filename: None,
+            theme: None,
+        };
+
+        let serialized = ron::ser::to_string_pretty(
+            &sidecar,
+            ron::ser::PrettyConfig::new().separate_tuple_members(true),
+        )
+        .expect("serialize sidecar");
+        assert!(serialized.contains(r#"content_width: "wide""#));
+        let parsed: ContentSidecar = ron::from_str(&serialized).expect("parse sidecar");
+        assert_eq!(parsed.content_width, ContentWidthMode::Wide);
+    }
+
+    #[test]
+    fn sidecar_rejects_unknown_content_width() {
+        let serialized = r#"(
+            alias: "docs/intro",
+            title: Some("Intro"),
+            mime: "text/markdown",
+            tags: [],
+            nav_title: None,
+            nav_parent_id: None,
+            nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: "full",
+            original_filename: None,
+            theme: None,
+        )"#;
+
+        let parsed = ron::from_str::<ContentSidecar>(serialized);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
     fn sidecar_allows_missing_alias() {
         let sidecar = ContentSidecar {
             alias: "".to_string(),
@@ -410,6 +542,9 @@ mod tests {
             nav_title: None,
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: None,
             theme: None,
         };

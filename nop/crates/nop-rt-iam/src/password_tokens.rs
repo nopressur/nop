@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use argon2::password_hash::rand_core::{OsRng, RngCore};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use tokio::sync::{mpsc, oneshot};
 
@@ -170,7 +169,7 @@ impl PasswordChangeState {
 
 fn generate_change_token() -> String {
     let mut bytes = [0u8; 18];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("secure random token");
     URL_SAFE_NO_PAD.encode(bytes)
 }
 

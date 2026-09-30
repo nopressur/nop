@@ -7,12 +7,80 @@ Status: Developed
 - Define how the admin UI manages content and related assets in flat storage.
 - Document sidecar metadata editing, listing, and upload flows.
 - Provide a canonical reference for admin content operations and side effects.
+- Add non-Markdown upload versioning so uploading an existing non-Markdown alias keeps the content
+  ID and creates a new blob version.
+- Surface alias-version intent in the admin upload modal as soon as an alias is set.
+- Default detected font uploads to the `fonts/` alias prefix.
+- Load large Markdown editor sources without depending on a single WebSocket response frame.
 
 ## Technical Details
 
 ### Canonical Scope
 
 This document is the single source of truth for admin content management. On-disk storage rules live in `docs/infrastructure/storage.md`, and public serving rules live in `docs/content/content-model.md`.
+
+### Page Editor Toggle and Width
+
+- The admin page editor exposes page-level navbar state through the reusable toggle documented
+  in `docs/admin/ui.md`: `Navbar Enabled` persists `disable_navbar = false`, and `Navbar Disabled`
+  persists `disable_navbar = true`.
+- The admin page editor adds a Markdown page width mode using the same reusable toggle pattern:
+  `Auto Width`, `Wide`, and `Narrow`.
+- Width mode is Markdown metadata and follows the same management-bus sidecar update path as title,
+  tags, theme, navbar fields, and `disable_navbar`.
+- The public rendering behavior for each width mode is owned by `docs/content/content-model.md`.
+
+### Search, Image Identity, and Hero Width
+
+- A public page that sets `disable_navbar = true` omits the navbar only. The public search overlay
+  remains initialized from the page layout, and passive typing plus keyboard shortcuts continue to
+  open search without requiring a navbar search button.
+- Non-Markdown editor previews and editor download links are object-identity actions. They use
+  `/id/<hex>` for the content item being edited, including image previews. Alias URL copy/open
+  actions remain available as explicit alias actions.
+- Binary image aliases are mutable public routing metadata. Sequential alias changes made through
+  management-bus updates must update the live public alias map without restarting the executable.
+  For metadata-only alias changes, ID URLs remain stable and must continue to return the same object
+  bytes.
+- Non-Markdown uploads that reuse an existing non-Markdown alias create a new blob version under the
+  existing content ID. After commit, the alias and `/id/<hex>` public URLs resolve to the latest
+  committed version for that ID.
+- Hero-image container escape/reopen behavior preserves the page's content width decision. Reopened
+  containers use the same compact or wide width as the page layout.
+
+### Non-Markdown Upload Versioning
+
+- The content management domain adds an alias-status query for upload workflows. The request carries
+  an alias string. The response returns:
+  - `canonical_alias`
+  - `exists`
+  - `id` when an object exists
+  - `version` when an object exists
+  - `mime` when an object exists
+  - `is_markdown` when an object exists
+  - `title` when an object exists and has a title
+- The admin upload modal must call the alias-status query for each generated alias and after alias
+  edits. Alias edits use a debounced background check and do not show a transient "checking" state.
+  The UI shows durable alias outcomes only: an existing non-Markdown alias creates a new version, an
+  existing Markdown alias blocks the upload, and failed verification shows "Alias could not be
+  verified."
+- Binary uploads with an alias that resolves to existing non-Markdown content retain the existing
+  content ID and write a new version. The response returns the retained ID, canonical alias, detected
+  MIME type, and `is_markdown = false`.
+- Binary uploads with an alias that resolves to Markdown content are rejected because Markdown body
+  updates must use the Markdown update path.
+- Binary uploads with an empty alias always create a new content ID.
+- Version reservation happens during binary upload initialization. The backend selects the next
+  available version for the target ID while considering committed versions and pending `.upload` or
+  `.tmp` files, then creates the upload temp file with create-new semantics so concurrent same-alias
+  uploads cannot reserve the same version.
+- Binary upload commit writes a sidecar for the new version using the submitted alias, title, tags,
+  detected MIME type, and original filename. The public cache must select the highest committed
+  version for alias and ID routing.
+- Successful binary uploads bump the release tracker so public asset URL consumers can refresh when
+  an alias is versioned.
+- Old versions remain on disk until the content ID is deleted. Deleting a content ID removes all
+  versions for that ID.
 
 ### ID-First Editing and Optional Aliases
 
@@ -27,6 +95,9 @@ This document is the single source of truth for admin content management. On-dis
   no alias exists and always use IDs for navigation.
 - Insert behavior (modal + upload drop): insert `/alias` when an alias exists, otherwise insert
   `/id/<hex>` for all content types (links, images, videos, markdown).
+- The editor header's `View Page` link is a public route, not an editor route: saved Markdown content
+  links to `/<alias>` when an alias exists, `/` for the `index` alias, and `/id/<hex>` only when no
+  alias exists.
 
 ### Admin Base Path and Layout
 
@@ -144,6 +215,10 @@ Validation:
 - Tags.
 - Navbar title, parent, and order.
 - Theme (if enabled per object; see `docs/content/themes.md` for file format and selection).
+- Navbar render state (boolean, default enabled). The public effect is defined in
+  `docs/content/content-model.md`.
+- Width mode (Markdown only, default `Auto Width`). The public effect is defined in
+  `docs/content/content-model.md`.
 - Original filename (read-only).
 - Saving metadata updates the sidecar without altering blob versions.
 
@@ -162,6 +237,10 @@ Validation:
   existing reference.
 - After a successful merge, the Markdown editor cursor moves to the end of the pasted body text,
   before the final reference definition block when one exists.
+- Markdown editors include a `Link-Card` toolbar action that converts the selected inline Markdown
+  link, or the inline Markdown link containing the cursor, into
+  `((link-card title="..." link="..." noblank))`. The conversion uses the link label as the
+  shortcode title and the link destination as the shortcode link.
 
 #### Editor Insert Modal
 
@@ -195,6 +274,12 @@ Validation:
   - `Navbar parent` (select from pages that have a navbar title and no parent).
   - `Navbar order` (integer; ordering within root/child lists).
 - Navbar parent options are supplied via the content management WebSocket using page cache data (`content.nav_index`).
+- The page editor exposes navbar render state as the reusable `Navbar Enabled`/`Navbar Disabled`
+  toggle in the details panel. It is independent of `Navbar title`: a disabled-navbar page can still
+  have `nav_title`, `nav_parent_id`, and `nav_order` so other pages can link to it from their navbar.
+- The page editor exposes floating document navigation render state as a separate reusable
+  `Floating Nav Enabled`/`Floating Nav Disabled` toggle. It maps to `disable_floating_nav` and
+  suppresses only the page-local document navigation panel and mobile heading links.
 - Removing a navbar title from a page that has children must show a warning dialog:
   - "Removing the navbar title from this page will also remove the navbar titles of its children."
   - Actions: Remove / Cancel.
@@ -220,10 +305,15 @@ Uploads are available from the Markdown editor and content list.
 - Default alias prefixes:
   - Images -> `images/<original-filename>`
   - Videos -> `videos/<original-filename>`
+  - Fonts -> `fonts/<original-filename>`
   - Other files -> `files/<original-filename>`
+- Theme font-face rules should reference uploaded fonts by their public alias path, normally
+  `/fonts/<original-filename>`.
 - If the page has a valid alias, editor uploads default to `<page-alias>/<original-filename>` instead
   of the type-based prefixes.
-- Aliases are deduplicated by appending numeric suffixes.
+- Generated aliases are checked against the backend. Alias edits are debounced and checked in the
+  background without transient pending text. An existing non-Markdown alias is treated as a pending
+  new version instead of being deduplicated or rejected.
 - MIME type is auto-detected and stored in the sidecar.
 - Original filename is preserved in the sidecar and cache.
 - Dragging files over the Markdown editor shows a stable drop hint and never navigates away;
@@ -251,15 +341,25 @@ Insertion behavior on drop:
 - `content store` takes a required positional file argument (last argument). Use `-` to read from standard input.
 - `content store` requires a file extension when a filename is provided and fails when missing.
 - `content store` requires `--title` for markdown content.
+- `content store --disable-navbar` sets the page-level navbar render flag for markdown content.
+- `content store --disable-floating-nav` sets the page-level floating document navigation render
+  flag for markdown content.
 - `content store` sets `original_filename` from the provided file name. When reading from standard input, it generates `cli-store-YYYY-MM-DD-HH-MM-SS.<ext>` where `<ext>` is derived from the detected MIME type (fallback `application/octet-stream` uses `.bin`).
 - `content change` targets content by ID only.
-- `content change` allows metadata-only updates (alias/title/tags/theme/nav fields as applicable).
+- `content change` allows metadata-only updates
+  (alias/title/tags/theme/nav/disable-navbar/disable-floating-nav fields as applicable).
+- `content change --disable-navbar` sets the flag, and `content change --enable-navbar` clears it.
+- `content change --disable-floating-nav` sets the flag, and `content change --enable-floating-nav`
+  clears it.
 - `content change` accepts an optional positional file argument (last argument) for markdown body updates only; when omitted, it performs a metadata-only change. Use `-` to read markdown content from standard input.
 - `content change` rejects content body updates for non-markdown objects (the management bus already enforces this rule).
 - `content change` requires markdown file input (`.md`/`.markdown`) when a file path is supplied and rejects empty file/stdin content.
 - `content stream` reads content by ID and writes to the required file argument; use `-` to write to standard output.
-- `content stream` returns markdown body exactly as `content.read` does today (no change).
-- `content stream` sets `stream_content` on `content.read` so binary bytes are streamed over the management connectors.
+- `content stream` writes the raw source bytes for Markdown and the raw object bytes for
+  non-Markdown content.
+- `content stream` sets `stream_content` on `content.read`; connectors may return inline content
+  for small Markdown and stream bytes for large Markdown or binary content. CLI bypass streaming
+  writes raw bytes from the content blob when the read response carries stream metadata.
 - `content delete` deletes by ID only and returns the management bus response message.
 - CLI execution must work via the socket connector when the daemon is running.
 - CLI execution must work via the CLI bypass connector when no socket is available.
@@ -275,10 +375,12 @@ Field applicability:
 | Navbar title | Markdown | Required to include a page in navigation. |
 | Navbar parent | Markdown | Only valid when navbar title is set; must reference a root navbar item. |
 | Navbar order | Markdown | Only valid when navbar title is set. |
+| Disable navbar | Markdown | Stores page-level navbar render state; defaults to false. |
+| Width mode | Markdown | Stores selected width mode: `auto`, `wide`, or `narrow`. |
 
 ### Markdown Create/Update vs Binary Uploads
 
-- Markdown create/update remains on the existing content commands and validation rules, including nav/title/theme handling.
+- Markdown create/update remains on the existing content commands and validation rules, including nav/title/theme/disable-navbar/width-mode handling.
 - Binary asset uploads are a separate command path and must not include nav/theme fields.
 - Binary protocol details and action IDs are documented in `docs/management/connector-socket.md` to avoid duplication.
 
@@ -310,7 +412,22 @@ Field applicability:
   - Negotiate size and metadata up front.
   - Stream UTF-8 bytes to temp files.
   - Commit via management commands that read from the temp file.
-- Size enforcement for markdown uses `upload.max_file_size_mb` (0 = unlimited) with no hard-coded caps.
+- Size enforcement for Markdown create/update uses `upload.max_file_size_mb` (0 = unlimited) with
+  no hard-coded total-size caps. Editor read responses still choose inline versus streamed transfer
+  using the shared WebSocket response budget.
+- Markdown editor reads use `content.read(stream_content = true)` through the admin WebSocket. The
+  response includes inline Markdown source when the encoded content-read response fits the shared
+  WebSocket response payload budget, which is the common case.
+- When the encoded response would exceed the shared inline budget, the response omits inline
+  `content`, includes `stream_id`, `chunk_bytes`, and `size_bytes`, and delivers raw Markdown source
+  bytes through the generic backend-to-frontend WebSocket blob stream defined in
+  `docs/management/connector-socket.md`.
+- The admin content service decodes streamed Markdown bytes as UTF-8 before updating the editor.
+  Inline and streamed reads must produce byte-identical source text after UTF-8 decoding.
+- Oversized Markdown source reads that do not set `stream_content = true` return a content-read
+  error instead of attempting to materialize and send a too-large inline response.
+- Public `/id/<hex>` and alias URLs are not used for Markdown editor source loads because they serve
+  public rendering behavior rather than editable Markdown source.
 
 ### Security and Session Notes
 

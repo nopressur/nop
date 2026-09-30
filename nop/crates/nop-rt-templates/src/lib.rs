@@ -18,13 +18,19 @@ use error::ErrorRenderer;
 
 #[derive(Clone)]
 pub struct RequestTools {
+    pub app_version: String,
     pub templates: Arc<dyn TemplateEngine>,
     pub error_renderer: ErrorRenderer,
 }
 
 impl RequestTools {
     pub fn new(app_name: &str) -> Self {
+        Self::new_with_version(app_name, "Release 1")
+    }
+
+    pub fn new_with_version(app_name: &str, app_version: &str) -> Self {
         Self {
+            app_version: app_version.to_string(),
             templates: Arc::new(MiniJinjaEngine::new()),
             error_renderer: ErrorRenderer::new(app_name.to_string()),
         }
@@ -118,6 +124,19 @@ macro_rules! template_vars {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nop_rt_builtin::LOGIN_SPA_DIR;
+
+    const LOGIN_SHELL_COMPAT_CONFIG: &str = r#"{"appName":"Compatibility Smoke","loginPath":"/login","profilePath":"/login/profile","profileApiPath":"/profile","csrfTokenPath":"/login/csrf-token-api","initialRoute":"login","providers":[{"id":"password","label":"Password"}],"passwordFrontEnd":{"memoryKib":8,"iterations":1,"parallelism":1,"outputLen":16,"saltLen":8},"passwordComplexityEnabled":true,"returnPath":null,"user":null}"#;
+    const LOGIN_SHELL_COMPAT_FIXTURE: &str =
+        include_str!("../../../ts/login/test-fixtures/login-shell.html");
+
+    fn normalize_login_asset_dir(html: &str) -> String {
+        html.replace(&format!("/builtin/{LOGIN_SPA_DIR}/"), "/builtin/login-dev/")
+            .replace(
+                &format!("&#x2f;builtin&#x2f;{LOGIN_SPA_DIR}&#x2f;"),
+                "&#x2f;builtin&#x2f;login-dev&#x2f;",
+            )
+    }
 
     #[test]
     fn render_template_strips_leading_html_comment() {
@@ -154,5 +173,44 @@ mod tests {
         let vars = template_vars! { "x" => "ok" };
         let rendered = render_template(template, &vars);
         assert_eq!(rendered, "<p>ok</p>");
+    }
+
+    #[test]
+    fn login_shell_uses_inert_mount_node_config() {
+        let engine = MiniJinjaEngine::new();
+        let context = LoginSpaShellContext::new(
+            "NoPressure",
+            "NoPressure",
+            r#"{"appName":"NoPressure","returnPath":"/admin?x=\"quoted\""}"#,
+            "nonce-test",
+        )
+        .to_value();
+
+        let rendered = render_minijinja_template(&engine, "login/login_page.html", context)
+            .expect("login shell should render");
+
+        assert!(rendered.contains(r#"<div id="login-app" data-login-config=""#));
+        assert!(rendered.contains("&quot;appName&quot;:&quot;NoPressure&quot;"));
+        assert!(rendered.contains("&quot;quoted\\&quot;&quot;"));
+        assert!(!rendered.contains("window.nopLoginConfig"));
+        assert!(!rendered.contains(r#"<script nonce="nonce-test">"#));
+    }
+
+    #[test]
+    fn login_shell_compatibility_fixture_matches_rendered_template() {
+        let engine = MiniJinjaEngine::new();
+        let context = LoginSpaShellContext::new(
+            "Compatibility Smoke",
+            "Compatibility Smoke",
+            LOGIN_SHELL_COMPAT_CONFIG,
+            "nonce-test",
+        )
+        .to_value();
+
+        let rendered = render_minijinja_template(&engine, "login/login_page.html", context)
+            .expect("login shell should render");
+        let rendered = normalize_login_asset_dir(rendered.trim());
+
+        assert_eq!(rendered, LOGIN_SHELL_COMPAT_FIXTURE.trim());
     }
 }

@@ -29,7 +29,7 @@ pub(super) async fn login_csrf_token(
 ) -> Result<HttpResponse> {
     let ip = match require_client_ip(&req, &config, "Login CSRF token") {
         Ok(ip) => ip,
-        Err(response) => return Ok(response),
+        Err(response) => return Ok(*response),
     };
     let user_key = req.jwt_id();
     if let Err(response) = check_auth_action_rate_limit(
@@ -42,7 +42,7 @@ pub(super) async fn login_csrf_token(
     )
     .await
     {
-        return Ok(response);
+        return Ok(*response);
     }
 
     match issue_csrf_token(&req, csrf_store.as_ref(), config.as_ref()) {
@@ -83,7 +83,7 @@ pub(super) async fn login_bootstrap(
 
     let ip = match require_client_ip(&req, &config, "Login bootstrap") {
         Ok(ip) => ip,
-        Err(response) => return Ok(response),
+        Err(response) => return Ok(*response),
     };
 
     let return_path = payload.return_path.as_deref().and_then(|path| {

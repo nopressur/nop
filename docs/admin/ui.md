@@ -13,11 +13,34 @@ Status: Developed
 
 ## Technical Details
 
+### Page Editor Layout Toggles
+
+- The page editor details panel replaces the `Disable navbar` checkbox with a reusable toggle button component.
+- The navbar toggle is a two-state control:
+  - `Navbar Enabled` is the default state, uses a transparent button with success/green border and text, and persists `disable_navbar = false`.
+  - `Navbar Disabled` is the active state, uses a transparent button with danger/red border and text, and persists `disable_navbar = true`.
+- The page editor details panel adds a force-width toggle for Markdown pages. It is a three-state control:
+  - `Auto Width` is the default state and uses a transparent button with success/green border and text.
+  - `Wide` uses a transparent button with warning/amber border and text.
+  - `Narrow` uses a transparent button with danger/red border and text.
+- The reusable toggle component must support two-state and three-state option sets without embedding content-specific labels in the component.
+- Toggle controls remain keyboard reachable, expose a clear accessible name, and emit a single selected value to the owning view.
+- The toggle component uses the existing Svelte event convention (`createEventDispatcher` + `on:` handlers) rather than callback props.
+- The width mode is Markdown metadata. Non-Markdown editors keep the control disabled.
+- The page editor renders the navbar and width toggles next to each other in one inline horizontal control group. The controls do not have separate visible titles because the selected button text describes the current state.
+- The admin UI stores the selected width mode in editor state, includes it in dirty-state comparison, and sends it through the same content management WebSocket paths used for other sidecar metadata.
+- Public rendering semantics for each width mode are defined in `docs/content/content-model.md`.
+
 ### Admin UX refinements
 
 - Content list search should update rows in place without clearing the table while fetching.
+- Typing-triggered background refreshes must not add or remove transient status text that resizes
+  pages or modals. Keep existing content visible while refreshing; when an empty loading area must
+  be shown, use a textless animated gradient/skeleton with stable dimensions.
 - Content list search auto-focuses on entry; Escape clears the active query.
-- The top-right header link switches to `View Page` when a markdown editor has a saved content ID and targets `/id/<id>`; otherwise it stays `View Site`.
+- The top-right header link switches to `View Page` when a Markdown editor has a saved content ID.
+  It targets the saved public alias when one exists (`/<alias>`, or `/` for `index`) and falls back
+  to `/id/<id>` when no alias exists; otherwise it stays `View Site`.
 - Editor UX:
   - Provide a Close/Cancel action plus Escape behavior that opens an unsaved-changes modal when edits exist.
     - Modal actions: Save (persist and return to list), Discard (return to list), Cancel (stay).
@@ -33,6 +56,9 @@ Status: Developed
     names (from `.theme` files; see `docs/content/themes.md`).
   - Selecting the default theme clears the theme field by sending an empty string; omitted fields are treated as unchanged.
   - Navbar fields include title, parent selection, and numeric order.
+  - Page layout controls render as one inline toggle group without separate visible titles:
+    - `Navbar Enabled` uses green border/text by default, and `Navbar Disabled` uses red border/text when active.
+    - `Auto Width` uses green border/text by default, `Wide` uses amber border/text, and `Narrow` uses red border/text.
   - Tags use a chip-style multi-select from existing tags; missing tags are removed and not shown.
   - Tag roles use a chip-style multi-select from existing roles (`roles.yaml`).
 - Table UX:
@@ -54,6 +80,9 @@ Status: Developed
   - Binary uploads run a two-step validation:
     - Pre-validation (filename, mime, size) builds placeholder blocks for rejected files.
     - Upload validation (alias, tags, filename, mime, size) runs on Save/Enter before streaming.
+  - Upload alias-status checks run in the background and are debounced after alias edits. The modal
+    does not show a transient "checking" line; it only shows durable outcomes such as a pending new
+    version, a Markdown alias conflict, or "Alias could not be verified."
   - Upload progress replaces only the active item; errors restore the editor block with a message.
   - Enter uploads a single item; "Save all" uploads sequentially; the modal closes when all succeed.
   - When the page alias is valid, editor uploads default to `<page-alias>/<filename>` instead of the
@@ -67,10 +96,13 @@ Status: Developed
 - Apply the selected tags filter to search results using the same all-of matching rules as the current list filter.
 - Admin search results use the same `128`-hit cap as the search domain.
 - Title matches are prioritized first; additional results follow relevance order with a title + ID tiebreak.
-- Apply the selected column sort to the returned results (the domain returns title-priority +
-  relevance ordering, but the UI sort determines the final list order).
+- Preserve search-domain result ordering when the default `title` ascending sort is active, so title
+  priority matches remain ahead of lower-priority hits. Apply the selected column sort to returned
+  search results only when the active sort differs from the default.
 - Do not add per-row search invalidation actions in the content list; the admin UI does not expose invalidate in this update.
 - System settings gains a new Search section with a `Reset` button that triggers `search.reset`.
+- Admin Settings requirements live in `docs/admin/settings.md`; the admin navigation must include
+  `Settings` between `Users` and `System`, and the Settings route is `/settings`.
 
 ### Navbar Fields
 
@@ -80,6 +112,11 @@ Status: Developed
   - `Navbar order` (integer input).
 - Populate the parent selector from the content management WebSocket using content IDs (`content.nav_index`).
 - Clearing a parent navbar title must warn and cascade to children.
+- The page-level navbar render state is controlled separately by the reusable navbar toggle button:
+  `Navbar Enabled` maps to `disable_navbar = false`, and `Navbar Disabled` maps to `disable_navbar = true`.
+- The page-level floating document navigation render state is controlled by a matching reusable
+  toggle button: `Floating Nav Enabled` maps to `disable_floating_nav = false`, and
+  `Floating Nav Disabled` maps to `disable_floating_nav = true`.
 
 ### SPA Architecture
 #### SPA shell and runtime config
@@ -91,7 +128,12 @@ Status: Developed
   under `adminPath` that is not an API endpoint still serves the SPA shell so the client can handle it.
 - Inline a runtime config object so the SPA never hardcodes `/admin`:
   - `adminPath`, `appName`, `csrfTokenPath`, `wsPath`, `wsTicketPath`.
+  - `version`, sourced from the running NoPressure binary package version.
   - `userManagementEnabled` derived from server-side OIDC config.
+- `appName` is sourced from `settings.name`. The runtime field name remains `appName` for the
+  admin SPA contract, but the backing server-side configuration is the Website Name setting.
+- Admin shells do not render `settings.description` as a meta description; the description meta tag
+  is public-page-only.
 - Expose the CSP nonce as `window.nopAdminCspNonce` so the admin SPA can attach it to
   dynamically-inserted styles (for example, Ace themes).
 - Inline optional bootstrap data (`window.nopAdminBootstrap`) for server-provided payloads (for example,
@@ -109,6 +151,9 @@ Status: Developed
 - Client-side guards:
   - Hide Users navigation when `userManagementEnabled` is false.
   - Redirect `/users*` to `/pages` when users are disabled.
+- The Settings route `/settings` remains visible regardless of user management provider.
+- The left navigation displays the running NoPressure version as small muted text directly under
+  `System`. This is admin-shell-only state and is not rendered by the login SPA.
 - Invalid admin routes redirect to `/pages` and show a toast indicating the URL was invalid (no 404
   view inside the SPA).
 - Keep existing query params for compatibility where they remain in use (for example,
@@ -118,6 +163,7 @@ Status: Developed
 
 - `nop/ts/admin/src/app/App.svelte` provides layout, navigation, and route outlet.
 - `nop/ts/admin/src/routes/*` holds view-level routes (content, tags, users, themes).
+- Settings UI and protocol details are defined in `docs/admin/settings.md`.
 - `nop/ts/admin/src/components/*` contains shared UI (tables, forms, modals, notification, editors).
 - `nop/ts/admin/src/stores/*` provides global state (runtime config, notifications, modal stack).
 - `nop/ts/admin/src/services/*` encapsulates domain logic (content, tags, users, themes).
@@ -188,6 +234,9 @@ Status: Developed
   without creating definitions, so they do not resolve to existing document references.
 - After `Paste-Merge`, the editor cursor moves to the end of the pasted body text, before the final
   reference definition block when one exists.
+- Markdown editors provide a `Link-Card` toolbar action that converts the selected inline Markdown
+  link, or the inline Markdown link containing the cursor, into a `link-card` shortcode with the
+  link label as `title`, the link destination as `link`, and the `noblank` flag set.
 
 #### Editor Insert Modal
 
@@ -222,7 +271,8 @@ Status: Developed
 - Use system light/dark preferences only (no manual toggle) and keep sharp edges with a small radius.
 - Prefer compact controls with consistent sizing to maximize editor/listing space.
 - Shared components replace current duplicated JS helpers:
-  - `NotificationToaster`, `Pagination`, `Button`, `Input`, `SearchInput`, `Select`, `AceEditor`.
+  - `NotificationToaster`, `Pagination`, `Button`, `Input`, `SearchInput`, `Select`, `AceEditor`,
+    and the reusable state toggle.
 - Toast notifications must emit a console log with the same message and a tone-based severity.
 - Toast notifications are centered horizontally at the top of the viewport, can overlap the navbar, and use
   a compact single-line layout with `max-width: 400px` and `width: 90vw` (truncate overflow if needed).
@@ -270,6 +320,7 @@ Status: Developed
 - `/admin/users` -> `UserListView` with list + role summaries (hidden when OIDC is enabled).
 - `/admin/users/new` -> `UserEditorView` (create mode).
 - `/admin/users/edit/:email` -> `UserEditorView` (edit mode).
+- `/admin/settings` -> `SettingsView` with Website Name, Website Title, and Website Description controls.
 - `/admin/themes` -> `ThemeListView` with list + delete controls.
 - `/admin/themes/new` -> `ThemeEditorView` (create mode) with theme name + variable editor.
 - `/admin/themes/customize/:theme` -> `ThemeEditorView` (edit mode) with variable editor.

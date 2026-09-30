@@ -12,7 +12,12 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import Input from "./Input.svelte";
   import { pushNotification } from "../stores/notifications";
   import { confirmDialog } from "../stores/confirmDialog";
-  import { uploadBinaryFile } from "../services/content";
+  import { clearBrowserTimeout, setBrowserTimeout } from "../services/browser";
+  import {
+    getContentAliasStatus,
+    uploadBinaryFile,
+    type ContentAliasStatus
+  } from "../services/content";
   import type { UploadItem } from "../types/uploads";
 
   export let open = false;
@@ -26,6 +31,11 @@ The code and documentation in this repository is licensed under the GNU Affero G
   }>();
 
   let container: HTMLDivElement | null = null;
+  const ALIAS_CHECK_DEBOUNCE_MS = 400;
+
+  let checkedAliases = new Map<string, string>();
+  let aliasCheckTimers = new Map<string, number>();
+  let aliasCheckSequences = new Map<string, number>();
 
   const busyStates = new Set<UploadItem["status"]>(["prechecking", "uploading"]);
 
@@ -36,6 +46,24 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
   $: if (open && container) {
     container.focus();
+  }
+
+  $: if (open) {
+    for (const item of items) {
+      const alias = item.alias.trim();
+      if (!alias || busyStates.has(item.status) || item.status === "rejected") {
+        continue;
+      }
+      if (checkedAliases.get(item.id) === alias) {
+        continue;
+      }
+      checkedAliases.set(item.id, alias);
+      void refreshAliasStatus(item.id, alias);
+    }
+  } else if (checkedAliases.size > 0 || aliasCheckTimers.size > 0) {
+    clearAliasCheckTimers();
+    checkedAliases = new Map();
+    aliasCheckSequences = new Map();
   }
 
   function updateItem(id: string, updates: Partial<UploadItem>): void {
@@ -54,6 +82,10 @@ The code and documentation in this repository is licensed under the GNU Affero G
     const updates: Partial<UploadItem> = { error: null, status: "ready" };
     if (field === "alias") {
       updates.alias = value;
+      updates.aliasStatus = null;
+      updates.aliasStatusError = null;
+      updates.aliasCheckStatus = value.trim() ? "checking" : "idle";
+      scheduleAliasStatusRefresh(id, value.trim());
     } else if (field === "title") {
       updates.title = value;
     }
@@ -62,6 +94,101 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
   function handleTagsChange(id: string, tags: string[]): void {
     updateItem(id, { tags, error: null, status: "ready" });
+  }
+
+  function clearAliasCheckTimers(): void {
+    for (const timer of aliasCheckTimers.values()) {
+      clearBrowserTimeout(timer);
+    }
+    aliasCheckTimers = new Map();
+  }
+
+  function clearAliasCheckTimer(id: string): void {
+    const timer = aliasCheckTimers.get(id);
+    if (timer !== undefined) {
+      clearBrowserTimeout(timer);
+      aliasCheckTimers.delete(id);
+    }
+  }
+
+  function scheduleAliasStatusRefresh(id: string, alias: string): void {
+    const trimmed = alias.trim();
+    clearAliasCheckTimer(id);
+    if (!trimmed) {
+      checkedAliases.delete(id);
+      updateItem(id, {
+        aliasCheckStatus: "idle",
+        aliasStatus: null,
+        aliasStatusError: null
+      });
+      return;
+    }
+    checkedAliases.set(id, trimmed);
+    const timer = setBrowserTimeout(() => {
+      aliasCheckTimers.delete(id);
+      void refreshAliasStatus(id, trimmed);
+    }, ALIAS_CHECK_DEBOUNCE_MS);
+    aliasCheckTimers.set(id, timer);
+  }
+
+  async function refreshAliasStatus(id: string, alias: string): Promise<void> {
+    const trimmed = alias.trim();
+    const sequence = (aliasCheckSequences.get(id) ?? 0) + 1;
+    aliasCheckSequences.set(id, sequence);
+    if (!trimmed) {
+      updateItem(id, {
+        aliasCheckStatus: "idle",
+        aliasStatus: null,
+        aliasStatusError: null
+      });
+      return;
+    }
+
+    updateItem(id, {
+      aliasCheckStatus: "checking",
+      aliasStatusError: null
+    });
+
+    try {
+      const status = await getContentAliasStatus(trimmed);
+      if (aliasCheckSequences.get(id) !== sequence || !itemStillHasAlias(id, trimmed)) {
+        return;
+      }
+      updateItem(id, {
+        aliasCheckStatus: "idle",
+        aliasStatus: status.exists ? status : null,
+        aliasStatusError: null,
+        error: status.exists && status.isMarkdown ? "Markdown aliases cannot be used for binary uploads." : null
+      });
+    } catch (error) {
+      if (!itemStillHasAlias(id, trimmed)) {
+        return;
+      }
+      if (aliasCheckSequences.get(id) !== sequence) {
+        return;
+      }
+      updateItem(id, {
+        aliasCheckStatus: "idle",
+        aliasStatus: null,
+        aliasStatusError: "Alias could not be verified."
+      });
+    }
+  }
+
+  function itemStillHasAlias(id: string, alias: string): boolean {
+    const item = items.find((entry) => entry.id === id);
+    return Boolean(item && item.alias.trim() === alias);
+  }
+
+  function aliasBlocksUpload(item: UploadItem): boolean {
+    return item.aliasStatus?.exists === true && item.aliasStatus.isMarkdown === true;
+  }
+
+  function nextVersion(status: ContentAliasStatus): number | null {
+    if (status.version === null) {
+      return null;
+    }
+    return status.version + 1;
   }
 
   async function handleClose(): Promise<void> {
@@ -107,6 +234,13 @@ The code and documentation in this repository is licensed under the GNU Affero G
     if (!item || busyStates.has(item.status) || item.status === "rejected") {
       return;
     }
+    if (aliasBlocksUpload(item)) {
+      updateItem(id, {
+        status: "error",
+        error: "Markdown aliases cannot be used for binary uploads."
+      });
+      return;
+    }
 
     const tags = item.tags;
 
@@ -139,7 +273,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
       return;
     }
     const ids = items
-      .filter((item) => item.status === "ready" || item.status === "error")
+      .filter((item) => (item.status === "ready" || item.status === "error") && !aliasBlocksUpload(item))
       .map((item) => item.id);
     for (const id of ids) {
       await saveItem(id);
@@ -232,6 +366,22 @@ The code and documentation in this repository is licensed under the GNU Affero G
             {#if item.error}
               <p class="mt-3 text-xs text-danger">{item.error}</p>
             {/if}
+            <div class="mt-3 min-h-4" aria-live="polite">
+              {#if item.aliasStatus?.exists && item.aliasStatus.isMarkdown}
+                <p class="text-xs text-danger">
+                  Alias belongs to Markdown content.
+                </p>
+              {:else if item.aliasStatus?.exists}
+                <p class="text-xs text-muted">
+                  New version of {item.aliasStatus.id ?? item.aliasStatus.canonicalAlias}
+                  {#if nextVersion(item.aliasStatus) !== null}
+                    v{nextVersion(item.aliasStatus)}
+                  {/if}
+                </p>
+              {:else if item.aliasStatusError}
+                <p class="text-xs text-warning">{item.aliasStatusError}</p>
+              {/if}
+            </div>
             <form
               class="mt-3"
               on:submit|preventDefault={() => saveItem(item.id)}
@@ -305,7 +455,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
                   type="submit"
                   variant="primary"
                   size="sm"
-                  disabled={busyStates.has(item.status)}
+                  disabled={busyStates.has(item.status) || aliasBlocksUpload(item)}
                 >
                   Save
                 </Button>

@@ -5,6 +5,7 @@ Always read these documents before making changes or proposing work:
 - `docs/README.md` for the documentation map and module boundaries.
 - `docs/standards/coding.md` for Rust style, structure, and logging conventions.
 - `docs/standards/testing.md` for test placement, naming, and execution expectations.
+- `private/docs/shared-build-cache.md` for the shared cargo target dir and sccache workflow (mandatory before any build, test, or git worktree operation).
 
 After that baseline, read the area-specific doc under `docs/` that matches the module you are touching.
 
@@ -45,7 +46,9 @@ After that baseline, read the area-specific doc under `docs/` that matches the m
 - Name tests by behavior (for example, `rejects_invalid_csrf_header`).
 
 ## Commit Policy
-- Assistants must not commit unless explicitly instructed by the user.
+- On the master branch, assistants must not commit or push unless explicitly instructed by the user for that exact write.
+- On task worktrees, assistants are expected to commit frequently (per documentation and implementation phase) and push the branch, so work can be tested, repeated, and reverted as needed.
+- Never merge into master directly; integrate worktrees only via squash merge when the user explicitly asks.
 - Commit messages start with a capital letter and end with a full stop.
 - Keep commit messages succinct and descriptive of the changes.
 

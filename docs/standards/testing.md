@@ -18,12 +18,18 @@ Reliable tests keep regressions out and make changes easier for AI assistants to
   scripts/run-full-tests.sh
   ```
   This formats, tests, and lints the root `nop` package and every local Rust path crate in
-  dependency-first order, then runs SPA checks/tests.
+  dependency-first order, then runs admin/login SPA checks/tests plus public site checks, tests,
+  build, and built-bundle compatibility validation.
 - Run the Playwright browser E2E/UX scope separately when UI workflow coverage is relevant:
   ```bash
   scripts/run-playwright.sh
   ```
 - When changing the admin SPA, also run `cd nop/ts/admin && npm run test` (and `npm run check` for type validation).
+- Theme changes and UI-facing changes must include corresponding Playwright E2E coverage that
+  validates the rendered browser output. For theme work, this means asserting that configured
+  theme values reach the browser and affect computed styles in the relevant light/dark modes; for
+  UI features, this means asserting the visible or computed rendered result, not only source data,
+  API responses, or DOM presence.
 
 ## Unit Tests
 
@@ -85,7 +91,34 @@ Reliable tests keep regressions out and make changes easier for AI assistants to
 - Login SPA unit/integration tests live under `nop/ts/login/src/**/*.test.ts`.
 - The login SPA should use Vitest for local logic, UI state, and API-mocking coverage; end-to-end coverage stays in Playwright.
 - Run with `cd nop/ts/login && npm install` (first time) and `npm run test` once Vitest is wired in.
-- Use `npm run check` for TypeScript-only validation when changing login types or runtime config contracts.
+- Use `npm run check` for TypeScript validation, browser compatibility linting, and built-bundle
+  compatibility validation when changing login types, runtime config contracts, or browser-facing
+  code.
+- The built-bundle compatibility validation must execute the emitted login script in legacy runtime
+  smoke scenarios where `EventTarget`, `queueMicrotask`, `WebAssembly`,
+  `String.prototype.replaceAll`, and ChildNode convenience methods are absent, and must assert
+  that the login shell mounts from escaped `data-login-config` HTML without relying on
+  `window.nopLoginConfig`. The smoke must use a rendered-shell fixture guarded by
+  `nop-rt-templates` MiniJinja rendering tests, not a synthetic jsdom-created mount node.
+- Login SPA browser compatibility is a build/lint/bundle contract. UX tests must continue to
+  validate user-visible behavior and must not depend on JavaScript implementation details such as
+  whether the active Argon2id implementation is WebAssembly or asm.js.
+- The slow Argon2 asm.js equivalence suite (`npm run argon2-asm:test`) is not regular login
+  validation. Run it only when the Argon2 asm.js implementation, generator, compatibility wrapper,
+  vector corpus, or generated artifact changes.
+
+## Frontend (Public Site) Tests
+
+- Public site unit tests live under `nop/ts/site/src/**/*.test.ts`.
+- Run with `cd nop/ts/site && npm ci` (first time when `package-lock.json` is present), then
+  `npm run check`, `npm run test`, and `npm run build`.
+- `npm run check` must include TypeScript validation, browser compatibility linting, production
+  build, and built-bundle ES2019 compatibility validation for `nop/builtin/site.js`.
+- The public-site built-bundle compatibility validation must execute `nop/builtin/site.js` in
+  a legacy runtime smoke scenario where the `EventTarget` constructor is absent, and must assert
+  that core navigation initializes.
+- Public site browser compatibility is a build/lint/bundle contract. UX tests must continue to
+  validate user-visible behavior and must not depend on public-site implementation details.
 
 ## API Coverage
 
@@ -103,6 +136,10 @@ including the login/profile flows, while keeping SPA unit/integration logic in V
 3. **Input rules**: Use `humanType`, `humanClick`, and `humanClearAndType` from `tests/playwright/utils/humanInput.ts`. Randomization is deterministic via `PW_RNG_SEED` or the test title path.
 4. **Suite split**: `tests/playwright/tests/e2e` can use full Playwright power; `tests/playwright/tests/ux` must stick to user-visible selectors (roles, labels, text) without hidden selectors or `page.evaluate`.
 5. **Artifacts**: HTML report plus trace/screenshot/video on failure under `PW_OUTPUT_DIR` or the OS temp dir `nopressure-pw-<run-id>` (`PW_RUN_ID`).
+6. **Rendered output requirement**: Any theme or UI-related change must add or update E2E coverage
+   that checks the final rendered browser output. Use computed style assertions, media emulation,
+   visible-state assertions, screenshots, or equivalent browser-level checks as appropriate for the
+   change.
 
 Run commands:
 ```bash

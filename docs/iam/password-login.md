@@ -10,8 +10,178 @@ Status: Developed
 - Use a two-phase login to fetch the front-end salt before computing the hash client-side.
 - Keep a double-hash storage model so the front-end hash is never stored or replayable.
 - Preserve the shared JWT issuance and middleware behavior across all login methods.
+- Provide a standalone, reproducible, testable asm.js Argon2id implementation that can later be
+  used by the login SPA when WebAssembly is unavailable.
 
 ## Technical Details
+
+### Standalone Argon2id asm.js Library Requirement
+
+The password-login client hashing boundary includes a separate Argon2id JavaScript library. The
+artifact is independently generated, independently testable, and suitable for later inclusion as
+the no-WebAssembly fallback for front-end password hashing.
+
+The library lives under `nop/ts/login/argon2-asm/` because it is part of the password-login client
+hashing boundary, but it remains outside `nop/ts/login/src/` until the login SPA explicitly adopts
+it. The artifact layout is:
+
+```text
+nop/ts/login/argon2-asm/
+  dist/
+    argon2id.asm.js
+  scripts/
+    generate.mjs
+    generate-vectors.mjs
+    test-equivalence.mjs
+    check-compat.mjs
+  vectors/
+    argon2id-vectors.json
+  argon2id.asm.manifest.json
+```
+
+`dist/argon2id.asm.js` is a generated classic JavaScript file. It is not an ES module and does not
+depend on WebAssembly. The public surface is a small deterministic API that accepts password bytes
+or a string, salt bytes or hex, and explicit Argon2id parameters, then returns the lowercase hex
+output:
+
+```ts
+type Argon2idParams = {
+  memoryKib: number;
+  iterations: number;
+  parallelism: number;
+  outputLen: number;
+};
+
+deriveArgon2id(password: string | Uint8Array, salt: string | Uint8Array, params: Argon2idParams): string;
+```
+
+The standalone artifact is loadable by Node-based tests and by a classic browser script. The
+browser-facing shape attaches `window.NoPressureArgon2id`; the Node test shape uses
+`module.exports` from the same file. It does not require Svelte, Vite, DOM APIs, `fetch`,
+`Promise`, `BigInt`, `Proxy`, or `WebAssembly`.
+
+#### Regeneration Process
+
+The generator resolves the pinned `hash-wasm` package through `nop/ts/login/package-lock.json` and
+uses the installed package source as a build input. It does not edit upstream files and does not
+patch files under `node_modules/`. The source inputs are the Argon2 C implementation, the Blake2b
+C implementation, the local bridge, the handwritten wrapper, generator scripts, and compatibility
+configuration.
+
+The generated artifact is committed only with a manifest that records enough information to
+reproduce and review it:
+
+- Generator command and working directory.
+- Generator toolchain name and version.
+- `hash-wasm` package name, version, resolved integrity, and license.
+- SHA-256 hash for every C/header/source file consumed by the generator.
+- SHA-256 hash for `dist/argon2id.asm.js`.
+- The exported API name and expected Argon2 variant (`argon2id`, version `0x13`).
+
+The generator uses the locally installed `emcc` toolchain and writes the artifact and manifest
+deterministically. Regeneration is valid only when the manifest changes consistently with the
+generated artifact and the equivalence tests pass. Upstream dependency updates must be normal
+lockfile updates; the process must not use npm overrides or local patches to force a transitive
+dependency graph.
+
+#### Vector Corpus
+
+`vectors/argon2id-vectors.json` is generated from the current WebAssembly `hash-wasm`
+implementation and is the authority for cross-testing the asm.js artifact. The corpus contains
+3,000 cases built from a deterministic matrix:
+
+- 100 password inputs.
+- 5 salt inputs per password.
+- 6 Argon2id parameter profiles per password/salt pair.
+
+The password input set includes:
+
+- Random-looking deterministic strings generated from a fixed seed.
+- Human-readable words and phrases.
+- Numeric-only strings and repeated digit strings.
+- One-character, whitespace-only, leading/trailing whitespace, and newline-containing passwords.
+- Empty password rejection coverage, because the current `hash-wasm` public Argon2id API rejects
+  empty passwords before hashing.
+- Non-ASCII strings to validate UTF-8 handling.
+- Long passwords that exceed one block of input processing.
+- Deterministic duplicates of visually similar strings where UTF-8 or whitespace handling could be
+  confused.
+
+The five salt inputs for each password cover different lengths and byte patterns:
+
+- Minimum accepted front-end salt length: 8 bytes.
+- Standard front-end salt length: 16 bytes.
+- Longer salt length: 32 bytes.
+- Fixed edge-case salt pattern, such as all-zero, all-`ff`, or incrementing bytes.
+- Deterministic random-looking salt derived from the corpus seed and password index.
+
+The six Argon2id parameter profiles cover fast developer profiles for broad regression coverage
+and production-shaped profiles for real login compatibility:
+
+- Tiny fast profile for cheap local iteration.
+- Low-memory profile with multiple iterations.
+- Medium-memory profile with output length variation.
+- Parallelism variation where supported by the implementation.
+- Current production front-end profile:
+  `memory_kib=65536`, `iterations=2`, `parallelism=1`, `output_len=32`.
+- A high-output-length profile to validate output truncation/expansion behavior.
+
+Each vector stores the password encoding, salt hex, Argon2id parameters, and expected lowercase hex
+output. Vector generation is deterministic so reviewers can distinguish intentional algorithm or
+dependency changes from accidental output churn.
+
+#### Equivalence and Compatibility Checks
+
+The asm.js implementation is acceptable only when every vector generated by the WebAssembly
+implementation matches exactly. Partial compatibility is a failure because the login server accepts
+only the exact front-end hash for a user's salt and configured parameters.
+
+The standalone checks are:
+
+- Regeneration check: `npm run argon2-asm:generate` rewrites `dist/argon2id.asm.js` and
+  `argon2id.asm.manifest.json` deterministically so working-tree diffs show artifact drift.
+- Manifest check: `npm run argon2-asm:check` verifies source input hashes, output hash, toolchain
+  metadata, and package version.
+- Equivalence check: run every vector through `dist/argon2id.asm.js` and compare exact lowercase
+  hex output with the WebAssembly-generated expected value.
+- Compatibility check: validate the final artifact with layered static gates for the Safari 9.1
+  floor.
+
+The static compatibility gates are intentionally strict because this file is expected to run as a
+plain classic script in browsers without WebAssembly:
+
+- `es-check es5 dist/argon2id.asm.js` must pass against the final generated artifact.
+- The local Browserslist target for this enclosure is:
+  ```text
+  iOS >= 9.3
+  Safari >= 9.1
+  ```
+- Browserslist-backed compatibility linting applies to handwritten wrapper/source files in
+  `nop/ts/login/argon2-asm/` so unsupported browser APIs are caught before generation.
+- `scripts/check-compat.mjs` scans the final `dist/argon2id.asm.js` and fails on hard-banned
+  syntax or runtime dependencies:
+  - `WebAssembly`
+  - `BigInt`
+  - `Proxy`
+  - `Promise`
+  - `fetch`
+  - `globalThis`
+  - `async`
+  - dynamic `import(`
+  - ES modules (`import`/`export` declarations)
+  - `class`
+  - `let` and `const`
+  - arrow functions (`=>`)
+  - optional chaining (`?.`)
+  - nullish coalescing (`??`)
+
+The compatibility gates validate the committed final artifact, not only intermediate Emscripten
+output. Raw Emscripten output may contain modern loader code; the generator is responsible for
+producing or post-processing a Safari-9.1-shaped classic script before the checks run.
+
+These checks are intentionally separate from Playwright. Playwright remains responsible for the
+login UX and browser flow once the fallback is integrated. The standalone asm.js work is verified by
+algorithmic equivalence and static compatibility gates first.
 
 ### Argon2id Two-Phase Login
 

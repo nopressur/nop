@@ -1,0 +1,75 @@
+# Theme palette for pink
+
+color-background-primary-light #fdf2f8
+color-background-secondary-light #f9a8d4
+color-content-background-light #ffffff
+color-text-primary-light #831843
+color-text-secondary-light #be185d
+color-navbar-background-light rgba(255, 255, 255, 0.95)
+color-footer-background-light rgba(255, 255, 255, 0.95)
+color-border-light rgba(236, 72, 153, 0.2)
+color-shadow-light rgba(236, 72, 153, 0.1)
+color-code-background-light #fce7f3
+color-blockquote-background-light #fce7f3
+color-table-border-light #f472b6
+color-table-header-background-light #fce7f3
+color-background-primary-dark #4c0519
+color-background-secondary-dark #831843
+color-content-background-dark #831843
+color-text-primary-dark #fbcfe8
+color-text-secondary-dark #f472b6
+color-navbar-background-dark rgba(131, 24, 67, 0.95)
+color-footer-background-dark rgba(131, 24, 67, 0.95)
+color-border-dark rgba(244, 114, 182, 0.3)
+color-shadow-dark rgba(0, 0, 0, 0.4)
+color-code-background-dark #be185d
+color-blockquote-background-dark #be185d
+color-table-border-dark #ec4899
+color-table-header-background-dark #be185d
+color-content-link-light #ec4899
+color-content-link-dark #f472b6
+color-breadcrumb-link-dark #f472b6
+color-content-blockquote-border-light #ec4899
+color-navbar-dropdown-arrow-light #db2777
+color-navbar-dropdown-border-top-light rgba(236, 72, 153, 0.2)
+color-navbar-dropdown-item-hover-background-light #fce7f3
+color-navbar-dropdown-background-dark #4c0519
+color-navbar-dropdown-border-dark rgba(244, 114, 182, 0.3)
+color-navbar-dropdown-shadow-dark rgba(0, 0, 0, 0.4)
+color-navbar-dropdown-item-hover-background-dark #be185d
+color-navbar-link-hover-background-dark #be185d
+color-navbar-dropdown-link-hover-background-dark #be185d
+color-notification-warning-background-dark #ec4899
+color-notification-warning-text-dark #fdf2f8
+
+# Typography
+font-body-family 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+font-heading-family 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+font-mono-family monospace
+font-body-size 16px
+font-body-line-height normal
+font-body-weight 400
+font-heading-weight 700
+font-heading-line-height 1.2
+font-nav-family 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+font-nav-weight 400
+font-control-family 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+font-code-size 0.875em
+font-code-line-height normal
+
+# Layout and components
+size-content-padding 2rem
+size-content-margin-y 1rem
+size-navbar-min-height 3.25rem
+size-search-panel-radius 12px
+size-control-radius 8px
+size-code-radius 5px
+size-table-cell-padding 0.75rem
+size-blockquote-padding 1rem
+
+# Visual treatment
+shadow-content-media none
+border-width-control 1px
+border-width-table 1px
+opacity-search-backdrop-light 0.65
+opacity-search-backdrop-dark 0.75

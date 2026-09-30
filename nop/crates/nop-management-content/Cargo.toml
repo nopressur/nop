@@ -1,11 +1,11 @@
 [package]
 name = "nop-management-content"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 async-trait = "0.1.89"
-infer = "0.19.0"
+infer = "0.22.0"
 mime_guess = "2.0"
 nop-config = { path = "../nop-config" }
 nop-content-store = { path = "../nop-content-store" }

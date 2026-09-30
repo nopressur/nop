@@ -9,6 +9,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import { onDestroy, onMount } from "svelte";
   import Button from "../components/Button.svelte";
   import CompactMultiSelect from "../components/CompactMultiSelect.svelte";
+  import LoadingGradient from "../components/LoadingGradient.svelte";
   import Pagination from "../components/Pagination.svelte";
   import SearchInput from "../components/SearchInput.svelte";
   import UploadOverlay from "../components/UploadOverlay.svelte";
@@ -122,11 +123,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
         if (current !== requestId) {
           return;
         }
-        const sortedItems = sortContentItems(
-          response.hits,
-          sortField,
-          sortDirection,
-        );
+        const sortedItems = isDefaultSort(sortField, sortDirection)
+          ? response.hits
+          : sortContentItems(response.hits, sortField, sortDirection);
         total = sortedItems.length;
         const totalPages = Math.max(1, Math.ceil(total / pageSize));
         page = Math.min(Math.max(1, nextPage), totalPages);
@@ -409,6 +408,13 @@ The code and documentation in this repository is licensed under the GNU Affero G
     return items;
   }
 
+  function isDefaultSort(
+    field: ContentSortField,
+    direction: ContentSortDirection,
+  ): boolean {
+    return field === "title" && direction === "asc";
+  }
+
   function tagsSortValue(tags: string[]): string | null {
     if (tags.length === 0) {
       return null;
@@ -498,7 +504,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
 
     <div class="mt-4 md:hidden">
       {#if $loading && items.length === 0 && initialLoad}
-        <p class="py-6 text-sm text-muted">Loading content...</p>
+        <div class="py-3">
+          <LoadingGradient rows={3} rowClassName="h-12" />
+        </div>
       {:else if items.length === 0}
         <p class="py-6 text-sm text-muted">No content matches this filter.</p>
       {:else}
@@ -673,7 +681,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
         <tbody class="divide-y divide-border" bind:this={listRef}>
           {#if $loading && items.length === 0 && initialLoad}
             <tr>
-              <td class="py-6 text-sm text-muted" colspan="6">Loading content...</td>
+              <td class="py-3" colspan="6">
+                <LoadingGradient rows={5} rowClassName="h-8" />
+              </td>
             </tr>
           {:else if items.length === 0}
             <tr>
@@ -759,10 +769,6 @@ The code and documentation in this repository is licensed under the GNU Affero G
         </tbody>
       </table>
     </div>
-
-    {#if $loading && items.length > 0}
-      <p class="mt-3 text-xs uppercase tracking-[0.3em] text-muted">Updating results...</p>
-    {/if}
 
     <div class="mt-4">
       <Pagination

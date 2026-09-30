@@ -7,6 +7,7 @@ pub mod content;
 pub(crate) mod parse_utils;
 pub mod roles;
 pub mod search;
+pub mod settings;
 pub mod system;
 pub mod tags;
 pub mod users;
@@ -170,6 +171,7 @@ pub fn build_registry() -> Result<CliRegistry, CliError> {
     registry.register_domain(tags::domain())?;
     registry.register_domain(content::domain())?;
     registry.register_domain(search::domain())?;
+    registry.register_domain(settings::domain())?;
     Ok(registry)
 }
 

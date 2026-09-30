@@ -20,16 +20,16 @@ pub(super) fn require_client_ip(
     req: &HttpRequest,
     config: &ValidatedConfig,
     context: &str,
-) -> Result<IpAddr, HttpResponse> {
+) -> Result<IpAddr, Box<HttpResponse>> {
     match security::threats::extract_client_ip(req, config) {
         Some(ip) => Ok(ip),
         None => {
             log::warn!("{} rejected: client IP unavailable", context);
-            Err(login_error_response(
+            Err(Box::new(login_error_response(
                 "invalid_request",
                 "Invalid request.",
                 StatusCode::BAD_REQUEST,
-            ))
+            )))
         }
     }
 }
@@ -41,18 +41,18 @@ pub(super) async fn check_auth_action_rate_limit(
     user_key: Option<String>,
     config: &ValidatedConfig,
     context: &str,
-) -> Result<(), HttpResponse> {
+) -> Result<(), Box<HttpResponse>> {
     if let Err(err) = security_tools
         .auth_action_limiter
         .check(action, ip, user_key, &config.security.login_sessions)
         .await
     {
         log::warn!("{} rate limited for IP {}", context, ip);
-        return Err(login_error_response(
+        return Err(Box::new(login_error_response(
             err.code(),
             err.message(),
             StatusCode::TOO_MANY_REQUESTS,
-        ));
+        )));
     }
     Ok(())
 }

@@ -31,12 +31,12 @@ impl WsAuthError {
     }
 }
 
-pub fn require_validated_csrf(req: &HttpRequest) -> Result<(), HttpResponse> {
+pub fn require_validated_csrf(req: &HttpRequest) -> Result<(), Box<HttpResponse>> {
     if req.extensions().get::<ValidatedCsrfToken>().is_none() {
         log::warn!("Admin WS ticket request missing CSRF token");
-        return Err(HttpResponse::BadRequest().json(json!({
+        return Err(Box::new(HttpResponse::BadRequest().json(json!({
             "error": format!("{} header required", CSRF_HEADER_NAME)
-        })));
+        }))));
     }
     Ok(())
 }

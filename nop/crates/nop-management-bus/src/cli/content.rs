@@ -14,7 +14,7 @@ use nop_management_contract::ManagementCommand;
 use nop_management_contract::content::{
     CONTENT_ACTION_DELETE_OK, CONTENT_ACTION_READ_OK, CONTENT_ACTION_UPDATE_OK,
     CONTENT_ACTION_UPLOAD_OK, CONTENT_DOMAIN_ID, ContentCommand, ContentDeleteRequest,
-    ContentReadRequest, ContentUpdateRequest, ContentUploadRequest,
+    ContentReadRequest, ContentUpdateRequest, ContentUploadRequest, ContentWidthMode,
 };
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -28,7 +28,7 @@ pub fn domain() -> DomainSpec {
                 name: "store",
                 aliases: &[],
                 usage: &[
-                    "content store [--alias <alias>] [--title <title>] [--tag <tag> ...] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] <file|->",
+                    "content store [--alias <alias>] [--title <title>] [--tag <tag> ...] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar] [--disable-floating-nav] <file|->",
                 ],
                 parser: parse_store,
             },
@@ -36,7 +36,7 @@ pub fn domain() -> DomainSpec {
                 name: "change",
                 aliases: &[],
                 usage: &[
-                    "content change <id> [--alias <alias>] [--title <title>] [--tag <tag> ...] [--clear-tags] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [<file|->]",
+                    "content change <id> [--alias <alias>] [--title <title>] [--tag <tag> ...] [--clear-tags] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar|--enable-navbar] [--disable-floating-nav|--enable-floating-nav] [<file|->]",
                 ],
                 parser: parse_change,
             },
@@ -64,6 +64,8 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
     let mut nav_title: Option<String> = None;
     let mut nav_parent_id: Option<String> = None;
     let mut nav_order: Option<i32> = None;
+    let mut disable_navbar = false;
+    let mut disable_floating_nav = false;
     let mut file_arg: Option<String> = None;
 
     let mut idx = 0;
@@ -118,6 +120,20 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
                     let value = next_value(args, &mut idx, "--nav-order")?;
                     nav_order = Some(parse_i32(&value, "--nav-order")?);
                 }
+                "--disable-navbar" => {
+                    if disable_navbar {
+                        return Err(CliError::usage("Duplicate --disable-navbar"));
+                    }
+                    disable_navbar = true;
+                    idx += 1;
+                }
+                "--disable-floating-nav" => {
+                    if disable_floating_nav {
+                        return Err(CliError::usage("Duplicate --disable-floating-nav"));
+                    }
+                    disable_floating_nav = true;
+                    idx += 1;
+                }
                 flag => {
                     return Err(CliError::usage(format!(
                         "Unknown flag for content store: {}",
@@ -141,8 +157,12 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
     }
 
     let file_arg = file_arg.ok_or_else(|| CliError::usage("content store requires a file"))?;
-    let markdown_hint =
-        theme.is_some() || nav_title.is_some() || nav_parent_id.is_some() || nav_order.is_some();
+    let markdown_hint = theme.is_some()
+        || nav_title.is_some()
+        || nav_parent_id.is_some()
+        || nav_order.is_some()
+        || disable_navbar
+        || disable_floating_nav;
     let (content, original_filename, mime) = read_store_payload(&file_arg, markdown_hint)?;
     let is_markdown = mime.eq_ignore_ascii_case("text/markdown");
 
@@ -150,10 +170,12 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
         && (theme.is_some()
             || nav_title.is_some()
             || nav_parent_id.is_some()
-            || nav_order.is_some())
+            || nav_order.is_some()
+            || disable_navbar
+            || disable_floating_nav)
     {
         return Err(CliError::usage(
-            "content store nav/theme flags require markdown content",
+            "content store nav/theme/disable-navbar/disable-floating-nav flags require markdown content",
         ));
     }
     if nav_title.is_none() && (nav_parent_id.is_some() || nav_order.is_some()) {
@@ -181,6 +203,9 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
             nav_order,
             original_filename: Some(original_filename),
             theme,
+            disable_navbar,
+            disable_floating_nav,
+            content_width: ContentWidthMode::Auto,
             content,
         })),
         success_actions: vec![DomainActionKey::new(
@@ -202,6 +227,8 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
     let mut nav_title: Option<String> = None;
     let mut nav_parent_id: Option<String> = None;
     let mut nav_order: Option<i32> = None;
+    let mut disable_navbar: Option<bool> = None;
+    let mut disable_floating_nav: Option<bool> = None;
     let mut file_arg: Option<String> = None;
 
     let mut idx = 0;
@@ -270,6 +297,42 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
                     let value = next_value(rest, &mut idx, "--nav-order")?;
                     nav_order = Some(parse_i32(&value, "--nav-order")?);
                 }
+                "--disable-navbar" => {
+                    if disable_navbar.is_some() {
+                        return Err(CliError::usage(
+                            "--disable-navbar cannot be combined with --enable-navbar",
+                        ));
+                    }
+                    disable_navbar = Some(true);
+                    idx += 1;
+                }
+                "--enable-navbar" => {
+                    if disable_navbar.is_some() {
+                        return Err(CliError::usage(
+                            "--enable-navbar cannot be combined with --disable-navbar",
+                        ));
+                    }
+                    disable_navbar = Some(false);
+                    idx += 1;
+                }
+                "--disable-floating-nav" => {
+                    if disable_floating_nav.is_some() {
+                        return Err(CliError::usage(
+                            "--disable-floating-nav cannot be combined with --enable-floating-nav",
+                        ));
+                    }
+                    disable_floating_nav = Some(true);
+                    idx += 1;
+                }
+                "--enable-floating-nav" => {
+                    if disable_floating_nav.is_some() {
+                        return Err(CliError::usage(
+                            "--enable-floating-nav cannot be combined with --disable-floating-nav",
+                        ));
+                    }
+                    disable_floating_nav = Some(false);
+                    idx += 1;
+                }
                 flag => {
                     return Err(CliError::usage(format!(
                         "Unknown flag for content change: {}",
@@ -312,6 +375,8 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
         && nav_title.is_none()
         && nav_parent_id.is_none()
         && nav_order.is_none()
+        && disable_navbar.is_none()
+        && disable_floating_nav.is_none()
         && content.is_none()
     {
         return Err(CliError::usage(
@@ -329,6 +394,9 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
             nav_parent_id,
             nav_order,
             theme,
+            disable_navbar,
+            disable_floating_nav,
+            content_width: None,
             content,
         })),
         success_actions: vec![DomainActionKey::new(
@@ -530,6 +598,47 @@ mod tests {
         let command = parse_store(&args).expect("parse store");
         match command.command {
             ManagementCommand::Content(ContentCommand::Upload(_)) => {}
+            other => panic!("unexpected command: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_store_accepts_disable_floating_nav_for_markdown() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let path = write_temp_file(&temp, "note.md", b"Hello\n");
+        let args = vec![
+            "--title",
+            "Note",
+            "--disable-floating-nav",
+            path.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>();
+
+        let command = parse_store(&args).expect("parse store");
+        match command.command {
+            ManagementCommand::Content(ContentCommand::Upload(request)) => {
+                assert!(request.disable_floating_nav);
+                assert!(!request.disable_navbar);
+            }
+            other => panic!("unexpected command: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_change_accepts_enable_floating_nav() {
+        let args = vec!["0000000000000001", "--enable-floating-nav"]
+            .into_iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+
+        let command = parse_change(&args).expect("parse change");
+        match command.command {
+            ManagementCommand::Content(ContentCommand::Update(request)) => {
+                assert_eq!(request.disable_floating_nav, Some(false));
+                assert_eq!(request.disable_navbar, None);
+            }
             other => panic!("unexpected command: {:?}", other),
         }
     }

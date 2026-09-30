@@ -19,12 +19,12 @@ impl HtmlSanitizer {
             .add_tag_attributes("figure", &["style"])
             .add_tag_attributes("figcaption", &["style"])
             .add_tag_attributes("p", &["style"])
-            .add_tag_attributes("h1", &["style"])
-            .add_tag_attributes("h2", &["style"])
-            .add_tag_attributes("h3", &["style"])
-            .add_tag_attributes("h4", &["style"])
-            .add_tag_attributes("h5", &["style"])
-            .add_tag_attributes("h6", &["style"])
+            .add_tag_attributes("h1", &["style", "id"])
+            .add_tag_attributes("h2", &["style", "id"])
+            .add_tag_attributes("h3", &["style", "id"])
+            .add_tag_attributes("h4", &["style", "id"])
+            .add_tag_attributes("h5", &["style", "id"])
+            .add_tag_attributes("h6", &["style", "id"])
             .link_rel(Some("noopener noreferrer"))
             .rm_tags(&["script", "link", "iframe", "object", "embed"]);
         Self { cleaner }

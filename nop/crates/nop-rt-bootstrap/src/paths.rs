@@ -122,6 +122,9 @@ fn ensure_default_content(runtime_paths: &RuntimePaths) -> Result<(), BootstrapE
         nav_title: Some(DEFAULT_HOME_TITLE.to_string()),
         nav_parent_id: None,
         nav_order: None,
+        disable_navbar: false,
+        disable_floating_nav: false,
+        content_width: Default::default(),
         original_filename: Some("index.md".to_string()),
         theme: None,
     };
@@ -312,6 +315,7 @@ mod tests {
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
             search: SearchConfig::default(),
+            settings: Default::default(),
             dev_mode: None,
         }
     }

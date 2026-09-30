@@ -4,30 +4,51 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run build:vite && npm run build:legacy && npm run check:bundle",
+    "build:vite": "vite build",
+    "build:legacy": "node scripts/build-legacy.mjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "npm run check:types && npm run lint:compat && npm run check:bundle",
+    "check:types": "tsc -p tsconfig.json --noEmit",
+    "check:bundle": "node scripts/check-login-bundle.mjs",
+    "lint:compat": "eslint \"src/**/*.ts\"",
+    "argon2-asm:generate": "node argon2-asm/scripts/generate.mjs",
+    "argon2-asm:vectors": "node argon2-asm/scripts/generate-vectors.mjs",
+    "argon2-asm:test": "node argon2-asm/scripts/test-equivalence.mjs",
+    "argon2-asm:check": "node argon2-asm/scripts/check-compat.mjs"
   },
+  "browserslist": [
+    "iOS >= 12",
+    "Safari >= 12"
+  ],
   "dependencies": {
     "@fontsource/space-grotesk": "^5.0.20",
     "hash-wasm": "^4.12.0"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^6.2.2",
+    "@babel/cli": "^8.0.1",
+    "@babel/core": "^8.0.1",
+    "@babel/preset-env": "^8.0.2",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/postcss": "^4.1.18",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.2.4",
     "@testing-library/user-event": "^14.6.1",
     "@tsconfig/svelte": "^5.0.0",
     "@types/node": "^25.0.3",
+    "@typescript-eslint/parser": "^8.61.1",
     "autoprefixer": "^10.4.20",
+    "es-check": "^9.6.4",
+    "eslint": "^10.5.0",
+    "eslint-plugin-compat": "^7.0.2",
     "jsdom": "^26.1.0",
     "postcss": "^8.4.47",
     "svelte": "^5.0.0",
     "tailwindcss": "^4.1.18",
+    "terser": "^5.48.0",
     "typescript": "^5.6.3",
-    "vite": "^7.3.0",
+    "vite": "^8.0.16",
     "vitest": "^4.0.16"
   }
 }

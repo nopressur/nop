@@ -11,6 +11,9 @@ export type ContentEditorSnapshot = {
   navParentId: string;
   navOrder: string;
   theme: string;
+  disableNavbar: boolean;
+  disableFloatingNav: boolean;
+  contentWidth: string;
   content: string;
 };
 
@@ -22,6 +25,9 @@ type ContentEditorInput = {
   navParentId: string;
   navOrder: string | number | null | undefined;
   theme: string;
+  disableNavbar: boolean;
+  disableFloatingNav: boolean;
+  contentWidth: string;
   contentValue: string;
   isMarkdown: boolean;
 };
@@ -55,6 +61,9 @@ export function buildEditorSnapshot(input: ContentEditorInput): ContentEditorSna
     navParentId: input.navParentId.trim(),
     navOrder: normalizeNavOrderValue(input.navOrder).trim(),
     theme: input.theme,
+    disableNavbar: input.disableNavbar,
+    disableFloatingNav: input.disableFloatingNav,
+    contentWidth: input.contentWidth,
     content: input.isMarkdown ? input.contentValue : "",
   };
 }
@@ -79,6 +88,15 @@ export function isEditorDirty(
     return true;
   }
   if (initial.theme !== current.theme) {
+    return true;
+  }
+  if (initial.disableNavbar !== current.disableNavbar) {
+    return true;
+  }
+  if (initial.disableFloatingNav !== current.disableFloatingNav) {
+    return true;
+  }
+  if (initial.contentWidth !== current.contentWidth) {
     return true;
   }
   if (initial.tags.length !== current.tags.length) {

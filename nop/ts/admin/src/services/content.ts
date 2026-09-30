@@ -4,6 +4,9 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 import {
+  CONTENT_ACTION_ALIAS_STATUS,
+  CONTENT_ACTION_ALIAS_STATUS_ERR,
+  CONTENT_ACTION_ALIAS_STATUS_OK,
   CONTENT_ACTION_DELETE,
   CONTENT_ACTION_DELETE_ERR,
   CONTENT_ACTION_DELETE_OK,
@@ -46,7 +49,9 @@ import {
   CONTENT_DOMAIN_ID,
   type ContentSortDirection,
   type ContentSortField,
+  type ContentWidthMode,
   decodeBinaryPrevalidateResponse,
+  decodeContentAliasStatusResponse,
   decodeContentNavIndexResponse,
   decodeContentListResponse,
   decodeContentReadResponse,
@@ -56,6 +61,7 @@ import {
   encodeBinaryPrevalidateRequest,
   encodeBinaryUploadCommitRequest,
   encodeBinaryUploadInitRequest,
+  encodeContentAliasStatusRequest,
   encodeContentDeleteRequest,
   encodeContentListRequest,
   encodeContentNavIndexRequest,
@@ -72,6 +78,32 @@ import { getAdminWsClient } from "../transport/wsClient";
 import { MAX_TAG_ID_CHARS, TAG_ID_PATTERN } from "../validation/tags";
 import { handleResponse } from "./response";
 
+type ContentReadResult = ReturnType<typeof decodeContentReadResponse>;
+
+function contentReadStreamMetadata(frame: {
+  domainId: number;
+  actionId: number;
+  payload: Uint8Array;
+}) {
+  if (frame.domainId !== CONTENT_DOMAIN_ID || frame.actionId !== CONTENT_ACTION_READ_OK) {
+    return null;
+  }
+  const payload = decodeContentReadResponse(frame.payload);
+  return {
+    streamId: payload.streamId,
+    chunkBytes: payload.chunkBytes,
+    sizeBytes: payload.sizeBytes,
+  };
+}
+
+function decodeStreamedMarkdown(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("Streamed Markdown content is not valid UTF-8");
+  }
+}
+
 export type ContentListItem = {
   id: string;
   alias: string;
@@ -82,6 +114,9 @@ export type ContentListItem = {
   navParentId: string | null;
   navOrder: number | null;
   originalFilename: string | null;
+  disableNavbar: boolean;
+  disableFloatingNav: boolean;
+  contentWidth: ContentWidthMode;
   isMarkdown: boolean;
 };
 
@@ -165,18 +200,22 @@ export async function readContent(id: string): Promise<{
   navOrder: number | null;
   originalFilename: string | null;
   theme: string | null;
+  disableNavbar: boolean;
+  disableFloatingNav: boolean;
+  contentWidth: ContentWidthMode;
   content: string | null;
   sizeBytes: number | null;
 }> {
   const client = getAdminWsClient();
-  const response = await client.request(
+  const streamed = await client.requestWithStream(
     CONTENT_DOMAIN_ID,
     CONTENT_ACTION_READ,
-    encodeContentReadRequest({ id }),
+    encodeContentReadRequest({ id, streamContent: true }),
+    contentReadStreamMetadata,
   );
 
-  return handleResponse({
-    response,
+  const payload: ContentReadResult = handleResponse({
+    response: streamed.response,
     domainId: CONTENT_DOMAIN_ID,
     okActionId: CONTENT_ACTION_READ_OK,
     errActionId: CONTENT_ACTION_READ_ERR,
@@ -184,6 +223,13 @@ export async function readContent(id: string): Promise<{
     errDecoder: decodeMessageResponse,
     domainLabel: "content",
   });
+  if (streamed.streamBytes !== null) {
+    return {
+      ...payload,
+      content: decodeStreamedMarkdown(streamed.streamBytes),
+    };
+  }
+  return payload;
 }
 
 export async function updateContent(params: {
@@ -195,6 +241,9 @@ export async function updateContent(params: {
   navParentId?: string | null;
   navOrder?: number | null;
   theme?: string | null;
+  disableNavbar?: boolean | null;
+  disableFloatingNav?: boolean | null;
+  contentWidth?: ContentWidthMode | null;
   content?: string | null;
 }): Promise<void> {
   const client = getAdminWsClient();
@@ -234,6 +283,35 @@ export async function deleteContent(id: string): Promise<void> {
   });
 }
 
+export type ContentAliasStatus = {
+  canonicalAlias: string;
+  exists: boolean;
+  id: string | null;
+  version: number | null;
+  mime: string | null;
+  isMarkdown: boolean | null;
+  title: string | null;
+};
+
+export async function getContentAliasStatus(alias: string): Promise<ContentAliasStatus> {
+  const client = getAdminWsClient();
+  const response = await client.request(
+    CONTENT_DOMAIN_ID,
+    CONTENT_ACTION_ALIAS_STATUS,
+    encodeContentAliasStatusRequest({ alias }),
+  );
+
+  return handleResponse({
+    response,
+    domainId: CONTENT_DOMAIN_ID,
+    okActionId: CONTENT_ACTION_ALIAS_STATUS_OK,
+    errActionId: CONTENT_ACTION_ALIAS_STATUS_ERR,
+    okDecoder: decodeContentAliasStatusResponse,
+    errDecoder: decodeMessageResponse,
+    domainLabel: "content",
+  });
+}
+
 export async function uploadContent(params: {
   alias?: string | null;
   title?: string | null;
@@ -244,6 +322,9 @@ export async function uploadContent(params: {
   navOrder?: number | null;
   originalFilename?: string | null;
   theme?: string | null;
+  disableNavbar?: boolean | null;
+  disableFloatingNav?: boolean | null;
+  contentWidth?: ContentWidthMode | null;
   content: Uint8Array;
 }): Promise<{ id: string; alias: string; mime: string; isMarkdown: boolean }> {
   const client = getAdminWsClient();
@@ -372,6 +453,9 @@ export async function createMarkdownStream(params: {
   navParentId?: string | null;
   navOrder?: number | null;
   theme?: string | null;
+  disableNavbar?: boolean | null;
+  disableFloatingNav?: boolean | null;
+  contentWidth?: ContentWidthMode | null;
   content: string;
 }): Promise<{ id: string; alias: string; mime: string; isMarkdown: boolean }> {
   const encoder = new TextEncoder();
@@ -389,6 +473,9 @@ export async function createMarkdownStream(params: {
       navParentId: params.navParentId ?? null,
       navOrder: params.navOrder ?? null,
       theme: params.theme ?? null,
+      disableNavbar: params.disableNavbar ?? false,
+      disableFloatingNav: params.disableFloatingNav ?? false,
+      contentWidth: params.contentWidth ?? "auto",
       sizeBytes: payload.length,
     }),
   );
@@ -434,6 +521,9 @@ export async function updateMarkdownStream(params: {
   navParentId?: string | null;
   navOrder?: number | null;
   theme?: string | null;
+  disableNavbar?: boolean | null;
+  disableFloatingNav?: boolean | null;
+  contentWidth?: ContentWidthMode | null;
   content: string;
 }): Promise<void> {
   const encoder = new TextEncoder();
@@ -452,6 +542,9 @@ export async function updateMarkdownStream(params: {
       navParentId: params.navParentId ?? null,
       navOrder: params.navOrder ?? null,
       theme: params.theme ?? null,
+      disableNavbar: params.disableNavbar ?? null,
+      disableFloatingNav: params.disableFloatingNav ?? null,
+      contentWidth: params.contentWidth ?? null,
       sizeBytes: payload.length,
     }),
   );
@@ -543,6 +636,16 @@ function slugifyFilename(name: string): string {
   return replaced.replace(/[^a-z0-9._-]/g, "-");
 }
 
+const FONT_EXTENSIONS = new Set(["woff", "woff2", "ttf", "otf", "eot", "ttc"]);
+
+function fileExtension(name: string): string {
+  const index = name.lastIndexOf(".");
+  if (index < 0 || index === name.length - 1) {
+    return "";
+  }
+  return name.slice(index + 1).toLowerCase();
+}
+
 export function defaultAliasForFile(file: File, basePrefix?: string | null): string {
   const filename = slugifyFilename(file.name);
   const normalizedPrefix = basePrefix?.trim().replace(/^\/+|\/+$/g, "");
@@ -555,6 +658,8 @@ export function defaultAliasForFile(file: File, basePrefix?: string | null): str
     prefix = "images";
   } else if (type.startsWith("video/")) {
     prefix = "videos";
+  } else if (type.startsWith("font/") || FONT_EXTENSIONS.has(fileExtension(file.name))) {
+    prefix = "fonts";
   }
   return `${prefix}/${filename}`;
 }

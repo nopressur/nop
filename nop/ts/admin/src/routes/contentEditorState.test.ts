@@ -16,6 +16,9 @@ describe("contentEditorState", () => {
       navParentId: " parent ",
       navOrder: 2,
       theme: "default",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -35,6 +38,9 @@ describe("contentEditorState", () => {
       navParentId: "",
       navOrder: "",
       theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -46,6 +52,9 @@ describe("contentEditorState", () => {
       navParentId: "",
       navOrder: "",
       theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -62,6 +71,9 @@ describe("contentEditorState", () => {
       navParentId: "",
       navOrder: "",
       theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -73,6 +85,108 @@ describe("contentEditorState", () => {
       navParentId: "",
       navOrder: "",
       theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      contentValue: "Body",
+      isMarkdown: true,
+    });
+
+    expect(isEditorDirty(initial, current)).toBe(true);
+  });
+
+  it("flags disable navbar changes as dirty", () => {
+    const initial = buildEditorSnapshot({
+      alias: "docs",
+      title: "Title",
+      selectedTags: [],
+      navTitle: "",
+      navParentId: "",
+      navOrder: "",
+      theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      contentValue: "Body",
+      isMarkdown: true,
+    });
+    const current = buildEditorSnapshot({
+      alias: "docs",
+      title: "Title",
+      selectedTags: [],
+      navTitle: "",
+      navParentId: "",
+      navOrder: "",
+      theme: "",
+      disableNavbar: true,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      contentValue: "Body",
+      isMarkdown: true,
+    });
+
+    expect(isEditorDirty(initial, current)).toBe(true);
+  });
+
+  it("flags disable floating nav changes as dirty", () => {
+    const initial = buildEditorSnapshot({
+      alias: "docs",
+      title: "Title",
+      selectedTags: [],
+      navTitle: "",
+      navParentId: "",
+      navOrder: "",
+      theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      contentValue: "Body",
+      isMarkdown: true,
+    });
+    const current = buildEditorSnapshot({
+      alias: "docs",
+      title: "Title",
+      selectedTags: [],
+      navTitle: "",
+      navParentId: "",
+      navOrder: "",
+      theme: "",
+      disableNavbar: false,
+      disableFloatingNav: true,
+      contentWidth: "auto",
+      contentValue: "Body",
+      isMarkdown: true,
+    });
+
+    expect(isEditorDirty(initial, current)).toBe(true);
+  });
+
+  it("flags content width changes as dirty", () => {
+    const initial = buildEditorSnapshot({
+      alias: "docs",
+      title: "Title",
+      selectedTags: [],
+      navTitle: "",
+      navParentId: "",
+      navOrder: "",
+      theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      contentValue: "Body",
+      isMarkdown: true,
+    });
+    const current = buildEditorSnapshot({
+      alias: "docs",
+      title: "Title",
+      selectedTags: [],
+      navTitle: "",
+      navParentId: "",
+      navOrder: "",
+      theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "wide",
       contentValue: "Body",
       isMarkdown: true,
     });

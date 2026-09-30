@@ -36,7 +36,8 @@ Status: Developed
   - Ensure the runtime root is made absolute before daemonizing so bootstrap is unaffected by `chdir`.
 - **Daemon logging**:
   - When daemonized, logs are written to `<runtime-root>/logs/` with size-based rotation.
-  - Foreground runs continue to log to stdout and do not create log files.
+  - Each new log file (first create, rotation, or clear) starts with `NoPressure server log`, the binary path, PID, and package version.
+  - Foreground runs continue to log to stdout and do not create log files; those same four facts are the first `info` lines after logger install.
 - **Non-Unix behavior**:
   - If daemonization is requested on non-Unix builds, print a warning and continue in foreground mode.
 - **Entrypoint structure**:

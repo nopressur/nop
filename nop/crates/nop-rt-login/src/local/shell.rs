@@ -163,8 +163,14 @@ fn render_login_shell(
         actix_web::error::ErrorInternalServerError("Template rendering failed")
     })?;
 
+    let app_title = config
+        .settings
+        .title
+        .as_deref()
+        .unwrap_or(config.app.name.as_str());
     let context =
-        LoginSpaShellContext::new(&config.app.name, &runtime_config_json, csp_nonce).to_value();
+        LoginSpaShellContext::new(&config.app.name, app_title, &runtime_config_json, csp_nonce)
+            .to_value();
     let html = render_minijinja_template(
         request_tools.templates.as_ref(),
         "login/login_page.html",

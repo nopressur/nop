@@ -54,6 +54,7 @@ struct AdminSpaRuntimeConfig {
     admin_path: String,
     app_name: String,
     csrf_token_path: String,
+    version: String,
     ws_path: String,
     ws_ticket_path: String,
     user_management_enabled: bool,
@@ -85,6 +86,7 @@ pub async fn render_admin_spa_shell_html(
         admin_path: config.admin.path.clone(),
         app_name: config.app.name.clone(),
         csrf_token_path: format!("{}/csrf-token-api", config.admin.path),
+        version: request_tools.app_version.clone(),
         ws_path: format!("{}/ws", config.admin.path),
         ws_ticket_path: format!("{}/ws-ticket", config.admin.path),
         user_management_enabled: !matches!(config.users, ValidatedUsersConfig::Oidc(_)),
@@ -115,8 +117,14 @@ pub async fn render_admin_spa_shell_html(
         None => "null".to_string(),
     };
 
+    let app_title = config
+        .settings
+        .title
+        .as_deref()
+        .unwrap_or(config.app.name.as_str());
     let context = AdminSpaShellContext::new(
         &config.app.name,
+        app_title,
         &config.admin.path,
         &runtime_config_json,
         &bootstrap_json,

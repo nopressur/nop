@@ -87,7 +87,8 @@ where
         | ManagementCommand::Tags(_)
         | ManagementCommand::Content(_)
         | ManagementCommand::Roles(_)
-        | ManagementCommand::Search(_) => Err(Box::new(SystemError::InvalidCommand)),
+        | ManagementCommand::Search(_)
+        | ManagementCommand::Settings(_) => Err(Box::new(SystemError::InvalidCommand)),
     }
 }
 
@@ -104,7 +105,7 @@ where
         && payload.version_minor == minor
         && payload.version_patch == patch
     {
-        format!("Version match {}.{}.{}", major, minor, patch)
+        format!("Release {}", major)
     } else {
         format!(
             "Version mismatch: expected {}.{}.{} but got {}.{}.{}",

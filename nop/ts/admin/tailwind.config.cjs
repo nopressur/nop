@@ -19,7 +19,8 @@ module.exports = {
         accent: "var(--accent)",
         "accent-strong": "var(--accent-strong)",
         danger: "var(--danger)",
-        success: "var(--success)"
+        success: "var(--success)",
+        warning: "var(--warning)"
       },
       borderRadius: {
         sm: "var(--radius-sm)",

@@ -97,6 +97,10 @@ vi.mock("../routes/UserListView.svelte", async () => ({
   default: (await import("../testing/StubView.svelte")).default,
 }));
 
+vi.mock("../routes/SettingsView.svelte", async () => ({
+  default: (await import("../testing/StubView.svelte")).default,
+}));
+
 vi.mock("../routes/SystemSettingsView.svelte", async () => ({
   default: (await import("../testing/StubView.svelte")).default,
 }));
@@ -107,6 +111,7 @@ describe("App header view link", () => {
       adminPath: "/admin",
       appName: "NoPressure",
       csrfTokenPath: "/admin/csrf-token-api",
+      version: "1.2.3",
       wsPath: "/admin/ws",
       wsTicketPath: "/admin/ws-ticket",
       userManagementEnabled: true,
@@ -134,11 +139,38 @@ describe("App header view link", () => {
     const viewSite = getByText("View Site");
     expect(viewSite.getAttribute("href")).toBe("/");
 
-    contentEditorViewPagePath.set("/id/test-id");
+    contentEditorViewPagePath.set("/docs/intro");
     await tick();
 
     expect(queryByText("View Site")).toBeNull();
     const viewPage = getByText("View Page");
-    expect(viewPage.getAttribute("href")).toBe("/id/test-id");
+    expect(viewPage.getAttribute("href")).toBe("/docs/intro");
+  });
+
+  it("places Settings between Users and System in the left navigation", async () => {
+    const App = (await import("./App.svelte")).default;
+    const { container } = render(App);
+
+    const labels = Array.from(container.querySelectorAll("nav a")).map((item) =>
+      item.textContent?.trim(),
+    );
+
+    expect(labels).toEqual([
+      "Content",
+      "Tags",
+      "Roles",
+      "Themes",
+      "Users",
+      "Settings",
+      "System",
+    ]);
+  });
+
+  it("shows the backend version below System in the left navigation", async () => {
+    const App = (await import("./App.svelte")).default;
+    const { container } = render(App);
+
+    const version = container.querySelector("[data-admin-version]");
+    expect(version?.textContent?.trim()).toBe("NoPressure 1.2.3");
   });
 });

@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use tokio::sync::oneshot;
 
+const MAX_INBOUND_STREAM_ID: u32 = 0x7fff_ffff;
+
 #[derive(Debug, Clone)]
 pub enum UploadKind {
     Binary(BinaryUploadMeta),
@@ -364,9 +366,8 @@ impl UploadRegistryWorker {
         }
 
         let file = OpenOptions::new()
-            .create(true)
+            .create_new(true)
             .write(true)
-            .truncate(true)
             .open(&temp_path)
             .map_err(|err| {
                 ManagementError::new(
@@ -536,7 +537,13 @@ impl UploadRegistryWorker {
     }
 
     fn next_stream_id(&mut self) -> u32 {
-        next_id(&mut self.next_stream_id)
+        let id = self.next_stream_id;
+        self.next_stream_id = if self.next_stream_id >= MAX_INBOUND_STREAM_ID {
+            1
+        } else {
+            self.next_stream_id + 1
+        };
+        id
     }
 }
 
@@ -619,6 +626,15 @@ mod tests {
             filename: "guide.pdf".to_string(),
             mime: "application/pdf".to_string(),
         }
+    }
+
+    #[test]
+    fn inbound_stream_ids_stay_in_low_range() {
+        let mut worker = UploadRegistryWorker::new();
+        worker.next_stream_id = MAX_INBOUND_STREAM_ID;
+
+        assert_eq!(worker.next_stream_id(), MAX_INBOUND_STREAM_ID);
+        assert_eq!(worker.next_stream_id(), 1);
     }
 
     #[tokio::test]

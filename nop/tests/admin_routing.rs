@@ -26,4 +26,5 @@ async fn unknown_admin_path_serves_spa_shell_for_admins() {
     let body = test::read_body(resp).await;
     let body_str = std::str::from_utf8(&body).expect("admin shell utf8");
     assert!(body_str.contains("id=\"admin-app\""));
+    assert!(body_str.contains(r#""version":"Release 1""#));
 }

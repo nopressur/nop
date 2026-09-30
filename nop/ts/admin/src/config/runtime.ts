@@ -9,6 +9,7 @@ export type AdminRuntimeConfig = {
   adminPath: string;
   appName: string;
   csrfTokenPath: string;
+  version: string;
   wsPath: string;
   wsTicketPath: string;
   userManagementEnabled: boolean;

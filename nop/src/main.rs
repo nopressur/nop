@@ -14,7 +14,9 @@ mod pid_file;
 
 use futures_util::future::try_join_all;
 use nop_admin::WsTicketStore;
-use nop_config::{AcmeChallenge, ServerProtocol, ServerRole, TlsMode, ValidatedConfig};
+use nop_config::{
+    AcmeChallenge, RuntimeSettings, ServerProtocol, ServerRole, TlsMode, ValidatedConfig,
+};
 use nop_management_bus::ManagementTools;
 use nop_public::RenderTools;
 use nop_public::shortcode::create_default_registry_with_config;
@@ -22,8 +24,8 @@ use nop_rt_csrf::{CsrfTokenStore, CsrfValidationMiddlewareFactory};
 use nop_rt_iam::UserServices;
 use nop_rt_iam::middleware::JwtAuthMiddlewareFactory;
 use nop_rt_logging::{
-    DEFAULT_LOG_FILE_NAME, LogController, LogRotationSettings, LogRunMode, RotatingLogWriter,
-    init_logger,
+    DEFAULT_LOG_FILE_NAME, LogController, LogIdentity, LogRotationSettings, LogRunMode,
+    RotatingLogWriter, init_logger,
 };
 use nop_rt_login::LoginState;
 use nop_rt_page_cache::PageMetaCache;
@@ -159,11 +161,13 @@ async fn run_server(
         _ => LevelFilter::Info,
     };
 
+    let log_identity = LogIdentity::for_current_process("Release 1");
     let (log_controller, log_target) = if matches!(log_run_mode, LogRunMode::Daemon) {
         match RotatingLogWriter::new(
             runtime_paths.logs_dir.clone(),
             DEFAULT_LOG_FILE_NAME,
             rotation_settings,
+            log_identity.clone(),
         ) {
             Ok(writer) => (
                 LogController::new(
@@ -219,7 +223,7 @@ async fn run_server(
     })?;
 
     // Log startup information including canonical paths
-    log_startup_info(&validated_config, &runtime_paths);
+    log_startup_info(&validated_config, &runtime_paths, &log_identity);
     if matches!(log_run_mode, LogRunMode::Daemon) {
         info!("Logs directory: {}", log_controller.log_dir().display());
         info!(
@@ -260,6 +264,7 @@ async fn run_server(
     let user_services = Arc::new(user_services);
 
     let upload_registry = Arc::new(nop_management_bus::UploadRegistry::new());
+    let runtime_settings = Arc::new(RuntimeSettings::new(&validated_config.settings));
 
     // Track the release identifier (Last Big Change) for cache busting headers.
     let release_tracker = Arc::new(ReleaseTracker::new());
@@ -309,6 +314,7 @@ async fn run_server(
     let management_context = management_context
         .with_upload_registry(upload_registry.clone())
         .with_release_tracker(release_tracker.clone())
+        .with_runtime_settings(runtime_settings.clone())
         .with_search_service(search_service.clone());
     let management_bus =
         nop_management_bus::ManagementBus::start(management_registry, management_context);
@@ -326,7 +332,10 @@ async fn run_server(
         }
     };
 
-    let request_tools = Arc::new(RequestTools::new(&validated_config.app.name));
+    let request_tools = Arc::new(RequestTools::new_with_version(
+        &validated_config.app.name,
+        "Release 1",
+    ));
     let render_tools = Arc::new(RenderTools::new());
     let security_tools = Arc::new(SecurityTools::new());
     let login_state = Arc::new(LoginState::new());
@@ -412,6 +421,7 @@ async fn run_server(
         let config_for_security = validated_config.clone();
         let config_for_admin = validated_config.clone();
         let config_for_login = validated_config.clone();
+        let runtime_settings_for_app = runtime_settings.clone();
         let release_tracker_for_app = release_tracker.clone();
         let request_tools_for_app = request_tools.clone();
         let render_tools_for_app = render_tools.clone();
@@ -431,6 +441,7 @@ async fn run_server(
             let config_for_security = config_for_security.clone();
             let config_for_admin = config_for_admin.clone();
             let config_for_login = config_for_login.clone();
+            let runtime_settings_for_app = runtime_settings_for_app.clone();
             let release_tracker_for_app = release_tracker_for_app.clone();
             let request_tools_for_app = request_tools_for_app.clone();
             let render_tools_for_app = render_tools_for_app.clone();
@@ -441,6 +452,7 @@ async fn run_server(
 
             App::new()
                 .app_data(web::Data::from(config_for_app))
+                .app_data(web::Data::from(runtime_settings_for_app))
                 .app_data(web::Data::from(request_tools_for_app))
                 .app_data(web::Data::from(render_tools_for_app))
                 .app_data(web::Data::from(security_tools_for_app))
@@ -580,7 +592,15 @@ fn should_force_foreground(
     daemon_requested && (created_config || created_users)
 }
 
-fn log_startup_info(config: &ValidatedConfig, runtime_paths: &RuntimePaths) {
+fn log_startup_info(
+    config: &ValidatedConfig,
+    runtime_paths: &RuntimePaths,
+    identity: &LogIdentity,
+) {
+    info!("{} server log", identity.product);
+    info!("binary: {}", identity.binary.display());
+    info!("pid: {}", identity.pid);
+    info!("{}", identity.version);
     info!("Starting {} - {}", config.app.name, config.app.description);
     info!("Workers: {}", config.server.workers);
 

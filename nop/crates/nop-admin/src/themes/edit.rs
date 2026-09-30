@@ -327,7 +327,7 @@ pub async fn themes_delete(
     ) {
         Ok(path) => path,
         Err(err) => {
-            return err;
+            return *err;
         }
     };
 

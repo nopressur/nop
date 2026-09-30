@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const legacyBrowserPrelude = `;(function(){var g;if(typeof globalThis==="object"){g=globalThis}else if(typeof self==="object"){g=self}else if(typeof window==="object"){g=window}else{g=Function("return this")()}try{if(g&&!g.globalThis){g.globalThis=g}}catch(e){}if(g){var needsEventTarget=typeof g.EventTarget!=="function";if(!needsEventTarget){try{needsEventTarget=!(g.document instanceof g.EventTarget)&&!(g.window instanceof g.EventTarget)}catch(e){needsEventTarget=true}}if(needsEventTarget){if(typeof g.Node==="function"){g.EventTarget=g.Node}else if(typeof g.Element==="function"){g.EventTarget=g.Element}else{g.EventTarget=function EventTarget(){}}}}}());`;
 
 export default defineConfig({
   test: {
@@ -18,6 +19,8 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, '../../builtin'),
     emptyOutDir: false,
+    target: 'esnext',
+    minify: 'terser',
     lib: {
       entry: path.resolve(__dirname, 'src/main.ts'),
       name: 'nopSite',
@@ -26,7 +29,17 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        inlineDynamicImports: true
+        banner: legacyBrowserPrelude
+      }
+    },
+    terserOptions: {
+      ecma: 2019,
+      compress: {
+        ecma: 2019
+      },
+      format: {
+        comments: false,
+        ecma: 2019
       }
     }
   }

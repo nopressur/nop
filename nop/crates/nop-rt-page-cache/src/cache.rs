@@ -5,7 +5,8 @@
 
 use log::error;
 use nop_content_store::flat_storage::{
-    ContentId, ContentVersion, canonicalize_alias, content_id_hex, parse_content_id_hex,
+    ContentId, ContentVersion, ContentWidthMode, canonicalize_alias, content_id_hex,
+    parse_content_id_hex,
 };
 use nop_content_store::reserved_paths::ReservedPaths;
 use std::collections::{HashMap, HashSet};
@@ -37,6 +38,9 @@ pub struct CachedObject {
     pub nav_title: Option<String>,
     pub nav_parent_id: Option<String>,
     pub nav_order: Option<i32>,
+    pub disable_navbar: bool,
+    pub disable_floating_nav: bool,
+    pub content_width: ContentWidthMode,
     pub original_filename: Option<String>,
     pub last_modified: SystemTime,
     pub is_markdown: bool,

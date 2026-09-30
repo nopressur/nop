@@ -1,6 +1,6 @@
 # Configuration & Secrets Management
 
-NoPressure reads `config.yaml` at startup and validates it through `Config::load_and_validate` (`nop/src/config.rs`). This guide explains the schema, defaults, validation rules, and how components consume each section.
+NoPressure reads `config.yaml` at startup and validates it through `Config::load_and_validate` (`nop/src/config.rs`). This guide explains the schema, defaults, validation rules, and how components consume each section. The option-level data registry lives in `docs/devops/configuration-registry.md`.
 
 ## File Locations
 
@@ -22,12 +22,13 @@ NoPressure reads `config.yaml` at startup and validates it through `Config::load
 | `logging` | Global log level + rotation settings | `main.rs` log bootstrap |
 | `security` | Path traversal guardrails, HSTS | `security::`, `headers::Headers` |
 | `tls` | TLS listeners, cert sources, well-known routing | `main.rs` server bootstrap |
-| `app` | Display name, description | Error pages, telemetry |
 | `upload` | Admin upload constraints | `admin::upload` |
 | `streaming` | Range streaming toggle | `public::assets` |
 | `shortcodes` | Dynamic shortcode defaults | `public::shortcode` |
 | `rendering` | Public markdown layout heuristics | `public::markdown` |
 | `search` | Tantivy search subsystem limits | Search infrastructure services |
+| `settings` | Website-level editable settings | Admin Settings, CLI, public rendering |
+| `app` | Deprecated compatibility input for old website identity config | `Config::load_and_validate` migration |
 | `dev_mode` | Debug-only bypass controls (ignored in release builds) | Middleware (security + IAM) |
 
 Note: the `server` block is authoritative. TLS is enabled by the presence of the top-level `tls`
@@ -54,8 +55,11 @@ block; when TLS is enabled, the HTTP port is provided by `server.http_port`.
 - **OIDC auth** requires `users.oidc` to be present when `auth_method: oidc`.
 - **Shortcodes**: `shortcodes.start_unibox` must contain `<QUERY>` and start with `http(s)://`; enforced by `validate_shortcodes`.
 - **Dev mode**: optional `dev_mode: localhost` or `dangerous`. `dangerous` bypasses access control entirely and logs loud warnings. Dev mode is honored only in debug builds; release builds ignore it and log a warning. Never use in production.
-- **Upload config**: defaults include broad file extensions (images, docs, archive, video, audio, web, markdown). `max_file_size_mb` defaults to 100; `0` disables the cap with no hidden safety limit. Upload limits apply to binary uploads and stream-backed Markdown create/update.
-- **Rendering**: `rendering.short_paragraph_length` defaults to 256 characters. Set to `0` to disable compact-width detection entirely.
+- **Upload config**: defaults include broad file extensions (images, docs, archive, video, audio,
+  web, markdown, and fonts such as `woff`, `woff2`, `ttf`, `otf`, `eot`, and `ttc`).
+  `max_file_size_mb` defaults to 100; `0` disables the cap with no hidden safety limit. Upload
+  limits apply to binary uploads and stream-backed Markdown create/update.
+- **Rendering**: content width is fully manual via the page sidecar (`content_width`); there are no rendering width settings.
 - **Search**:
   - `search.max_memory_mb` configures the maximum memory budget in MiB for Tantivy search write/index operations.
   - `search.worker_count` configures the number of partitioned search ingestion workers.
@@ -65,6 +69,15 @@ block; when TLS is enabled, the HTTP port is provided by `server.http_port`.
   - If `worker_count` is configured above `16`, startup clamps the effective value to `16` and logs a warning.
   - Current default: `128`.
   - Current `worker_count` default: `1`.
+- **Settings**:
+  - `settings.name` is the user-visible website name shown on public pages and app shells. It defaults to `NoPressure` when absent.
+  - `settings.title` is the optional suffix used in public HTML `<title>` values. When set, public HTML titles render as `<page title> | <settings.title>`.
+  - `settings.description` is the optional public-page-only `<meta name="description">` value. It is not emitted on admin, login, or profile shells.
+  - Values are trimmed before persistence and validation. Empty `settings.title` and `settings.description` values clear those optional settings; `settings.name` must remain non-empty.
+  - `settings.name` and `settings.title` must be at most 120 characters. `settings.description` must be at most 240 characters. Values must not contain ASCII control characters.
+  - Legacy `settings.website_title` is accepted as a compatibility alias for `settings.title`.
+  - Legacy top-level `app.name` and `app.description` are accepted as compatibility input when the corresponding `settings.*` keys are absent. Successful validated loads migrate those values into `settings` and stop emitting the `app` block.
+  - Admin, CLI, management protocol, and rendering requirements are defined in `docs/admin/settings.md`.
 - **Streaming**: default `enabled: true`. Even when disabled, non-Markdown assets respond to HTTP range requests when the feature flag remains true.
 - **Security**:
   - `max_violations` (default 2) and `cooldown_seconds` (default 30) power the IP throttler in `security::`.

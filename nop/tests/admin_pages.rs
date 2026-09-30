@@ -29,6 +29,9 @@ async fn content_upload_list_update_delete() {
         nav_order: None,
         original_filename: None,
         theme: None,
+        disable_navbar: false,
+        disable_floating_nav: false,
+        content_width: Default::default(),
         content: b"# Getting Started\n\nHello.".to_vec(),
     };
 
@@ -111,6 +114,9 @@ async fn content_upload_list_update_delete() {
                 nav_parent_id: None,
                 nav_order: None,
                 theme: Some("landing".to_string()),
+                disable_navbar: None,
+                disable_floating_nav: None,
+                content_width: Default::default(),
                 content: Some("# Intro\n\nUpdated".to_string()),
             })),
         )
@@ -159,6 +165,9 @@ async fn nav_alias_change_bumps_release_tracker() {
         nav_order: Some(0),
         original_filename: None,
         theme: None,
+        disable_navbar: false,
+        disable_floating_nav: false,
+        content_width: Default::default(),
         content: b"# Docs\n\nParent.".to_vec(),
     };
 
@@ -187,6 +196,9 @@ async fn nav_alias_change_bumps_release_tracker() {
         nav_order: Some(1),
         original_filename: None,
         theme: None,
+        disable_navbar: false,
+        disable_floating_nav: false,
+        content_width: Default::default(),
         content: b"# Child\n\nChild page.".to_vec(),
     };
 
@@ -219,6 +231,9 @@ async fn nav_alias_change_bumps_release_tracker() {
                 nav_parent_id: None,
                 nav_order: None,
                 theme: None,
+                disable_navbar: None,
+                disable_floating_nav: None,
+                content_width: Default::default(),
                 content: None,
             })),
         )
@@ -249,6 +264,9 @@ async fn non_markdown_upload_exposes_id_alias() {
         nav_order: None,
         original_filename: Some("guide.pdf".to_string()),
         theme: None,
+        disable_navbar: false,
+        disable_floating_nav: false,
+        content_width: Default::default(),
         content: pdf_bytes,
     };
 
@@ -298,6 +316,9 @@ async fn index_alias_cannot_be_renamed() {
                 nav_parent_id: None,
                 nav_order: None,
                 theme: None,
+                disable_navbar: None,
+                disable_floating_nav: None,
+                content_width: Default::default(),
                 content: None,
             })),
         )
@@ -322,6 +343,9 @@ async fn content_read_update_delete_by_id() {
         nav_order: None,
         original_filename: None,
         theme: None,
+        disable_navbar: false,
+        disable_floating_nav: false,
+        content_width: Default::default(),
         content: b"# ID Only\n\nHello.".to_vec(),
     };
 
@@ -365,6 +389,9 @@ async fn content_read_update_delete_by_id() {
                 nav_parent_id: None,
                 nav_order: None,
                 theme: None,
+                disable_navbar: None,
+                disable_floating_nav: None,
+                content_width: Default::default(),
                 content: Some("# ID Only\n\nUpdated.".to_string()),
             })),
         )

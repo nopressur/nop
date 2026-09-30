@@ -1,6 +1,6 @@
 [package]
 name = "nop-content-store"
-version = "0.1.29"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]

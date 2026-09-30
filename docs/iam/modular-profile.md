@@ -16,6 +16,10 @@ Status: Developed
 - `/login/profile` serves the login SPA shell (MiniJinja template) with an initial route pointing to the profile view.
 - The shell embeds `appName`, `loginPath`, `profilePath`, `profileApiPath`, `csrfTokenPath`, and
   `returnPath` (if supplied). The profile view uses the validated return path when the user clicks Back.
+- `appName` is sourced from `settings.name`. The runtime field name remains `appName` for the login
+  SPA contract, but the backing server-side configuration is the Website Name setting.
+- The profile shell does not render `settings.description` as a meta description; the description
+  meta tag is public-page-only.
 - The login SPA CSRF client refreshes tokens before expiry, retries once on 403 by clearing the cached token, and clears the cache after profile/password updates refresh the JWT.
 - Enabled providers are embedded in the shell so the SPA can render profile modules without an extra bootstrap call (see `docs/iam/modular-login.md`).
 

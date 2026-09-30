@@ -93,6 +93,13 @@ upload:
     - "js"
     - "json"
     - "xml"
+    # Font files
+    - "woff"
+    - "woff2"
+    - "ttf"
+    - "otf"
+    - "eot"
+    - "ttc"
     # Markdown files (will be renamed to .markdown extension)
     - "md"
     - "markdown"
@@ -156,6 +163,11 @@ users:
 navigation:
   max_dropdown_items: 7  # Maximum items to show in dropdown menus before adding "More..." link
 
+settings:
+  name: "NoPressure"  # User-visible website name shown on public pages and app shells
+  title: null         # Optional suffix for public HTML page titles, e.g. "Example Site"
+  description: "The AI native tiny little website system"  # Optional public meta description
+
 rendering:
   short_paragraph_length: 256  # Paragraph length (chars) to count as "short" (0 disables compact width)
 
@@ -183,10 +195,6 @@ logging:
   rotation:
     max_size_mb: 16  # Max size per log file before rotation (daemon mode only)
     max_files: 10    # Total log files to retain including the active file
-
-app:
-  name: "NoPressure"
-  description: "The AI native tiny little website system"
 
 # Shortcodes configuration - controls dynamic content features
 shortcodes:

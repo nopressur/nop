@@ -8,6 +8,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
 <script lang="ts">
   import { createEventDispatcher, tick } from "svelte";
   import Button from "./Button.svelte";
+  import LoadingGradient from "./LoadingGradient.svelte";
   import SearchInput from "./SearchInput.svelte";
   import Select from "./Select.svelte";
   import { listContent } from "../services/content";
@@ -391,7 +392,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
         on:keydown={handleListKeydown}
       >
         {#if loading}
-          <div class="px-3 py-4 text-sm text-muted">Loading content...</div>
+          <div class="px-2 py-3">
+            <LoadingGradient rows={4} rowClassName="h-12" />
+          </div>
         {:else if items.length === 0}
           <div class="px-3 py-4 text-sm text-muted">No content matches this filter.</div>
         {:else}

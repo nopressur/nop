@@ -46,7 +46,7 @@ describe("admin route validation", () => {
   });
 
   it("does nothing for valid routes", () => {
-    enforceAdminRoute("/themes/new", true);
+    enforceAdminRoute("/settings", true);
     expect(notifyMock).not.toHaveBeenCalled();
     expect(navigateMock).not.toHaveBeenCalled();
   });

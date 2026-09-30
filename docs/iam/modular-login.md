@@ -21,6 +21,10 @@ Status: Developed
 - Serve a dedicated login SPA shell template that mounts a Svelte app into a single root element.
 - The shell embeds a runtime config object that includes `loginPath`, `appName`, and a
   `returnPath` (if supplied by the caller).
+- `appName` is sourced from `settings.name`. The runtime field name remains `appName` for the login
+  SPA contract, but the backing server-side configuration is the Website Name setting.
+- The login shell does not render `settings.description` as a meta description; the description
+  meta tag is public-page-only.
 - The SPA is intentionally small: it covers login, authentication setup, and profile management, but not the admin UI.
 - The SPA must call the bootstrap endpoint whenever a new login flow starts to obtain a fresh
   `login_session_id`.
@@ -82,6 +86,10 @@ Status: Developed
   `/builtin/login-<hash>/login.js` and `/builtin/login-<hash>/login.css`.
 - Serve the login HTML with `Cache-Control: no-store` while allowing versioned assets to use long
   cache lifetimes (`immutable`).
+- The login SPA build and release compatibility contract is owned by
+  `docs/devops/build-and-release.md`. The shipped login JavaScript is a classic script with an
+  iOS 9.3 / Safari 9.1 compatibility floor, legacy lowering, ES5 bundle validation, and an
+  Argon2id asm.js fallback copied beside `login.js`.
 
 #### API contracts (shared)
 

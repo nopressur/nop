@@ -24,6 +24,7 @@ const VALID_ROUTE_PATTERNS: RegExp[] = [
   /^\/users$/,
   /^\/users\/new$/,
   /^\/users\/edit\/[^/]+$/,
+  /^\/settings$/,
   /^\/system$/
 ];
 

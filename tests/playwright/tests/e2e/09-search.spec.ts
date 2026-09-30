@@ -6,19 +6,20 @@
 import { test, expect } from "../../fixtures";
 import { humanClick, humanType } from "../../utils/humanInput";
 
-test("search button is always visible on mobile and outside hamburger menu", async ({ page, harness, rng }) => {
+test("narrow drawer exposes inline search instead of a search button", async ({ page, harness, rng }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${harness.baseUrl}/`);
 
-  const searchButton = page.locator("[data-site-search-button]:visible");
-  await expect(searchButton).toBeVisible();
-  await expect(page.locator("[data-site-mobile-menu] [data-site-search-button]:visible")).toHaveCount(0);
+  await expect(page.locator("[data-site-search-button]:visible")).toHaveCount(0);
+  await expect(page.locator("[data-site-mobile-toggle]")).toHaveCount(0);
 
-  await humanClick(page.locator("[data-site-mobile-toggle]"), rng);
-  await expect(searchButton).toBeVisible();
+  await page.locator("[data-site-topbar-menu]").click();
+  await expect(page.locator("[data-site-menu-drawer]")).toBeVisible();
+  const input = page.locator("[data-site-menu-drawer] [data-site-drawer-search-input]");
+  await expect(input).toBeVisible();
 
-  await humanClick(searchButton, rng);
-  await expect(page.locator("[data-site-search-overlay]")).toBeVisible();
+  await humanClick(input, rng);
+  await expect(input).toBeFocused();
 });
 
 test("search overlay supports threshold, keyboard navigation, and enter routing", async ({ page, harness, rng }) => {
@@ -76,6 +77,31 @@ test("search overlay supports threshold, keyboard navigation, and enter routing"
   await expect(page).toHaveURL(/\/docs\/search-beta$/);
 });
 
+test("search result opens on the first pointer click", async ({ page, harness, rng }) => {
+  await page.route("**/api/search**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        { id: "0000000000000001", alias: "docs/search-alpha", title: "Search Alpha" },
+        { id: "0000000000000002", alias: "docs/search-beta", title: "Search Beta" },
+      ]),
+    });
+  });
+
+  await page.goto(`${harness.baseUrl}/`);
+  await humanClick(page.locator("[data-site-search-button]:visible"), rng);
+
+  const input = page.locator("[data-site-search-input]");
+  await humanType(input, "search", rng);
+
+  const betaResult = page.locator(".site-search-result", { hasText: "Search Beta" });
+  await expect(betaResult).toBeVisible();
+  await humanClick(betaResult, rng);
+
+  await expect(page).toHaveURL(/\/docs\/search-beta$/);
+});
+
 test("search overlay renders request failure state and closes with escape", async ({ page, harness, rng }) => {
   await page.goto(`${harness.baseUrl}/`);
   await page.route("**/api/search**", async (route) => {
@@ -113,6 +139,22 @@ test("search overlay returns seeded fixtures", async ({ page, harness, rng }) =>
 
   await expect(tableResult).toBeVisible();
   await expect(htmlResult).toBeVisible();
+});
+
+test("search keyboard trigger works on pages without a navbar", async ({ page, harness }) => {
+  await page.goto(`${harness.baseUrl}${harness.publicRenderFixtures.noNavbarPath}`);
+
+  await expect(page.locator("[data-site-navbar]")).toHaveCount(0);
+  await page.keyboard.press("s");
+  await expect(page.locator("[data-site-search-overlay]")).toBeVisible();
+  await expect(page.locator("[data-site-search-input]")).toHaveValue("s");
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[data-site-search-overlay]")).toBeHidden();
+
+  await page.keyboard.press("/");
+  await expect(page.locator("[data-site-search-overlay]")).toBeVisible();
+  await expect(page.locator("[data-site-search-input]")).toHaveValue("");
 });
 
 async function stubSearchAndCapture(page: import("@playwright/test").Page): Promise<string[]> {

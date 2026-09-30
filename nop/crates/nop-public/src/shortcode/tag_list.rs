@@ -146,6 +146,9 @@ mod tests {
             nav_title: None,
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: None,
             theme: None,
         };

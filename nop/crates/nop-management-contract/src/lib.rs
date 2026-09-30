@@ -11,10 +11,12 @@ mod macros;
 pub mod registry;
 pub mod roles;
 pub mod search;
+pub mod settings;
 pub mod system;
 pub mod tags;
 pub mod users;
 pub mod wire;
+pub mod ws_limits;
 
 pub use codec::{
     CodecError, FieldLimit, FieldLimits, FieldValue, FieldValues, RequestCodec, ResponseCodec,

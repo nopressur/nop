@@ -6,14 +6,15 @@
 use async_trait::async_trait;
 use nop_config::ValidatedConfig;
 use nop_content_store::flat_storage::{
-    ContentId, ContentSidecar, ContentVersion, blob_path, content_id_hex, generate_content_id,
-    normalize_optional_alias, parse_content_id_hex, read_sidecar, sidecar_path, validate_sidecar,
-    write_sidecar_atomic,
+    ContentId, ContentSidecar, ContentVersion, ContentWidthMode as StoreContentWidthMode,
+    blob_path, content_id_hex, generate_content_id, normalize_optional_alias, parse_content_id_hex,
+    read_sidecar, sidecar_path, validate_sidecar, write_sidecar_atomic,
 };
 use nop_content_store::reserved_paths::ReservedPaths;
 pub use nop_management_contract::content::{
     BinaryPrevalidateRequest, BinaryPrevalidateResponse, BinaryUploadCommitRequest,
-    BinaryUploadInitRequest, CONTENT_ACTION_BINARY_PREVALIDATE,
+    BinaryUploadInitRequest, CONTENT_ACTION_ALIAS_STATUS, CONTENT_ACTION_ALIAS_STATUS_ERR,
+    CONTENT_ACTION_ALIAS_STATUS_OK, CONTENT_ACTION_BINARY_PREVALIDATE,
     CONTENT_ACTION_BINARY_PREVALIDATE_ERR, CONTENT_ACTION_BINARY_PREVALIDATE_OK,
     CONTENT_ACTION_BINARY_UPLOAD_COMMIT, CONTENT_ACTION_BINARY_UPLOAD_COMMIT_ERR,
     CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK, CONTENT_ACTION_BINARY_UPLOAD_INIT,
@@ -29,12 +30,17 @@ pub use nop_management_contract::content::{
     CONTENT_ACTION_UPLOAD_OK, CONTENT_ACTION_UPLOAD_STREAM_COMMIT,
     CONTENT_ACTION_UPLOAD_STREAM_COMMIT_ERR, CONTENT_ACTION_UPLOAD_STREAM_COMMIT_OK,
     CONTENT_ACTION_UPLOAD_STREAM_INIT, CONTENT_ACTION_UPLOAD_STREAM_INIT_ERR,
-    CONTENT_ACTION_UPLOAD_STREAM_INIT_OK, CONTENT_DOMAIN_ID, ContentCommand, ContentDeleteRequest,
-    ContentListRequest, ContentListResponse, ContentNavIndexEntry, ContentNavIndexRequest,
-    ContentNavIndexResponse, ContentReadRequest, ContentReadResponse, ContentSortDirection,
-    ContentSortField, ContentSummary, ContentUpdateRequest, ContentUpdateStreamCommitRequest,
+    CONTENT_ACTION_UPLOAD_STREAM_INIT_OK, CONTENT_DOMAIN_ID, ContentAliasStatusRequest,
+    ContentAliasStatusResponse, ContentCommand, ContentDeleteRequest, ContentListRequest,
+    ContentListResponse, ContentNavIndexEntry, ContentNavIndexRequest, ContentNavIndexResponse,
+    ContentReadRequest, ContentReadResponse, ContentSortDirection, ContentSortField,
+    ContentSummary, ContentUpdateRequest, ContentUpdateStreamCommitRequest,
     ContentUpdateStreamInitRequest, ContentUploadRequest, ContentUploadResponse,
-    ContentUploadStreamCommitRequest, ContentUploadStreamInitRequest, UploadStreamInitResponse,
+    ContentUploadStreamCommitRequest, ContentUploadStreamInitRequest, ContentWidthMode,
+    UploadStreamInitResponse,
+};
+use nop_management_contract::ws_limits::{
+    WS_MAX_RESPONSE_PAYLOAD_BYTES, WS_MAX_STREAM_CHUNK_BYTES,
 };
 use nop_management_contract::{
     CodecError, DomainActionKey, FieldLimit, FieldLimits, FieldValues, ManagementCommand,
@@ -66,11 +72,25 @@ const MAX_ID_CHARS: usize = 16;
 const MAX_NAV_PARENT_CHARS: usize = 16;
 const MAX_NAV_INDEX_ITEMS: usize = 2048;
 const HOME_ALIAS: &str = "index";
-// Keep in sync with management WS protocol limits.
-const WS_MAX_MESSAGE_BYTES: usize = 63 * 1024;
-const WS_STREAM_CHUNK_OVERHEAD_BYTES: usize = 17;
-const WS_MAX_STREAM_CHUNK_BYTES: usize = WS_MAX_MESSAGE_BYTES - WS_STREAM_CHUNK_OVERHEAD_BYTES;
 const DEFAULT_STREAM_CHUNK_BYTES: u32 = WS_MAX_STREAM_CHUNK_BYTES as u32;
+const INLINE_CONTENT_TOO_LARGE_MESSAGE: &str =
+    "Content is too large to read inline; request streaming content";
+
+fn contract_width_mode(value: StoreContentWidthMode) -> ContentWidthMode {
+    match value {
+        StoreContentWidthMode::Auto => ContentWidthMode::Auto,
+        StoreContentWidthMode::Wide => ContentWidthMode::Wide,
+        StoreContentWidthMode::Narrow => ContentWidthMode::Narrow,
+    }
+}
+
+fn store_width_mode(value: ContentWidthMode) -> StoreContentWidthMode {
+    match value {
+        ContentWidthMode::Auto => StoreContentWidthMode::Auto,
+        ContentWidthMode::Wide => StoreContentWidthMode::Wide,
+        ContentWidthMode::Narrow => StoreContentWidthMode::Narrow,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum UploadKind {
@@ -219,6 +239,9 @@ pub fn content_summary_from_object(object: &CachedObject) -> ContentSummary {
         nav_title: object.nav_title.clone(),
         nav_parent_id: object.nav_parent_id.clone(),
         nav_order: object.nav_order,
+        disable_navbar: object.disable_navbar,
+        disable_floating_nav: object.disable_floating_nav,
+        content_width: contract_width_mode(object.content_width),
         original_filename: object.original_filename.clone(),
         is_markdown: object.is_markdown,
     }
@@ -291,6 +314,9 @@ where
                 context,
             )
             .await
+        }
+        ManagementCommand::Content(ContentCommand::AliasStatus(payload)) => {
+            handle_alias_status(payload, request.workflow_id, context).await
         }
         _ => response_err(
             CONTENT_ACTION_LIST_ERR,
@@ -433,6 +459,19 @@ fn compare_optional_str(
     }
 }
 
+fn set_content_stream_metadata(response: &mut ContentReadResponse, size_bytes: u64) {
+    response.content = None;
+    response.stream_id = None;
+    response.chunk_bytes = Some(DEFAULT_STREAM_CHUNK_BYTES);
+    response.size_bytes = Some(size_bytes);
+}
+
+fn content_read_fits_single_ws_response(response: &ContentReadResponse) -> Result<bool, String> {
+    codec::encode_payload(response)
+        .map(|payload| payload.len() <= WS_MAX_RESPONSE_PAYLOAD_BYTES)
+        .map_err(|err| format!("Failed to encode content response: {}", err))
+}
+
 async fn handle_read<C>(
     payload: ContentReadRequest,
     workflow_id: u32,
@@ -477,69 +516,88 @@ where
     let nav_parent_id = normalize_nav_parent_value(&sidecar.nav_parent_id, nav_title.is_some());
     let nav_order = normalize_nav_order_value(&sidecar.nav_order, nav_title.is_some());
 
-    let mut stream_id = None;
-    let mut chunk_bytes = None;
-    let mut size_bytes = None;
-    let content = if object.is_markdown {
-        let blob_path = blob_path(
-            &context.runtime_paths().content_dir,
-            object.key.id,
-            object.key.version,
-        );
-        match fs::read_to_string(&blob_path) {
-            Ok(content) => Some(content),
-            Err(err) => {
-                return response_err(
-                    CONTENT_ACTION_READ_ERR,
-                    workflow_id,
-                    &format!("Failed to read content: {}", err),
-                );
-            }
-        }
-    } else {
-        if stream_requested {
-            let blob_path = blob_path(
-                &context.runtime_paths().content_dir,
-                object.key.id,
-                object.key.version,
+    let mut read_response = ContentReadResponse {
+        id: content_id_hex(object.key.id),
+        alias: sidecar.alias,
+        title: sidecar.title,
+        mime: sidecar.mime,
+        tags: sidecar.tags,
+        nav_title,
+        nav_parent_id,
+        nav_order,
+        original_filename: sidecar.original_filename,
+        theme: sidecar.theme,
+        disable_navbar: sidecar.disable_navbar,
+        disable_floating_nav: sidecar.disable_floating_nav,
+        content_width: contract_width_mode(sidecar.content_width),
+        content: None,
+        stream_id: None,
+        chunk_bytes: None,
+        size_bytes: None,
+    };
+
+    let blob_path = blob_path(
+        &context.runtime_paths().content_dir,
+        object.key.id,
+        object.key.version,
+    );
+    let metadata = match fs::metadata(&blob_path) {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            return response_err(
+                CONTENT_ACTION_READ_ERR,
+                workflow_id,
+                &format!("Failed to read content metadata: {}", err),
             );
-            let metadata = match fs::metadata(&blob_path) {
-                Ok(metadata) => metadata,
+        }
+    };
+
+    if object.is_markdown {
+        if metadata.len() <= WS_MAX_RESPONSE_PAYLOAD_BYTES as u64 {
+            let content = match fs::read_to_string(&blob_path) {
+                Ok(content) => content,
                 Err(err) => {
                     return response_err(
                         CONTENT_ACTION_READ_ERR,
                         workflow_id,
-                        &format!("Failed to read content metadata: {}", err),
+                        &format!("Failed to read content: {}", err),
                     );
                 }
             };
-            stream_id = Some(workflow_id);
-            chunk_bytes = Some(DEFAULT_STREAM_CHUNK_BYTES);
-            size_bytes = Some(metadata.len());
+            read_response.content = Some(content);
+            match content_read_fits_single_ws_response(&read_response) {
+                Ok(true) => {}
+                Ok(false) => {
+                    if stream_requested {
+                        set_content_stream_metadata(&mut read_response, metadata.len());
+                    } else {
+                        return response_err(
+                            CONTENT_ACTION_READ_ERR,
+                            workflow_id,
+                            INLINE_CONTENT_TOO_LARGE_MESSAGE,
+                        );
+                    }
+                }
+                Err(err) => return response_err(CONTENT_ACTION_READ_ERR, workflow_id, &err),
+            }
+        } else if stream_requested {
+            set_content_stream_metadata(&mut read_response, metadata.len());
+        } else {
+            return response_err(
+                CONTENT_ACTION_READ_ERR,
+                workflow_id,
+                INLINE_CONTENT_TOO_LARGE_MESSAGE,
+            );
         }
-        None
-    };
+    } else if stream_requested {
+        set_content_stream_metadata(&mut read_response, metadata.len());
+    }
 
     ManagementResponse {
         domain_id: CONTENT_DOMAIN_ID,
         action_id: CONTENT_ACTION_READ_OK,
         workflow_id,
-        payload: ResponsePayload::ContentRead(ContentReadResponse {
-            id: content_id_hex(object.key.id),
-            alias: sidecar.alias,
-            title: sidecar.title,
-            mime: sidecar.mime,
-            tags: sidecar.tags,
-            nav_title,
-            nav_parent_id,
-            nav_order,
-            original_filename: sidecar.original_filename,
-            theme: sidecar.theme,
-            content,
-            stream_id,
-            chunk_bytes,
-            size_bytes,
-        }),
+        payload: ResponsePayload::ContentRead(Box::new(read_response)),
     }
 }
 
@@ -698,6 +756,15 @@ where
         } else {
             sidecar.theme = Some(trimmed.to_string());
         }
+    }
+    if let Some(disable_navbar) = payload.disable_navbar {
+        sidecar.disable_navbar = disable_navbar;
+    }
+    if let Some(disable_floating_nav) = payload.disable_floating_nav {
+        sidecar.disable_floating_nav = disable_floating_nav;
+    }
+    if let Some(content_width) = payload.content_width {
+        sidecar.content_width = store_width_mode(content_width);
     }
 
     if let Err(err) = validate_sidecar(&sidecar) {
@@ -975,6 +1042,9 @@ where
         nav_title,
         nav_parent_id,
         nav_order,
+        disable_navbar: payload.disable_navbar,
+        disable_floating_nav: payload.disable_floating_nav,
+        content_width: store_width_mode(payload.content_width),
         original_filename: payload.original_filename.clone(),
         theme: payload.theme.clone(),
     };
@@ -1074,6 +1144,62 @@ where
     }
 }
 
+async fn handle_alias_status<C>(
+    payload: ContentAliasStatusRequest,
+    workflow_id: u32,
+    context: &C,
+) -> ManagementResponse
+where
+    C: ContentContext,
+{
+    let reserved_paths = ReservedPaths::from_config(context.config());
+    let canonical_alias =
+        match canonicalize_optional_with_reserved_paths(&payload.alias, &reserved_paths) {
+            Ok(Some(alias)) => alias,
+            Ok(None) => {
+                return response_err(
+                    CONTENT_ACTION_ALIAS_STATUS_ERR,
+                    workflow_id,
+                    "Alias is required",
+                );
+            }
+            Err(err) => return response_err(CONTENT_ACTION_ALIAS_STATUS_ERR, workflow_id, &err),
+        };
+
+    let cache = match get_cache(context).await {
+        Ok(cache) => cache,
+        Err(err) => return response_err(CONTENT_ACTION_ALIAS_STATUS_ERR, workflow_id, &err),
+    };
+
+    let payload = match cache.get_by_alias(&canonical_alias) {
+        Some(object) => ContentAliasStatusResponse {
+            canonical_alias,
+            exists: true,
+            id: Some(content_id_hex(object.key.id)),
+            version: Some(object.key.version.0),
+            mime: Some(object.mime),
+            is_markdown: Some(object.is_markdown),
+            title: object.title,
+        },
+        None => ContentAliasStatusResponse {
+            canonical_alias,
+            exists: false,
+            id: None,
+            version: None,
+            mime: None,
+            is_markdown: None,
+            title: None,
+        },
+    };
+
+    ManagementResponse {
+        domain_id: CONTENT_DOMAIN_ID,
+        action_id: CONTENT_ACTION_ALIAS_STATUS_OK,
+        workflow_id,
+        payload: ResponsePayload::ContentAliasStatus(payload),
+    }
+}
+
 async fn handle_binary_prevalidate<C>(
     payload: BinaryPrevalidateRequest,
     workflow_id: u32,
@@ -1145,63 +1271,24 @@ where
         Err(err) => return response_err(CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR, workflow_id, &err),
     };
 
-    if let Some(alias) = alias.as_ref()
-        && cache.get_by_alias(alias).is_some()
-    {
-        return response_err(
-            CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
-            workflow_id,
-            "Alias already exists",
-        );
-    }
-
-    let content_id = match generate_content_id() {
-        Ok(id) => id,
-        Err(err) => {
-            return response_err(
-                CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
-                workflow_id,
-                &format!("Failed to generate ID: {}", err),
-            );
-        }
-    };
-    let version = ContentVersion(1);
-    let blob = blob_path(&context.runtime_paths().content_dir, content_id, version);
-    let temp_path = temp_upload_path(&blob);
-
     let max_bytes = match resolve_upload_limit(payload.size_bytes, context.config()) {
         Ok(max_bytes) => max_bytes,
         Err(err) => return response_err(CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR, workflow_id, &err),
     };
 
-    let init_config = UploadBeginConfig::builder(
+    let init = match begin_binary_upload_with_version_reservation(
+        payload,
+        alias,
+        &cache,
+        workflow_id,
         connection_id,
-        UploadKind::Binary(BinaryUploadMeta {
-            content_id: content_id.0,
-            version: version.0,
-            alias: alias.clone().unwrap_or_default(),
-            title: payload.title.clone(),
-            tags: payload.tags.clone(),
-            filename: payload.filename.clone(),
-            mime: payload.mime.clone(),
-        }),
-        temp_path,
-        payload.size_bytes,
         max_bytes,
-        DEFAULT_STREAM_CHUNK_BYTES,
+        context,
     )
-    .validate_utf8(false)
-    .build();
-
-    let init = match context.begin_upload(init_config).await {
+    .await
+    {
         Ok(init) => init,
-        Err(err) => {
-            return response_err(
-                CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
-                workflow_id,
-                &err.to_string(),
-            );
-        }
+        Err(response) => return *response,
     };
 
     ManagementResponse {
@@ -1215,6 +1302,105 @@ where
             chunk_bytes: init.chunk_bytes,
         }),
     }
+}
+
+async fn begin_binary_upload_with_version_reservation<C>(
+    payload: BinaryUploadInitRequest,
+    alias: Option<String>,
+    cache: &PageMetaCache,
+    workflow_id: u32,
+    connection_id: u32,
+    max_bytes: u64,
+    context: &C,
+) -> Result<UploadInit, Box<ManagementResponse>>
+where
+    C: ContentContext,
+{
+    let existing = alias.as_deref().and_then(|alias| cache.get_by_alias(alias));
+    if let Some(existing) = existing.as_ref()
+        && existing.is_markdown
+    {
+        return Err(Box::new(response_err(
+            CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
+            workflow_id,
+            "Alias already exists for Markdown content",
+        )));
+    }
+
+    let mut next_version = match existing.as_ref() {
+        Some(existing) => existing.key.version.0.saturating_add(1),
+        None => 1,
+    };
+    let content_id = match existing.as_ref() {
+        Some(existing) => existing.key.id,
+        None => match generate_content_id() {
+            Ok(id) => id,
+            Err(err) => {
+                return Err(Box::new(response_err(
+                    CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
+                    workflow_id,
+                    &format!("Failed to generate ID: {}", err),
+                )));
+            }
+        },
+    };
+
+    for _ in 0..16 {
+        let version = match next_available_upload_version(
+            &context.runtime_paths().content_dir,
+            content_id,
+            ContentVersion(next_version),
+        ) {
+            Ok(version) => version,
+            Err(err) => {
+                return Err(Box::new(response_err(
+                    CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
+                    workflow_id,
+                    &err,
+                )));
+            }
+        };
+        let blob = blob_path(&context.runtime_paths().content_dir, content_id, version);
+        let temp_path = temp_upload_path(&blob);
+        let init_config = UploadBeginConfig::builder(
+            connection_id,
+            UploadKind::Binary(BinaryUploadMeta {
+                content_id: content_id.0,
+                version: version.0,
+                alias: alias.clone().unwrap_or_default(),
+                title: payload.title.clone(),
+                tags: payload.tags.clone(),
+                filename: payload.filename.clone(),
+                mime: payload.mime.clone(),
+            }),
+            temp_path,
+            payload.size_bytes,
+            max_bytes,
+            DEFAULT_STREAM_CHUNK_BYTES,
+        )
+        .validate_utf8(false)
+        .build();
+
+        match context.begin_upload(init_config).await {
+            Ok(init) => return Ok(init),
+            Err(err) if is_upload_temp_collision(&err) => {
+                next_version = version.0.saturating_add(1);
+            }
+            Err(err) => {
+                return Err(Box::new(response_err(
+                    CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
+                    workflow_id,
+                    &err.to_string(),
+                )));
+            }
+        }
+    }
+
+    Err(Box::new(response_err(
+        CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
+        workflow_id,
+        "Failed to reserve upload version",
+    )))
 }
 
 async fn handle_binary_upload_commit<C>(
@@ -1295,6 +1481,9 @@ where
         nav_title: None,
         nav_parent_id: None,
         nav_order: None,
+        disable_navbar: false,
+        disable_floating_nav: false,
+        content_width: Default::default(),
         original_filename: Some(meta.filename.clone()),
         theme: None,
     };
@@ -1315,7 +1504,7 @@ where
     }
 
     content_workflows::invalidate_cache(context).await;
-    ManagementResponse {
+    let response = ManagementResponse {
         domain_id: CONTENT_DOMAIN_ID,
         action_id: CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK,
         workflow_id,
@@ -1325,7 +1514,16 @@ where
             mime: detected_mime.clone(),
             is_markdown: detected_mime == "text/markdown",
         }),
+    };
+
+    if let Some(tracker) = context.release_tracker() {
+        tracker.bump(&format!(
+            "binary content updated ({})",
+            content_id_hex(content_id)
+        ));
     }
+
+    response
 }
 
 async fn handle_upload_stream_init<C>(
@@ -1414,6 +1612,9 @@ where
         nav_title,
         nav_parent_id,
         nav_order,
+        disable_navbar: payload.disable_navbar,
+        disable_floating_nav: payload.disable_floating_nav,
+        content_width: store_width_mode(payload.content_width),
         original_filename: None,
         theme: payload.theme.clone(),
     };
@@ -1750,6 +1951,15 @@ where
             sidecar.theme = Some(trimmed.to_string());
         }
     }
+    if let Some(disable_navbar) = payload.disable_navbar {
+        sidecar.disable_navbar = disable_navbar;
+    }
+    if let Some(disable_floating_nav) = payload.disable_floating_nav {
+        sidecar.disable_floating_nav = disable_floating_nav;
+    }
+    if let Some(content_width) = payload.content_width {
+        sidecar.content_width = store_width_mode(content_width);
+    }
 
     if let Err(err) = validate_sidecar(&sidecar) {
         return response_err(
@@ -2024,6 +2234,47 @@ fn temp_upload_path(blob_path: &Path) -> std::path::PathBuf {
     temp
 }
 
+fn temp_tmp_path(path: &Path) -> std::path::PathBuf {
+    let mut temp = path.to_path_buf();
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("upload");
+    temp.set_file_name(format!("{}.tmp", file_name));
+    temp
+}
+
+fn next_available_upload_version(
+    content_dir: &Path,
+    id: ContentId,
+    start: ContentVersion,
+) -> Result<ContentVersion, String> {
+    let mut version = start.0.max(1);
+    loop {
+        let candidate = ContentVersion(version);
+        if !upload_version_path_exists(content_dir, id, candidate) {
+            return Ok(candidate);
+        }
+        version = version
+            .checked_add(1)
+            .ok_or_else(|| "Content version limit reached".to_string())?;
+    }
+}
+
+fn upload_version_path_exists(content_dir: &Path, id: ContentId, version: ContentVersion) -> bool {
+    let blob = blob_path(content_dir, id, version);
+    let sidecar = sidecar_path(content_dir, id, version);
+    blob.exists()
+        || sidecar.exists()
+        || temp_upload_path(&blob).exists()
+        || temp_tmp_path(&blob).exists()
+        || temp_tmp_path(&sidecar).exists()
+}
+
+fn is_upload_temp_collision(err: &str) -> bool {
+    err.contains("File exists") || err.contains("already exists")
+}
+
 fn validate_binary_file_inputs<C>(
     filename: &str,
     _mime: &str,
@@ -2042,16 +2293,32 @@ where
 /// Detect MIME type using content-based detection (infer) with fallback to extension-based
 /// (mime_guess).
 pub fn detect_mime_type(file_path: &Path, file_content: &[u8]) -> String {
+    let extension = file_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
     if let Some(mime_type) = infer::get(file_content) {
-        return mime_type.mime_type().to_string();
+        return normalize_detected_mime(extension.as_deref(), mime_type.mime_type());
     }
 
     let mime_guess = mime_guess::from_path(file_path);
     if let Some(mime_type) = mime_guess.first() {
-        return mime_type.to_string();
+        return normalize_detected_mime(extension.as_deref(), mime_type.essence_str());
     }
 
     "application/octet-stream".to_string()
+}
+
+fn normalize_detected_mime(extension: Option<&str>, mime: &str) -> String {
+    match extension {
+        Some("woff2") => "font/woff2".to_string(),
+        Some("woff") => "font/woff".to_string(),
+        Some("ttf") => "font/ttf".to_string(),
+        Some("otf") => "font/otf".to_string(),
+        Some("ttc") => "font/collection".to_string(),
+        Some("eot") => "application/vnd.ms-fontobject".to_string(),
+        _ => mime.to_string(),
+    }
 }
 
 fn detect_mime_for_upload(blob_path: &Path, filename: &str) -> String {
@@ -2251,6 +2518,13 @@ fn validate_content_list(request: &ContentListRequest) -> Result<(), String> {
         validate_tags(tags)?;
     }
     Ok(())
+}
+
+fn validate_content_alias_status(request: &ContentAliasStatusRequest) -> Result<(), String> {
+    match canonicalize_optional_or_err(&request.alias)? {
+        Some(_) => Ok(()),
+        None => Err("Alias is required".to_string()),
+    }
 }
 
 fn validate_content_upload(request: &ContentUploadRequest) -> Result<(), String> {
@@ -2764,6 +3038,53 @@ impl RequestCodec for ContentNavIndexRequestCodec {
             _ => Err(CodecError::new(
                 ManagementErrorKind::Codec,
                 "Unsupported command for content nav index codec",
+            )),
+        }
+    }
+}
+
+pub struct ContentAliasStatusRequestCodec;
+
+impl RequestCodec for ContentAliasStatusRequestCodec {
+    fn key(&self) -> DomainActionKey {
+        DomainActionKey::new(CONTENT_DOMAIN_ID, CONTENT_ACTION_ALIAS_STATUS)
+    }
+
+    fn limits(&self) -> FieldLimits {
+        FieldLimits::new(vec![("alias", FieldLimit::MaxChars(MAX_ALIAS_CHARS))])
+    }
+
+    fn decode(&self, payload: &[u8]) -> Result<ManagementCommand, CodecError> {
+        let request: ContentAliasStatusRequest = codec::decode_payload(payload)?;
+        Ok(ManagementCommand::Content(ContentCommand::AliasStatus(
+            request,
+        )))
+    }
+
+    fn encode(&self, command: &ManagementCommand) -> Result<Vec<u8>, CodecError> {
+        match command {
+            ManagementCommand::Content(ContentCommand::AliasStatus(request)) => {
+                codec::encode_payload(request)
+            }
+            _ => Err(CodecError::new(
+                ManagementErrorKind::Codec,
+                "Unsupported command for content alias status codec",
+            )),
+        }
+    }
+
+    fn validate(&self, command: &ManagementCommand) -> Result<(), CodecError> {
+        match command {
+            ManagementCommand::Content(ContentCommand::AliasStatus(request)) => {
+                validate_content_alias_status(request)
+                    .map_err(|err| CodecError::new(ManagementErrorKind::Validation, err))?;
+                let mut values = FieldValues::new();
+                values.insert_len("alias", request.alias.chars().count());
+                validate_field_limits(&self.limits(), &values)
+            }
+            _ => Err(CodecError::new(
+                ManagementErrorKind::Codec,
+                "Unsupported command for content alias status codec",
             )),
         }
     }
@@ -3431,6 +3752,61 @@ impl ResponseCodec for ContentNavIndexResponseCodec {
     }
 }
 
+pub struct ContentAliasStatusResponseCodec;
+
+impl ResponseCodec for ContentAliasStatusResponseCodec {
+    fn key(&self) -> DomainActionKey {
+        DomainActionKey::new(CONTENT_DOMAIN_ID, CONTENT_ACTION_ALIAS_STATUS_OK)
+    }
+
+    fn limits(&self) -> FieldLimits {
+        FieldLimits::new(vec![
+            ("alias", FieldLimit::MaxChars(MAX_ALIAS_CHARS)),
+            ("id", FieldLimit::MaxChars(MAX_ID_CHARS)),
+            ("mime", FieldLimit::MaxChars(MAX_MIME_CHARS)),
+            ("title", FieldLimit::MaxChars(MAX_TITLE_CHARS)),
+        ])
+    }
+
+    fn encode(&self, response: &ManagementResponse) -> Result<Vec<u8>, CodecError> {
+        match &response.payload {
+            ResponsePayload::ContentAliasStatus(payload) => codec::encode_payload(payload),
+            _ => Err(CodecError::new(
+                ManagementErrorKind::Codec,
+                "Unsupported response payload for content alias status codec",
+            )),
+        }
+    }
+
+    fn decode(&self, payload: &[u8]) -> Result<ResponsePayload, CodecError> {
+        let response: ContentAliasStatusResponse = codec::decode_payload(payload)?;
+        Ok(ResponsePayload::ContentAliasStatus(response))
+    }
+
+    fn validate(&self, response: &ManagementResponse) -> Result<(), CodecError> {
+        match &response.payload {
+            ResponsePayload::ContentAliasStatus(payload) => {
+                let mut values = FieldValues::new();
+                values.insert_len("alias", payload.canonical_alias.chars().count());
+                if let Some(id) = &payload.id {
+                    values.insert_len("id", id.chars().count());
+                }
+                if let Some(mime) = &payload.mime {
+                    values.insert_len("mime", mime.chars().count());
+                }
+                if let Some(title) = &payload.title {
+                    values.insert_len("title", title.chars().count());
+                }
+                validate_field_limits(&self.limits(), &values)
+            }
+            _ => Err(CodecError::new(
+                ManagementErrorKind::Codec,
+                "Unsupported response payload for content alias status codec",
+            )),
+        }
+    }
+}
+
 pub struct ContentReadResponseCodec;
 
 impl ResponseCodec for ContentReadResponseCodec {
@@ -3458,7 +3834,7 @@ impl ResponseCodec for ContentReadResponseCodec {
 
     fn encode(&self, response: &ManagementResponse) -> Result<Vec<u8>, CodecError> {
         match &response.payload {
-            ResponsePayload::ContentRead(payload) => codec::encode_payload(payload),
+            ResponsePayload::ContentRead(payload) => codec::encode_payload(payload.as_ref()),
             _ => Err(CodecError::new(
                 ManagementErrorKind::Codec,
                 "Unsupported response payload for content read codec",
@@ -3468,7 +3844,7 @@ impl ResponseCodec for ContentReadResponseCodec {
 
     fn decode(&self, payload: &[u8]) -> Result<ResponsePayload, CodecError> {
         let response: ContentReadResponse = codec::decode_payload(payload)?;
-        Ok(ResponsePayload::ContentRead(response))
+        Ok(ResponsePayload::ContentRead(Box::new(response)))
     }
 
     fn validate(&self, response: &ManagementResponse) -> Result<(), CodecError> {
@@ -3668,11 +4044,64 @@ mod tests {
             nav_title: nav_title.map(str::to_string),
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: None,
             last_modified: std::time::SystemTime::UNIX_EPOCH,
             is_markdown: mime == "text/markdown",
             resolved_roles: ResolvedRoles::Public,
         }
+    }
+
+    fn make_read_response(content: Option<String>) -> ContentReadResponse {
+        ContentReadResponse {
+            id: "0000000000000001".to_string(),
+            alias: "docs/test".to_string(),
+            title: Some("Test".to_string()),
+            mime: "text/markdown".to_string(),
+            tags: Vec::new(),
+            nav_title: None,
+            nav_parent_id: None,
+            nav_order: None,
+            original_filename: Some("test.md".to_string()),
+            theme: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: ContentWidthMode::Auto,
+            content,
+            stream_id: None,
+            chunk_bytes: None,
+            size_bytes: None,
+        }
+    }
+
+    #[test]
+    fn content_read_ws_fit_check_accounts_for_response_payload_overhead() {
+        assert!(
+            content_read_fits_single_ws_response(&make_read_response(Some(
+                "# Small\n".to_string()
+            )))
+            .expect("small response encodes")
+        );
+        assert!(
+            !content_read_fits_single_ws_response(&make_read_response(Some(
+                "a".repeat(WS_MAX_RESPONSE_PAYLOAD_BYTES)
+            )))
+            .expect("large response encodes")
+        );
+    }
+
+    #[test]
+    fn set_content_stream_metadata_removes_inline_content() {
+        let mut response = make_read_response(Some("# Large\n".to_string()));
+
+        set_content_stream_metadata(&mut response, 2048);
+
+        assert!(response.content.is_none());
+        assert!(response.stream_id.is_none());
+        assert_eq!(response.chunk_bytes, Some(DEFAULT_STREAM_CHUNK_BYTES));
+        assert_eq!(response.size_bytes, Some(2048));
     }
 
     #[test]
@@ -3751,5 +4180,25 @@ mod tests {
         let mut reader = WireReader::new(&bytes);
         let err = ContentSortDirection::decode(&mut reader).unwrap_err();
         assert!(err.to_string().contains("Unknown sort direction"));
+    }
+
+    #[test]
+    fn normalizes_font_mime_types_by_extension() {
+        assert_eq!(
+            detect_mime_type(Path::new("brand.woff2"), b"wOF2font-data"),
+            "font/woff2"
+        );
+        assert_eq!(
+            detect_mime_type(Path::new("brand.woff"), b"wOFFfont-data"),
+            "font/woff"
+        );
+        assert_eq!(
+            detect_mime_type(Path::new("brand.ttf"), b"not-a-real-font"),
+            "font/ttf"
+        );
+        assert_eq!(
+            detect_mime_type(Path::new("brand.otf"), b"not-a-real-font"),
+            "font/otf"
+        );
     }
 }

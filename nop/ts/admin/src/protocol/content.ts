@@ -19,6 +19,7 @@ export const CONTENT_ACTION_UPLOAD_STREAM_INIT = 10;
 export const CONTENT_ACTION_UPLOAD_STREAM_COMMIT = 11;
 export const CONTENT_ACTION_UPDATE_STREAM_INIT = 12;
 export const CONTENT_ACTION_UPDATE_STREAM_COMMIT = 13;
+export const CONTENT_ACTION_ALIAS_STATUS = 14;
 
 export const CONTENT_ACTION_LIST_OK = 101;
 export const CONTENT_ACTION_LIST_ERR = 102;
@@ -46,9 +47,12 @@ export const CONTENT_ACTION_UPDATE_STREAM_INIT_OK = 1201;
 export const CONTENT_ACTION_UPDATE_STREAM_INIT_ERR = 1202;
 export const CONTENT_ACTION_UPDATE_STREAM_COMMIT_OK = 1301;
 export const CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR = 1302;
+export const CONTENT_ACTION_ALIAS_STATUS_OK = 1401;
+export const CONTENT_ACTION_ALIAS_STATUS_ERR = 1402;
 
 export type ContentSortField = "title" | "alias" | "tags" | "mime" | "nav_title";
 export type ContentSortDirection = "asc" | "desc";
+export type ContentWidthMode = "auto" | "wide" | "narrow";
 
 const SORT_FIELD_TITLE = 0;
 const SORT_FIELD_ALIAS = 1;
@@ -65,6 +69,18 @@ function writeStringVec(writer: WireWriter, values: string[]): void {
 
 function readStringVec(reader: WireReader): string[] {
   return reader.readVec((itemReader) => itemReader.readString());
+}
+
+function writeContentWidthMode(writer: WireWriter, value: ContentWidthMode): void {
+  writer.writeString(value);
+}
+
+function readContentWidthMode(reader: WireReader): ContentWidthMode {
+  const value = reader.readString();
+  if (value !== "auto" && value !== "wide" && value !== "narrow") {
+    throw new Error(`Unknown content width mode ${value}`);
+  }
+  return value;
 }
 
 function writeContentSortField(writer: WireWriter, value: ContentSortField): void {
@@ -150,6 +166,9 @@ export function encodeContentUpdateRequest(payload: {
   navParentId?: string | null;
   navOrder?: number | null;
   theme?: string | null;
+  disableNavbar?: boolean | null;
+  disableFloatingNav?: boolean | null;
+  contentWidth?: ContentWidthMode | null;
   content?: string | null;
 }): Uint8Array {
   const writer = new WireWriter();
@@ -161,6 +180,9 @@ export function encodeContentUpdateRequest(payload: {
     payload.navParentId !== null && payload.navParentId !== undefined,
     payload.navOrder !== null && payload.navOrder !== undefined,
     payload.theme !== null && payload.theme !== undefined,
+    payload.disableNavbar !== null && payload.disableNavbar !== undefined,
+    payload.disableFloatingNav !== null && payload.disableFloatingNav !== undefined,
+    payload.contentWidth !== null && payload.contentWidth !== undefined,
     payload.content !== null && payload.content !== undefined,
   ];
   OptionMap.write(writer, optionFlags);
@@ -188,6 +210,15 @@ export function encodeContentUpdateRequest(payload: {
     writer.writeString(payload.theme as string);
   }
   if (optionFlags[7]) {
+    writer.writeBool(payload.disableNavbar as boolean);
+  }
+  if (optionFlags[8]) {
+    writer.writeBool(payload.disableFloatingNav as boolean);
+  }
+  if (optionFlags[9]) {
+    writeContentWidthMode(writer, payload.contentWidth as ContentWidthMode);
+  }
+  if (optionFlags[10]) {
     writer.writeString(payload.content as string);
   }
   return writer.toUint8Array();
@@ -203,6 +234,14 @@ export function encodeContentNavIndexRequest(): Uint8Array {
   return new Uint8Array();
 }
 
+export function encodeContentAliasStatusRequest(payload: {
+  alias: string;
+}): Uint8Array {
+  const writer = new WireWriter();
+  writer.writeString(payload.alias);
+  return writer.toUint8Array();
+}
+
 export function encodeContentUploadRequest(payload: {
   alias?: string | null;
   title?: string | null;
@@ -213,6 +252,9 @@ export function encodeContentUploadRequest(payload: {
   navOrder?: number | null;
   originalFilename?: string | null;
   theme?: string | null;
+  disableNavbar?: boolean | null;
+  disableFloatingNav?: boolean | null;
+  contentWidth?: ContentWidthMode | null;
   content: Uint8Array;
 }): Uint8Array {
   const writer = new WireWriter();
@@ -250,6 +292,9 @@ export function encodeContentUploadRequest(payload: {
   if (optionFlags[6]) {
     writer.writeString(payload.theme as string);
   }
+  writer.writeBool(payload.disableNavbar ?? false);
+  writer.writeBool(payload.disableFloatingNav ?? false);
+  writeContentWidthMode(writer, payload.contentWidth ?? "auto");
   writer.writeBytes(payload.content);
   return writer.toUint8Array();
 }
@@ -310,6 +355,9 @@ export function encodeContentUploadStreamInitRequest(payload: {
   navParentId?: string | null;
   navOrder?: number | null;
   theme?: string | null;
+  disableNavbar?: boolean | null;
+  disableFloatingNav?: boolean | null;
+  contentWidth?: ContentWidthMode | null;
   sizeBytes: number;
 }): Uint8Array {
   const writer = new WireWriter();
@@ -342,6 +390,9 @@ export function encodeContentUploadStreamInitRequest(payload: {
   if (optionFlags[5]) {
     writer.writeString(payload.theme as string);
   }
+  writer.writeBool(payload.disableNavbar ?? false);
+  writer.writeBool(payload.disableFloatingNav ?? false);
+  writeContentWidthMode(writer, payload.contentWidth ?? "auto");
   writer.writeU64(payload.sizeBytes);
   return writer.toUint8Array();
 }
@@ -363,6 +414,9 @@ export function encodeContentUpdateStreamInitRequest(payload: {
   navParentId?: string | null;
   navOrder?: number | null;
   theme?: string | null;
+  disableNavbar?: boolean | null;
+  disableFloatingNav?: boolean | null;
+  contentWidth?: ContentWidthMode | null;
   sizeBytes: number;
 }): Uint8Array {
   const writer = new WireWriter();
@@ -374,6 +428,9 @@ export function encodeContentUpdateStreamInitRequest(payload: {
     payload.navParentId !== null && payload.navParentId !== undefined,
     payload.navOrder !== null && payload.navOrder !== undefined,
     payload.theme !== null && payload.theme !== undefined,
+    payload.disableNavbar !== null && payload.disableNavbar !== undefined,
+    payload.disableFloatingNav !== null && payload.disableFloatingNav !== undefined,
+    payload.contentWidth !== null && payload.contentWidth !== undefined,
   ];
   OptionMap.write(writer, optionFlags);
 
@@ -398,6 +455,15 @@ export function encodeContentUpdateStreamInitRequest(payload: {
   }
   if (optionFlags[6]) {
     writer.writeString(payload.theme as string);
+  }
+  if (optionFlags[7]) {
+    writer.writeBool(payload.disableNavbar as boolean);
+  }
+  if (optionFlags[8]) {
+    writer.writeBool(payload.disableFloatingNav as boolean);
+  }
+  if (optionFlags[9]) {
+    writeContentWidthMode(writer, payload.contentWidth as ContentWidthMode);
   }
   writer.writeU64(payload.sizeBytes);
   return writer.toUint8Array();
@@ -458,6 +524,9 @@ export function decodeContentListResponse(bytes: Uint8Array): {
     navParentId: string | null;
     navOrder: number | null;
     originalFilename: string | null;
+    disableNavbar: boolean;
+    disableFloatingNav: boolean;
+    contentWidth: ContentWidthMode;
     isMarkdown: boolean;
   }[];
 } {
@@ -476,6 +545,9 @@ export function decodeContentListResponse(bytes: Uint8Array): {
     const navParentId = flags[2] ? itemReader.readString() : null;
     const navOrder = flags[3] ? itemReader.readI32() : null;
     const originalFilename = flags[4] ? itemReader.readString() : null;
+    const disableNavbar = itemReader.readBool();
+    const disableFloatingNav = itemReader.readBool();
+    const contentWidth = readContentWidthMode(itemReader);
     const isMarkdown = itemReader.readBool();
     return {
       id,
@@ -487,6 +559,9 @@ export function decodeContentListResponse(bytes: Uint8Array): {
       navParentId,
       navOrder,
       originalFilename,
+      disableNavbar,
+      disableFloatingNav,
+      contentWidth,
       isMarkdown,
     };
   });
@@ -505,6 +580,9 @@ export function decodeContentReadResponse(bytes: Uint8Array): {
   navOrder: number | null;
   originalFilename: string | null;
   theme: string | null;
+  disableNavbar: boolean;
+  disableFloatingNav: boolean;
+  contentWidth: ContentWidthMode;
   content: string | null;
   streamId: number | null;
   chunkBytes: number | null;
@@ -522,6 +600,9 @@ export function decodeContentReadResponse(bytes: Uint8Array): {
   const navOrder = flags[3] ? reader.readI32() : null;
   const originalFilename = flags[4] ? reader.readString() : null;
   const theme = flags[5] ? reader.readString() : null;
+  const disableNavbar = reader.readBool();
+  const disableFloatingNav = reader.readBool();
+  const contentWidth = readContentWidthMode(reader);
   const content = flags[6] ? reader.readString() : null;
   const streamId = flags[7] ? reader.readU32() : null;
   const chunkBytes = flags[8] ? reader.readU32() : null;
@@ -538,6 +619,9 @@ export function decodeContentReadResponse(bytes: Uint8Array): {
     navOrder,
     originalFilename,
     theme,
+    disableNavbar,
+    disableFloatingNav,
+    contentWidth,
     content,
     streamId,
     chunkBytes,
@@ -590,4 +674,34 @@ export function decodeContentNavIndexResponse(bytes: Uint8Array): {
   });
   reader.ensureFullyConsumed();
   return { items };
+}
+
+export function decodeContentAliasStatusResponse(bytes: Uint8Array): {
+  canonicalAlias: string;
+  exists: boolean;
+  id: string | null;
+  version: number | null;
+  mime: string | null;
+  isMarkdown: boolean | null;
+  title: string | null;
+} {
+  const reader = new WireReader(bytes);
+  const flags = OptionMap.read(reader, 5);
+  const canonicalAlias = reader.readString();
+  const exists = reader.readBool();
+  const id = flags[0] ? reader.readString() : null;
+  const version = flags[1] ? reader.readU32() : null;
+  const mime = flags[2] ? reader.readString() : null;
+  const isMarkdown = flags[3] ? reader.readBool() : null;
+  const title = flags[4] ? reader.readString() : null;
+  reader.ensureFullyConsumed();
+  return {
+    canonicalAlias,
+    exists,
+    id,
+    version,
+    mime,
+    isMarkdown,
+    title,
+  };
 }

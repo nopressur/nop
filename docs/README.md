@@ -19,6 +19,7 @@ Choose the home that matches the primary purpose of the document and avoid dupli
 - management: The plumbing behind administration. This is the management bus, domain/action contracts, connectors, and protocols that power admin and CLI interactions.
 - infrastructure: Core runtime wiring and underlying technical capabilities used across the system (storage, templates, TLS, internal utilities, network and filesystem security).
 - devops: How to build, test, release, configure, and run the system. This is about operating the product, not the product itself.
+- user: End-user reference material for configuring and using NoPressure features without implementation details.
 - standards: Coding and testing conventions, style rules, and contribution practices.
 - modules: Self-contained feature modules shared across the system (for example, shortcodes).
 - Do not create a `features` directory at any level. Feature documents live in the owning domain directory.
@@ -35,6 +36,7 @@ The `nop-roles` crate owns role rules and shared role types used by IAM, search,
 ### Content Storage and Public Model
 - `docs/infrastructure/storage.md` - On-disk content contract, sidecar metadata, and write expectations.
 - `docs/content/content-model.md` - Routing, rendering, navigation, and public access control rules.
+- `docs/content/special-fallback-files.md` - Root-level public files that can fall back to built-in assets.
 - `docs/content/search-ux.md` - Public search API contract and site TypeScript search overlay behavior.
 - `docs/content/sitemap.md` - `/robots.txt` and `/sitemap.xml` behavior, crawl rules, and canonical URL rules.
 - `docs/content/themes.md` - Theme file format, palettes, and public theme rendering pipeline.
@@ -51,6 +53,7 @@ The `nop-roles` crate owns role rules and shared role types used by IAM, search,
 - `docs/admin/ui.md` - Admin SPA architecture, UX requirements, and UI integration details.
 - `docs/admin/auto-bootstrap.md` - Runtime root validation rules and default bootstrap behavior.
 - `docs/admin/list-control-guideline.md` - Admin list interaction pattern and keyboard navigation guidelines.
+- `docs/admin/settings.md` - Admin Settings requirements spanning UI, management protocol, CLI, config, and public title rendering.
 - `docs/admin/user-management.md` - User management UI and management bus integration.
 
 ### CLI
@@ -71,6 +74,7 @@ The `nop-roles` crate owns role rules and shared role types used by IAM, search,
 ### DevOps & Platform
 - `docs/devops/build-and-release.md` - Build modes, asset embedding, multi-target release process.
 - `docs/devops/configuration.md` - Config schema, defaults, validation, secrets handling.
+- `docs/devops/configuration-registry.md` - Data registry of every `config.yaml` option, default, validation rule, consumer, management exposure, and sensitivity.
 - `docs/devops/tooling.md` - Helper scripts (`scripts/crg.sh`) plus Bulma (`scripts/update-bulma.sh`) and Ace (`scripts/update-ace.sh`) updaters.
 
 ### Infrastructure Support Modules
@@ -100,6 +104,10 @@ The `nop-roles` crate owns role rules and shared role types used by IAM, search,
 - `docs/content/tags.md` - Tag model, access rules, and listing behavior.
 - `docs/infrastructure/tls.md` - TLS feature behavior and validation rules.
 - `docs/infrastructure/acme.md` - ACME issuance, challenges, and provider requirements.
+
+### User Guides
+- `docs/user/command-line.md` - User-facing command line usage, examples, and command reference.
+- `docs/user/theming.md` - User-facing public theme file options, defaults, and value ranges.
 
 ### Core Runtime
 - `docs/infrastructure/main.md` - Startup flow, middleware wiring, and failure behavior.

@@ -8,6 +8,7 @@ import type { SiteNavigationController } from './navigation';
 
 const PROFILE_ENDPOINT = '/api/profile';
 const MENU_ROOT_SELECTOR = '[data-site-user-menu]';
+const DRAWER_ROWS_SELECTOR = '[data-site-drawer-rows]';
 const CONTENT_ID_SELECTOR = '[data-site-content-id]';
 const EDIT_BUTTON_SELECTOR = '[data-site-edit-button]';
 const ADMIN_BUTTON_SELECTOR = '[data-site-admin-button]';
@@ -107,6 +108,53 @@ function buildAdminButton(adminHref: string): HTMLElement {
   return wrapper;
 }
 
+function appendDrawerItemLink(container: HTMLElement, item: ProfileMenuItem) {
+  const link = document.createElement('a');
+  link.className = 'site-drawer-nav__link';
+  link.textContent = item.label;
+  link.href = item.href;
+
+  const method = item.method?.toUpperCase();
+  if (method && method !== 'GET') {
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      void performAction(item.href, method);
+    });
+  }
+
+  container.appendChild(link);
+}
+
+function buildDrawerProfile(displayName: string, menuItems: ProfileMenuItem[]): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.dataset.siteDrawerProfile = '';
+  wrapper.dataset.siteExpander = '';
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.dataset.siteExpanderToggle = '';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.appendChild(document.createTextNode(displayName));
+  const chevron = document.createElement('span');
+  chevron.dataset.siteExpanderChevron = '';
+  chevron.setAttribute('aria-hidden', 'true');
+  toggle.appendChild(chevron);
+  wrapper.appendChild(toggle);
+
+  const panel = document.createElement('div');
+  panel.dataset.siteExpanderPanel = '';
+  panel.setAttribute('hidden', '');
+  menuItems.forEach((item) => appendDrawerItemLink(panel, item));
+  wrapper.appendChild(panel);
+  return wrapper;
+}
+
+function clearElementChildren(element: HTMLElement) {
+  while (element.firstChild) {
+    element.removeChild(element.firstChild);
+  }
+}
+
 function getContentId(): string | null {
   const container = document.querySelector<HTMLElement>(CONTENT_ID_SELECTOR);
   const contentId = container?.dataset.siteContentId?.trim();
@@ -123,7 +171,11 @@ function clearActionButtons(root: HTMLElement) {
   }
   parent
     .querySelectorAll(`${EDIT_BUTTON_SELECTOR}, ${ADMIN_BUTTON_SELECTOR}`)
-    .forEach((button) => button.remove());
+    .forEach((button) => {
+      if (button.parentNode) {
+        button.parentNode.removeChild(button);
+      }
+    });
 }
 
 function resetMenuRoot(root: HTMLElement) {
@@ -163,18 +215,22 @@ async function refreshUserMenu() {
     });
     if (!response.ok) {
       root.innerHTML = '';
+      clearDrawerRows();
       return;
     }
 
     const payload = (await response.json()) as ProfileResponse;
     if (!payload.authenticated || !payload.menu_items?.length) {
       resetMenuRoot(root);
+      clearDrawerRows();
       return;
     }
 
     const displayName = payload.display_name?.trim() || 'Account';
     const menu = buildMenu(displayName, payload.menu_items);
-    root.replaceWith(menu);
+    if (root.parentNode) {
+      root.parentNode.replaceChild(menu, root);
+    }
     resolveSiteNavigation().registerDropdowns(menu);
 
     const adminItem = payload.menu_items.find((item) => item.key === 'admin');
@@ -189,10 +245,40 @@ async function refreshUserMenu() {
       const adminButton = buildAdminButton(adminItem.href);
       parent.insertBefore(adminButton, insertionPoint);
     }
+    populateDrawerRows(displayName, payload.menu_items, contentId, adminItem?.href ?? null);
   } catch (error) {
     console.error('Failed to load profile menu:', error);
     resetMenuRoot(root);
+    clearDrawerRows();
   }
+}
+
+function clearDrawerRows() {
+  const rows = document.querySelector<HTMLElement>(DRAWER_ROWS_SELECTOR);
+  if (rows) {
+    clearElementChildren(rows);
+  }
+}
+
+function populateDrawerRows(
+  displayName: string,
+  menuItems: ProfileMenuItem[],
+  contentId: string | null,
+  adminHref: string | null
+) {
+  const rows = document.querySelector<HTMLElement>(DRAWER_ROWS_SELECTOR);
+  if (!rows) {
+    return;
+  }
+  clearElementChildren(rows);
+  if (adminHref) {
+    if (contentId) {
+      rows.appendChild(buildEditButton(adminHref, contentId));
+    }
+    rows.appendChild(buildAdminButton(adminHref));
+  }
+  rows.appendChild(buildDrawerProfile(displayName, menuItems));
+  resolveSiteNavigation().registerExpanders(rows);
 }
 
 let initialized = false;

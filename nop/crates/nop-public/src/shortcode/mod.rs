@@ -261,6 +261,7 @@ pub struct ShortcodeProcessingResult {
     pub hash_to_html_map: HashMap<String, String>,
     pub hash_to_type_map: HashMap<String, ShortcodeType>,
     pub contains_dynamic_shortcodes: bool,
+    pub contains_hero: bool,
 }
 
 /// Process text content looking for shortcodes and replace them with hash placeholders
@@ -277,6 +278,7 @@ pub fn process_text_with_shortcodes(
             hash_to_html_map: HashMap::new(),
             hash_to_type_map: HashMap::new(),
             contains_dynamic_shortcodes: false,
+            contains_hero: false,
         };
     }
 
@@ -286,6 +288,7 @@ pub fn process_text_with_shortcodes(
     let mut result_text = String::new();
     let mut last_end = 0;
     let mut contains_dynamic_shortcodes = false;
+    let mut contains_hero = false;
 
     while last_end < text.len() {
         // Look for the next shortcode starting from last_end
@@ -307,6 +310,9 @@ pub fn process_text_with_shortcodes(
                 let is_dynamic = resolved_type.dynamic;
                 if is_dynamic {
                     contains_dynamic_shortcodes = true;
+                }
+                if shortcode.name == "hero-img" {
+                    contains_hero = true;
                 }
                 let normalized_shortcode = normalize_shortcode(&shortcode);
                 let hash_placeholder = generate_shortcode_hash(&shortcode);
@@ -382,6 +388,7 @@ pub fn process_text_with_shortcodes(
         hash_to_html_map,
         hash_to_type_map,
         contains_dynamic_shortcodes,
+        contains_hero,
     }
 }
 
@@ -927,6 +934,38 @@ mod tests {
     }
 
     #[test]
+    fn test_process_text_marks_hero_presence() {
+        let mut registry = ShortcodeRegistry::new();
+        registry.register(
+            "hero-img",
+            |_shortcode, _ctx| Ok("<div class=\"sc-hero-img\">Hero</div>".to_string()),
+            ShortcodeType {
+                dynamic: false,
+                container_escape: true,
+            },
+        );
+        registry.register(
+            "breakout",
+            |_shortcode, _ctx| Ok("<section>Breakout</section>".to_string()),
+            ShortcodeType {
+                dynamic: false,
+                container_escape: true,
+            },
+        );
+        let cache = build_test_cache();
+        let ctx = build_shortcode_context(&cache);
+
+        let hero = process_text_with_shortcodes("((hero-img src=\"a.png\"))", &registry, &ctx);
+        assert!(hero.contains_hero);
+
+        let other = process_text_with_shortcodes("((breakout))", &registry, &ctx);
+        assert!(!other.contains_hero);
+
+        let plain = process_text_with_shortcodes("plain text", &registry, &ctx);
+        assert!(!plain.contains_hero);
+    }
+
+    #[test]
     fn test_video_shortcode_missing_src() {
         let registry = create_default_registry();
         let cache = build_test_cache();
@@ -1171,6 +1210,12 @@ mod tests {
     struct StubHooks;
 
     impl crate::markdown::RenderPipelineSupportHooks for StubHooks {
+        fn open_content_segment(&self, _ctx: &crate::markdown::PageRenderHookContext) -> String {
+            "<<OPEN>>".to_string()
+        }
+        fn close_content_segment(&self) -> String {
+            "<<CLOSE>>".to_string()
+        }
         fn escape_container(&self, _ctx: &crate::markdown::PageRenderHookContext) -> String {
             "<<ESC>>".to_string()
         }

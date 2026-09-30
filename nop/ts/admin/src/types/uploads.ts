@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
+import type { ContentAliasStatus } from "../services/content";
+
 export type UploadItemStatus =
   | "prechecking"
   | "ready"
@@ -18,6 +20,9 @@ export type UploadItem = {
   tags: string[];
   status: UploadItemStatus;
   error?: string | null;
+  aliasCheckStatus?: "idle" | "checking";
+  aliasStatus?: ContentAliasStatus | null;
+  aliasStatusError?: string | null;
   progress?: {
     loaded: number;
     total: number;

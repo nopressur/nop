@@ -93,6 +93,40 @@ pub fn generate_navigation_html(
     }
 }
 
+/// Drawer navigation markup for the narrow menu drawer. Parents render as
+/// single-expander rows (link plus chevron toggle with a hidden child panel);
+/// entries without children render as plain links.
+pub fn generate_drawer_navigation_html(navigation: &[NavItem]) -> String {
+    let mut html = String::new();
+    for item in navigation {
+        let title = html_escape(&item.title);
+        let path = html_escape(&item.path);
+        if item.children.is_empty() {
+            html.push_str(&format!(
+                r#"<a class="site-drawer-nav__link" href="{path}">{title}</a>"#
+            ));
+            continue;
+        }
+        html.push_str(r#"<div class="site-drawer-nav__item" data-site-expander>"#);
+        html.push_str(&format!(
+            r#"<a class="site-drawer-nav__link" href="{path}">{title}</a>"#
+        ));
+        html.push_str(&format!(
+            r#"<button class="site-drawer-nav__toggle" type="button" data-site-expander-toggle aria-expanded="false" aria-label="Toggle {title} submenu"><span data-site-expander-chevron aria-hidden="true"></span></button>"#
+        ));
+        html.push_str(r#"<div class="site-drawer-nav__panel" data-site-expander-panel hidden>"#);
+        for child in &item.children {
+            let child_title = html_escape(&child.title);
+            let child_path = html_escape(&child.path);
+            html.push_str(&format!(
+                r#"<a class="site-drawer-nav__link site-drawer-nav__link--child" href="{child_path}">{child_title}</a>"#
+            ));
+        }
+        html.push_str("</div></div>");
+    }
+    html
+}
+
 #[derive(Debug, Clone)]
 struct NavNode {
     parent_id: Option<nop_content_store::flat_storage::ContentId>,
@@ -193,6 +227,37 @@ mod tests {
     use super::*;
     use nop_content_store::flat_storage::ContentId;
     use nop_rt_templates::MiniJinjaEngine;
+
+    #[test]
+    fn drawer_navigation_renders_expanders_for_parents() {
+        let items = vec![NavItem {
+            title: "Parent & Co".to_string(),
+            path: "/parent".to_string(),
+            children: vec![NavItem {
+                title: "Child".to_string(),
+                path: "/parent/child".to_string(),
+                children: Vec::new(),
+            }],
+        }];
+        let html = generate_drawer_navigation_html(&items);
+        assert!(html.contains("data-site-expander"));
+        assert!(html.contains(r#"aria-expanded="false""#));
+        assert!(html.contains("data-site-expander-panel hidden"));
+        assert!(html.contains("Parent &amp; Co"));
+        assert!(html.contains("/parent/child"));
+    }
+
+    #[test]
+    fn drawer_navigation_renders_plain_links_without_children() {
+        let items = vec![NavItem {
+            title: "Leaf".to_string(),
+            path: "/leaf".to_string(),
+            children: Vec::new(),
+        }];
+        let html = generate_drawer_navigation_html(&items);
+        assert!(html.contains(r#"<a class="site-drawer-nav__link" href="/leaf">Leaf</a>"#));
+        assert!(!html.contains("data-site-expander"));
+    }
 
     #[test]
     fn navigation_titles_are_escaped() {

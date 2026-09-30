@@ -1,6 +1,6 @@
 [package]
 name = "nop-public"
-version = "0.1.29"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
@@ -16,6 +16,7 @@ nop-config = { path = "../nop-config" }
 nop-content-store = { path = "../nop-content-store" }
 nop-rt-headers = { path = "../nop-rt-headers" }
 nop-rt-iam = { path = "../nop-rt-iam" }
+nop-rt-builtin = { path = "../nop-rt-builtin" }
 nop-rt-page-cache = { path = "../nop-rt-page-cache" }
 nop-rt-paths = { path = "../nop-rt-paths" }
 nop-rt-release = { path = "../nop-rt-release" }

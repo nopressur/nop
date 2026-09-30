@@ -14,6 +14,7 @@ This catalog highlights repo-provided tooling that speeds up development, testin
   - Runs Rust format, test, and clippy in dependency-first order for every local path crate and
     the root `nop` package.
   - Runs admin/login SPA checks and tests.
+  - Runs public site checks, tests, build, and built-bundle compatibility validation.
 - `scripts/run-playwright.sh`
   - Runs the Playwright browser E2E/UX scope separately.
 
@@ -37,11 +38,20 @@ This catalog highlights repo-provided tooling that speeds up development, testin
 
 1. **Bootstrap**: install Rust tooling (`rustup`), ensure `scripts/crg.sh nop fmt`, `scripts/crg.sh nop clippy`, `scripts/crg.sh nop test`, and `scripts/run-full-tests.sh` succeed for the relevant scope.
 2. **Manage credentials**: use `nop user` subcommands for local user hashes instead of online generators.
-3. **Frontend builds**: `build.rs` rebuilds admin/login SPA assets automatically; run `npm run build`
-   in `nop/ts/admin` or `nop/ts/login` only if you need to regenerate assets manually. Login
-   builds write `login.js` + `login.css` into `nop/builtin/login-<hash>` and update
-   `nop/builtin/login-spa-version.txt` so the templates reference the correct versioned assets.
-4. **Ship**: use `scripts/crg.sh nop build --release` before packaging binaries or images.
+3. **Frontend installs**: automation uses lockfile-controlled installs (`npm ci`) when
+   `package-lock.json` is present, with `npm install` reserved for package roots that intentionally
+   do not have a lockfile.
+4. **Frontend builds**: `nop/crates/nop-rt-builtin/build.rs` rebuilds admin/login SPA assets and
+   the public site bundle automatically; run `npm run build` in `nop/ts/admin`, `nop/ts/login`, or
+   `nop/ts/site` only if you need to regenerate assets manually. Login builds write `login.js` +
+   `login.css` into `nop/builtin/login-<hash>` and update `nop/builtin/login-spa-version.txt` so
+   the templates reference the correct versioned assets. Before each required frontend rebuild,
+   the build script automatically installs locked dependencies with
+   `npm ci --include=dev --include=optional` for the executing host. Up-to-date frontends skip
+   installation and compilation.
+5. **Audit**: run `cargo audit`, `npm audit` in every Node package root, and `trivy fs .` before
+   release candidates; scan container images with `trivy image <image>`.
+6. **Ship**: use `scripts/crg.sh nop build --release` before packaging binaries or images.
 
 Each tool prints actionable output and exits with non-zero status on failure, making them safe to wire into CI or scripted workflows.
 

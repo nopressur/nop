@@ -207,6 +207,7 @@ mod tests {
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
             search: nop_config::SearchConfig::default(),
+            settings: Default::default(),
             dev_mode: None,
         }
     }

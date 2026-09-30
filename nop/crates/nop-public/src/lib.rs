@@ -13,6 +13,7 @@ pub mod nav;
 mod render_tools;
 pub mod seo;
 pub mod shortcode;
+mod special_files;
 mod streaming;
 
 pub use context::{PageRenderContext, PublicRequestContext};

@@ -15,7 +15,7 @@ use tokio::fs;
 
 use super::parser::{RenderRequest, generate_html};
 use super::render::generate_html_page_with_user;
-use super::render_pipeline_support_hooks::DefaultRenderPipelineSupportHooks;
+use super::render_pipeline_support_hooks::{DefaultRenderPipelineSupportHooks, PageRenderState};
 
 pub async fn serve_markdown_alias(
     alias: &str,
@@ -62,7 +62,7 @@ pub async fn serve_markdown_alias(
         Some(&config.app.name),
     ) {
         Ok(path) => path,
-        Err(error_response) => return error_response,
+        Err(error_response) => return *error_response,
     };
 
     let content = match fs::read_to_string(&canonical_file_path).await {
@@ -92,8 +92,12 @@ pub async fn serve_markdown_alias(
         cache,
         md_path: alias,
         user,
-        short_paragraph_length: config.rendering.short_paragraph_length,
         hooks: &hooks,
+        render_state: PageRenderState::new(
+            object.disable_navbar,
+            object.disable_floating_nav,
+            object.content_width,
+        ),
     }) {
         Ok(rendered) => rendered,
         Err(error) => {
@@ -107,16 +111,21 @@ pub async fn serve_markdown_alias(
 
     let render_ctx = PageRenderContext {
         config,
+        runtime_settings: ctx.runtime_settings,
         runtime_paths: ctx.runtime_paths,
         theme: theme.as_deref(),
         release_tracker,
         template_engine,
+        app_version: &ctx.request_tools.app_version,
+        show_admin_version_footer: user
+            .map(|user| user.roles.iter().any(|role| role == "admin"))
+            .unwrap_or(false),
     };
     let html_page = generate_html_page_with_user(
         &title,
         &rendered_html.html,
         &navigation,
-        rendered_html.use_compact_width,
+        &rendered_html.render_state,
         &content_id,
         &render_ctx,
     )

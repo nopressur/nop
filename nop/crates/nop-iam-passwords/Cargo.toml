@@ -1,11 +1,12 @@
 [package]
 name = "nop-iam-passwords"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 nop-config = { path = "../nop-config" }
-argon2 = "0.5"
+argon2 = "0.6.0"
 hex = "0.4"
-password-hash = { version = "0.5", features = ["getrandom"] }
+password-hash = { version = "0.6", features = ["alloc", "phc"] }
+getrandom = "0.3"
 serde = { version = "1.0", features = ["derive"] }

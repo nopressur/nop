@@ -89,6 +89,7 @@ describe("UserEditorView", () => {
       adminPath: "/admin",
       appName: "NoPressure",
       csrfTokenPath: "/admin/csrf-token-api",
+      version: "1.2.3",
       wsPath: "/admin/ws",
       wsTicketPath: "/admin/ws-ticket",
       userManagementEnabled: true,

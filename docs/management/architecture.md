@@ -43,7 +43,8 @@ Status: Developed
 
 #### Command Enum and Bus Flow
 
-- `ManagementCommand::{ System(SystemCommand), Users(UserCommand) }` carries domain-specific requests.
+- `ManagementCommand` carries domain-specific requests such as `System`, `Users`, `Content`,
+  `Search`, and `Settings`.
 - `ManagementRequest { connection_id, workflow_id, command }` is the bus payload; connectors and
   internal callers must supply both IDs.
 - `ManagementRequest` also carries optional actor metadata (for example, `actor_email`) injected by
@@ -107,6 +108,7 @@ Status: Developed
 | Content | 12 | Content management | List/read/update/delete/upload + streaming + binary uploads |
 | Roles | 13 | Role management | Role CRUD/list/show |
 | Search | 21 | Search management | Search query + reset/invalidate |
+| Settings | 22 | Admin settings | Website-level editable settings |
 
 #### System Action Table
 
@@ -175,6 +177,7 @@ Status: Developed
 - `docs/management/troubleshooting.md`
 - `docs/management/operations.md`
 - `docs/management/domains.md`
+- `docs/admin/settings.md`
 
 <!--
 This file is part of the product NoPressure.

@@ -15,7 +15,7 @@ use nop_content_store::flat_storage::{
 use nop_content_store::reserved_paths::ReservedPaths;
 use nop_management_bus::socket::ManagementSocket;
 use nop_management_bus::socket::client::{SocketClient, SocketConnect};
-use nop_management_bus::ws::{StreamAckFrame, WsFrame};
+use nop_management_bus::ws::{StreamAckFrame, WS_MAX_STREAM_CHUNK_BYTES, WsFrame};
 use nop_management_bus::{ManagementBus, ManagementContext, build_default_registry};
 use nop_management_contract::content::{
     CONTENT_ACTION_READ_OK, ContentCommand, ContentReadRequest,
@@ -76,10 +76,10 @@ fn write_local_config(root: &Path) {
             hsts_preload: false,
         },
         tls: None,
-        app: AppConfig {
+        app: Some(AppConfig {
             name: "Test App".to_string(),
             description: "Test Description".to_string(),
-        },
+        }),
         upload: UploadConfig {
             max_file_size_mb: 100,
             allowed_extensions: vec!["md".to_string()],
@@ -88,6 +88,7 @@ fn write_local_config(root: &Path) {
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
         search: nop_config::SearchConfig::default(),
+        settings: Default::default(),
         dev_mode: None,
     };
 
@@ -125,6 +126,9 @@ fn seed_content(runtime_paths: &RuntimePaths) {
             nav_title: None,
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: Some(format!(
                 "{}.{}",
                 alias.rsplit('/').next().unwrap_or("file"),
@@ -151,6 +155,21 @@ fn seed_content(runtime_paths: &RuntimePaths) {
         None,
         "application/octet-stream",
         b"abcdefghijklmnopqrstuvwxyz012345",
+    );
+    let mut large_markdown = b"# Large\r\n".to_vec();
+    large_markdown.extend(std::iter::repeat_n(
+        b'a',
+        WS_MAX_STREAM_CHUNK_BYTES - large_markdown.len() - 1,
+    ));
+    large_markdown.extend_from_slice("€".as_bytes());
+    large_markdown.extend_from_slice(b"\r\nSocket streamed Markdown.\r\n");
+    write_object(
+        runtime_paths,
+        ContentId(5),
+        "docs/large",
+        Some("Large"),
+        "text/markdown",
+        &large_markdown,
     );
 }
 
@@ -297,4 +316,75 @@ async fn socket_read_markdown_returns_inline_content_with_stream_flag() {
         payload.content.as_deref(),
         Some("# Home\n\nWelcome to the test site.\n")
     );
+}
+
+#[actix_web::test]
+async fn socket_streams_large_markdown_content_after_read_response() {
+    let (_temp, runtime_paths, bus) = setup_runtime().await;
+    let registry = bus.registry();
+    let _socket = ManagementSocket::start(&runtime_paths, bus)
+        .await
+        .expect("socket");
+
+    let socket_path = runtime_paths.state_sys_dir.join("management.sock");
+    let mut client = match SocketClient::connect(&socket_path, registry)
+        .await
+        .expect("socket connect")
+    {
+        SocketConnect::Ready(client) => client,
+        SocketConnect::Stale => panic!("expected socket to be ready"),
+        SocketConnect::Incompatible(message) => panic!("socket incompatible: {}", message),
+    };
+
+    let content_id = content_id_hex(ContentId(5));
+    let response = client
+        .send(ManagementCommand::Content(ContentCommand::Read(
+            ContentReadRequest {
+                id: content_id,
+                stream_content: Some(true),
+            },
+        )))
+        .await
+        .expect("content read");
+
+    assert_eq!(response.action_id, CONTENT_ACTION_READ_OK);
+    let payload = match response.payload {
+        ResponsePayload::ContentRead(payload) => payload,
+        other => panic!("unexpected payload: {:?}", other),
+    };
+    assert!(payload.content.is_none());
+    let stream_id = payload.stream_id.expect("stream id");
+    let chunk_bytes = payload.chunk_bytes.expect("chunk bytes");
+    let size_bytes = payload.size_bytes.expect("size bytes");
+
+    let mut received = Vec::new();
+    let mut expected_seq = 0u32;
+    loop {
+        let frame = client.read_stream_frame().await.expect("stream frame");
+        match frame {
+            WsFrame::StreamChunk(chunk) => {
+                assert_eq!(chunk.stream_id, stream_id);
+                assert_eq!(chunk.seq, expected_seq);
+                assert!(chunk.payload.len() <= chunk_bytes as usize);
+                received.extend_from_slice(&chunk.payload);
+                client
+                    .write_stream_frame(&WsFrame::Ack(StreamAckFrame {
+                        stream_id,
+                        seq: chunk.seq,
+                    }))
+                    .await
+                    .expect("ack");
+                if chunk.is_final() {
+                    break;
+                }
+                expected_seq = expected_seq.saturating_add(1);
+            }
+            other => panic!("unexpected stream frame: {:?}", other),
+        }
+    }
+
+    assert_eq!(received.len() as u64, size_bytes);
+    let markdown = String::from_utf8(received).expect("utf-8 markdown");
+    assert!(markdown.starts_with("# Large\r\n"));
+    assert!(markdown.contains("€\r\nSocket streamed Markdown.\r\n"));
 }

@@ -161,7 +161,6 @@ export function initSearchOverlay(
   const results = root.querySelector<HTMLElement>(SELECTORS.results)
 
   if (
-    triggerButtons.length === 0 ||
     !overlay ||
     !backdrop ||
     !panel ||
@@ -277,15 +276,31 @@ export function initSearchOverlay(
     })
 
     results.appendChild(list)
+    scrollActiveResultIntoView()
+  }
+
+  const scrollActiveResultIntoView = () => {
     const active = results.querySelector<HTMLElement>('.site-search-result.is-active')
     if (active && typeof active.scrollIntoView === 'function') {
       active.scrollIntoView({ block: 'nearest' })
     }
   }
 
+  const syncActiveResultState = () => {
+    results
+      .querySelectorAll<HTMLButtonElement>('[data-site-search-result-index]')
+      .forEach((button) => {
+        const index = Number(button.dataset.siteSearchResultIndex)
+        const isActive = index === activeIndex
+        button.classList.toggle('is-active', isActive)
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false')
+      })
+    scrollActiveResultIntoView()
+  }
+
   const setActiveIndex = (index: number) => {
     activeIndex = index
-    renderHits()
+    syncActiveResultState()
   }
 
   const runSearch = async (query: string) => {
@@ -581,14 +596,284 @@ export function initSearchOverlay(
 
   return {
     destroy: () => {
-      clearPendingSearch()
+      // Force-close an open overlay synchronously so teardown (e.g. the
+      // desktop controller being dropped on resize below the breakpoint)
+      // cannot leave a dead open layer behind with its handlers removed.
+      closeOverlay()
       if (hideTimer !== null) {
         window.clearTimeout(hideTimer)
+        hideTimer = null
       }
+      overlay.classList.remove('is-open')
+      overlay.hidden = true
+      clearPendingSearch()
       if (previousBodyOverflow !== null) {
         document.body.style.overflow = previousBodyOverflow
         previousBodyOverflow = null
       }
+      cleanup.forEach((fn) => fn())
+    }
+  }
+}
+
+const DRAWER_SELECTORS = {
+  input: '[data-site-drawer-search-input]',
+  status: '[data-site-drawer-search-status]',
+  results: '[data-site-drawer-search-results]'
+} as const
+
+export type SiteDrawerSearchController = {
+  destroy: () => void
+}
+
+export function initDrawerSearch(
+  root: ParentNode = document
+): SiteDrawerSearchController | null {
+  const input = root.querySelector<HTMLInputElement>(DRAWER_SELECTORS.input)
+  const status = root.querySelector<HTMLElement>(DRAWER_SELECTORS.status)
+  const results = root.querySelector<HTMLElement>(DRAWER_SELECTORS.results)
+
+  if (!input || !status || !results) {
+    return null
+  }
+
+  const cleanup: Array<() => void> = []
+  let pendingTimer: number | null = null
+  let inFlight: AbortController | null = null
+  let requestSerial = 0
+  let activeIndex = -1
+  let currentHits: SearchHit[] = []
+
+  const clearPendingSearch = () => {
+    if (pendingTimer !== null) {
+      window.clearTimeout(pendingTimer)
+      pendingTimer = null
+    }
+    if (inFlight) {
+      inFlight.abort()
+      inFlight = null
+    }
+    requestSerial += 1
+  }
+
+  const renderIdleState = () => {
+    status.textContent = ''
+    currentHits = []
+    activeIndex = -1
+    results.textContent = ''
+    results.setAttribute('hidden', 'true')
+  }
+
+  const renderErrorState = () => {
+    status.textContent = "Search didn't work."
+    currentHits = []
+    activeIndex = -1
+    results.textContent = ''
+    results.setAttribute('hidden', 'true')
+  }
+
+  const renderNoResultsState = () => {
+    status.textContent = 'No results'
+    currentHits = []
+    activeIndex = -1
+    results.textContent = ''
+    results.setAttribute('hidden', 'true')
+  }
+
+  const scrollActiveResultIntoView = () => {
+    const active = results.querySelector<HTMLElement>('.site-search-result.is-active')
+    if (active && typeof active.scrollIntoView === 'function') {
+      active.scrollIntoView({ block: 'nearest' })
+    }
+  }
+
+  const syncActiveResultState = () => {
+    results
+      .querySelectorAll<HTMLButtonElement>('[data-site-search-result-index]')
+      .forEach((button) => {
+        const index = Number(button.dataset.siteSearchResultIndex)
+        const isActive = index === activeIndex
+        button.classList.toggle('is-active', isActive)
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false')
+      })
+    scrollActiveResultIntoView()
+  }
+
+  const renderHits = () => {
+    status.textContent = ''
+    results.textContent = ''
+    if (currentHits.length === 0) {
+      results.setAttribute('hidden', 'true')
+      return
+    }
+    results.removeAttribute('hidden')
+    const list = document.createElement('ul')
+    list.className = 'site-search-results__list'
+    list.setAttribute('role', 'listbox')
+    list.setAttribute('aria-label', 'Search results')
+
+    currentHits.forEach((hit, index) => {
+      const item = document.createElement('li')
+      item.className = 'site-search-results__item'
+
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'site-search-result'
+      button.dataset.siteSearchResultIndex = String(index)
+      button.setAttribute('role', 'option')
+      button.setAttribute('aria-selected', index === activeIndex ? 'true' : 'false')
+      if (index === activeIndex) {
+        button.classList.add('is-active')
+      }
+
+      const title = document.createElement('span')
+      title.className = 'site-search-result__title'
+      title.textContent = hit.title
+      const path = document.createElement('span')
+      path.className = 'site-search-result__path'
+      path.textContent = resolveHitPath(hit)
+      button.appendChild(title)
+      button.appendChild(path)
+      item.appendChild(button)
+      list.appendChild(item)
+    })
+
+    results.appendChild(list)
+    scrollActiveResultIntoView()
+  }
+
+  const runSearch = async (query: string) => {
+    const serial = ++requestSerial
+    const controller = new AbortController()
+    inFlight = controller
+
+    try {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`, {
+        method: 'GET',
+        credentials: 'same-origin',
+        signal: controller.signal
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const payload = await response.json()
+      if (serial !== requestSerial) {
+        return
+      }
+      currentHits = parseHits(payload)
+      activeIndex = -1
+      if (currentHits.length === 0) {
+        renderNoResultsState()
+        return
+      }
+      renderHits()
+    } catch (error) {
+      if (controller.signal.aborted || serial !== requestSerial) {
+        return
+      }
+      console.error('Search request failed:', error)
+      renderErrorState()
+    } finally {
+      if (inFlight === controller) {
+        inFlight = null
+      }
+    }
+  }
+
+  const scheduleSearch = (rawQuery: string) => {
+    clearPendingSearch()
+    if (rawQuery.length > SEARCH_MAX_QUERY_LEN) {
+      const clamped = rawQuery.slice(0, SEARCH_MAX_QUERY_LEN)
+      if (input.value !== clamped) {
+        input.value = clamped
+      }
+      rawQuery = clamped
+    }
+    const query = normalizeQuery(rawQuery)
+    if (query.length < SEARCH_MIN_QUERY_LEN) {
+      renderIdleState()
+      return
+    }
+    pendingTimer = window.setTimeout(() => {
+      pendingTimer = null
+      void runSearch(query)
+    }, SEARCH_DEBOUNCE_MS)
+  }
+
+  const navigateToHit = (index: number) => {
+    if (index < 0 || index >= currentHits.length) {
+      return
+    }
+    navigateTo(resolveHitPath(currentHits[index]))
+  }
+
+  const onInput = () => {
+    activeIndex = -1
+    scheduleSearch(input.value)
+  }
+
+  const onResultsClick = (event: Event) => {
+    const target = event.target
+    if (!(target instanceof HTMLElement)) {
+      return
+    }
+    const button = target.closest('[data-site-search-result-index]')
+    if (!(button instanceof HTMLButtonElement)) {
+      return
+    }
+    navigateToHit(Number(button.dataset.siteSearchResultIndex))
+  }
+
+  const onInputKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      clearPendingSearch()
+      input.value = ''
+      renderIdleState()
+      return
+    }
+    if (event.key === 'ArrowDown') {
+      if (currentHits.length === 0) {
+        return
+      }
+      event.preventDefault()
+      activeIndex = activeIndex < 0 ? 0 : (activeIndex + 1) % currentHits.length
+      syncActiveResultState()
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      if (currentHits.length === 0) {
+        return
+      }
+      event.preventDefault()
+      activeIndex =
+        activeIndex < 0
+          ? currentHits.length - 1
+          : (activeIndex - 1 + currentHits.length) % currentHits.length
+      syncActiveResultState()
+      return
+    }
+    if (event.key === 'Enter') {
+      if (activeIndex < 0 || activeIndex >= currentHits.length) {
+        return
+      }
+      event.preventDefault()
+      navigateToHit(activeIndex)
+    }
+  }
+
+  input.addEventListener('input', onInput)
+  input.addEventListener('keydown', onInputKeydown)
+  results.addEventListener('click', onResultsClick)
+  cleanup.push(() => input.removeEventListener('input', onInput))
+  cleanup.push(() => input.removeEventListener('keydown', onInputKeydown))
+  cleanup.push(() => results.removeEventListener('click', onResultsClick))
+
+  renderIdleState()
+
+  return {
+    destroy: () => {
+      clearPendingSearch()
       cleanup.forEach((fn) => fn())
     }
   }

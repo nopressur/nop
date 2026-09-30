@@ -30,6 +30,10 @@ Status: Developed
 
 - Playwright lives under `tests/playwright` and is the standard harness for all UI testing.
 - Tests are not tied to a specific area; new suites should reuse the shared utilities and fixtures.
+- Theme changes and UI-facing changes must be implemented with corresponding E2E coverage that
+  validates the rendered browser output. Assertions must exercise the final page state through
+  computed styles, visible state, media emulation, screenshots, or equivalent browser-level checks,
+  rather than stopping at source data or API responses.
 
 ### Harness and Isolation
 
@@ -75,9 +79,19 @@ Status: Developed
 table and HTML bodies that include visible text plus attribute/URL tokens, tagged with `docs`
 so admin tag filters and insert defaults behave like real content.
 
+### Theme Fixtures
+
+`seedFixtureData()` seeds a dedicated `theme-e2e.theme` file and `/theme-e2e` public page.
+The E2E coverage validates that every documented configurable theme key is exposed as a CSS
+custom property in the browser, then checks representative computed styles in both light and
+dark media modes for body, content text, headings, links, code, blockquotes, tables, Bulma
+title/subtitle variables, and dark warning notifications.
+
 ### E2E Coverage (Initial Baseline)
 
 - **00 smoke test**: render a known public page and validate a stable element to prove the harness.
+- **Theme rendering**: render the seeded theme page and validate all configurable theme variables plus
+  key light/dark computed browser styles.
 - **User flows**: login/logout, role-based access checks for admin/editor/viewer, user CRUD, user listing,
   login SPA error states + return-path fallback, profile password error states + logout.
 - **Content flows**: paginated file list, title search, Markdown/all filter, sidecar metadata edit,

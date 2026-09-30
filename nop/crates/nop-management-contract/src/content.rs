@@ -21,6 +21,7 @@ pub const CONTENT_ACTION_UPLOAD_STREAM_INIT: u32 = 10;
 pub const CONTENT_ACTION_UPLOAD_STREAM_COMMIT: u32 = 11;
 pub const CONTENT_ACTION_UPDATE_STREAM_INIT: u32 = 12;
 pub const CONTENT_ACTION_UPDATE_STREAM_COMMIT: u32 = 13;
+pub const CONTENT_ACTION_ALIAS_STATUS: u32 = 14;
 
 pub const CONTENT_ACTION_LIST_OK: u32 = 101;
 pub const CONTENT_ACTION_LIST_ERR: u32 = 102;
@@ -48,6 +49,8 @@ pub const CONTENT_ACTION_UPDATE_STREAM_INIT_OK: u32 = 1201;
 pub const CONTENT_ACTION_UPDATE_STREAM_INIT_ERR: u32 = 1202;
 pub const CONTENT_ACTION_UPDATE_STREAM_COMMIT_OK: u32 = 1301;
 pub const CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR: u32 = 1302;
+pub const CONTENT_ACTION_ALIAS_STATUS_OK: u32 = 1401;
+pub const CONTENT_ACTION_ALIAS_STATUS_ERR: u32 = 1402;
 
 #[derive(Debug, Clone)]
 pub enum ContentCommand {
@@ -64,6 +67,7 @@ pub enum ContentCommand {
     UploadStreamCommit(ContentUploadStreamCommitRequest),
     UpdateStreamInit(ContentUpdateStreamInitRequest),
     UpdateStreamCommit(ContentUpdateStreamCommitRequest),
+    AliasStatus(ContentAliasStatusRequest),
 }
 
 impl ContentCommand {
@@ -82,6 +86,7 @@ impl ContentCommand {
             ContentCommand::UploadStreamCommit(_) => CONTENT_ACTION_UPLOAD_STREAM_COMMIT,
             ContentCommand::UpdateStreamInit(_) => CONTENT_ACTION_UPDATE_STREAM_INIT,
             ContentCommand::UpdateStreamCommit(_) => CONTENT_ACTION_UPDATE_STREAM_COMMIT,
+            ContentCommand::AliasStatus(_) => CONTENT_ACTION_ALIAS_STATUS,
         }
     }
 }
@@ -101,6 +106,38 @@ pub enum ContentSortField {
 pub enum ContentSortDirection {
     Asc,
     Desc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentWidthMode {
+    #[default]
+    Auto,
+    Wide,
+    Narrow,
+}
+
+impl ContentWidthMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ContentWidthMode::Auto => "auto",
+            ContentWidthMode::Wide => "wide",
+            ContentWidthMode::Narrow => "narrow",
+        }
+    }
+}
+
+impl std::str::FromStr for ContentWidthMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "auto" => Ok(ContentWidthMode::Auto),
+            "wide" => Ok(ContentWidthMode::Wide),
+            "narrow" => Ok(ContentWidthMode::Narrow),
+            _ => Err(format!("Unknown content width mode {}", value)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +167,9 @@ pub struct ContentUpdateRequest {
     pub nav_parent_id: Option<String>,
     pub nav_order: Option<i32>,
     pub theme: Option<String>,
+    pub disable_navbar: Option<bool>,
+    pub disable_floating_nav: Option<bool>,
+    pub content_width: Option<ContentWidthMode>,
     pub content: Option<String>,
 }
 
@@ -149,6 +189,9 @@ pub struct ContentUploadRequest {
     pub nav_order: Option<i32>,
     pub original_filename: Option<String>,
     pub theme: Option<String>,
+    pub disable_navbar: bool,
+    pub disable_floating_nav: bool,
+    pub content_width: ContentWidthMode,
     pub content: Vec<u8>,
 }
 
@@ -183,6 +226,9 @@ pub struct ContentUploadStreamInitRequest {
     pub nav_parent_id: Option<String>,
     pub nav_order: Option<i32>,
     pub theme: Option<String>,
+    pub disable_navbar: bool,
+    pub disable_floating_nav: bool,
+    pub content_width: ContentWidthMode,
     pub size_bytes: u64,
 }
 
@@ -201,12 +247,31 @@ pub struct ContentUpdateStreamInitRequest {
     pub nav_parent_id: Option<String>,
     pub nav_order: Option<i32>,
     pub theme: Option<String>,
+    pub disable_navbar: Option<bool>,
+    pub disable_floating_nav: Option<bool>,
+    pub content_width: Option<ContentWidthMode>,
     pub size_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentUpdateStreamCommitRequest {
     pub upload_id: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentAliasStatusRequest {
+    pub alias: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentAliasStatusResponse {
+    pub canonical_alias: String,
+    pub exists: bool,
+    pub id: Option<String>,
+    pub version: Option<u32>,
+    pub mime: Option<String>,
+    pub is_markdown: Option<bool>,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,6 +288,9 @@ pub struct ContentSummary {
     pub nav_parent_id: Option<String>,
     pub nav_order: Option<i32>,
     pub original_filename: Option<String>,
+    pub disable_navbar: bool,
+    pub disable_floating_nav: bool,
+    pub content_width: ContentWidthMode,
     pub is_markdown: bool,
 }
 
@@ -261,6 +329,9 @@ pub struct ContentReadResponse {
     pub nav_order: Option<i32>,
     pub original_filename: Option<String>,
     pub theme: Option<String>,
+    pub disable_navbar: bool,
+    pub disable_floating_nav: bool,
+    pub content_width: ContentWidthMode,
     pub content: Option<String>,
     pub stream_id: Option<u32>,
     pub chunk_bytes: Option<u32>,
@@ -341,6 +412,15 @@ impl WireDecode for ContentSortDirection {
             ))),
         }
     }
+}
+
+fn write_content_width_mode(writer: &mut WireWriter, value: ContentWidthMode) -> WireResult<()> {
+    writer.write_string(value.as_str())
+}
+
+fn read_content_width_mode(reader: &mut WireReader) -> WireResult<ContentWidthMode> {
+    let value = reader.read_string()?;
+    value.parse().map_err(crate::wire::WireError::new)
 }
 
 impl WireEncode for ContentListRequest {
@@ -427,6 +507,9 @@ impl WireEncode for ContentUpdateRequest {
             self.nav_parent_id.is_some(),
             self.nav_order.is_some(),
             self.theme.is_some(),
+            self.disable_navbar.is_some(),
+            self.disable_floating_nav.is_some(),
+            self.content_width.is_some(),
             self.content.is_some(),
         ];
         OptionMap::from_flags(&option_flags)?.write(writer)?;
@@ -452,6 +535,15 @@ impl WireEncode for ContentUpdateRequest {
         if let Some(value) = &self.theme {
             writer.write_string(value)?;
         }
+        if let Some(value) = self.disable_navbar {
+            writer.write_bool(value);
+        }
+        if let Some(value) = self.disable_floating_nav {
+            writer.write_bool(value);
+        }
+        if let Some(value) = self.content_width {
+            write_content_width_mode(writer, value)?;
+        }
         if let Some(value) = &self.content {
             writer.write_string(value)?;
         }
@@ -461,7 +553,7 @@ impl WireEncode for ContentUpdateRequest {
 
 impl WireDecode for ContentUpdateRequest {
     fn decode(reader: &mut WireReader) -> WireResult<Self> {
-        let flags = OptionMap::read(reader, 8)?;
+        let flags = OptionMap::read(reader, 11)?;
         let id = reader.read_string()?;
         let new_alias = if flags[0] {
             Some(reader.read_string()?)
@@ -498,7 +590,22 @@ impl WireDecode for ContentUpdateRequest {
         } else {
             None
         };
-        let content = if flags[7] {
+        let disable_navbar = if flags[7] {
+            Some(reader.read_bool()?)
+        } else {
+            None
+        };
+        let disable_floating_nav = if flags[8] {
+            Some(reader.read_bool()?)
+        } else {
+            None
+        };
+        let content_width = if flags[9] {
+            Some(read_content_width_mode(reader)?)
+        } else {
+            None
+        };
+        let content = if flags[10] {
             Some(reader.read_string()?)
         } else {
             None
@@ -512,6 +619,9 @@ impl WireDecode for ContentUpdateRequest {
             nav_parent_id,
             nav_order,
             theme,
+            disable_navbar,
+            disable_floating_nav,
+            content_width,
             content,
         })
     }
@@ -566,6 +676,9 @@ impl WireEncode for ContentUploadRequest {
         if let Some(value) = &self.theme {
             writer.write_string(value)?;
         }
+        writer.write_bool(self.disable_navbar);
+        writer.write_bool(self.disable_floating_nav);
+        write_content_width_mode(writer, self.content_width)?;
         writer.write_bytes(&self.content)?;
         Ok(())
     }
@@ -611,6 +724,9 @@ impl WireDecode for ContentUploadRequest {
         } else {
             None
         };
+        let disable_navbar = reader.read_bool()?;
+        let disable_floating_nav = reader.read_bool()?;
+        let content_width = read_content_width_mode(reader)?;
         let content = reader.read_bytes()?;
         Ok(Self {
             alias,
@@ -622,6 +738,9 @@ impl WireDecode for ContentUploadRequest {
             nav_order,
             original_filename,
             theme,
+            disable_navbar,
+            disable_floating_nav,
+            content_width,
             content,
         })
     }
@@ -737,6 +856,9 @@ impl WireEncode for ContentUploadStreamInitRequest {
         if let Some(value) = &self.theme {
             writer.write_string(value)?;
         }
+        writer.write_bool(self.disable_navbar);
+        writer.write_bool(self.disable_floating_nav);
+        write_content_width_mode(writer, self.content_width)?;
         writer.write_u64(self.size_bytes);
         Ok(())
     }
@@ -776,6 +898,9 @@ impl WireDecode for ContentUploadStreamInitRequest {
         } else {
             None
         };
+        let disable_navbar = reader.read_bool()?;
+        let disable_floating_nav = reader.read_bool()?;
+        let content_width = read_content_width_mode(reader)?;
         let size_bytes = reader.read_u64()?;
         Ok(Self {
             alias,
@@ -785,6 +910,9 @@ impl WireDecode for ContentUploadStreamInitRequest {
             nav_parent_id,
             nav_order,
             theme,
+            disable_navbar,
+            disable_floating_nav,
+            content_width,
             size_bytes,
         })
     }
@@ -815,6 +943,9 @@ impl WireEncode for ContentUpdateStreamInitRequest {
             self.nav_parent_id.is_some(),
             self.nav_order.is_some(),
             self.theme.is_some(),
+            self.disable_navbar.is_some(),
+            self.disable_floating_nav.is_some(),
+            self.content_width.is_some(),
         ];
         OptionMap::from_flags(&option_flags)?.write(writer)?;
         writer.write_string(&self.id)?;
@@ -839,6 +970,15 @@ impl WireEncode for ContentUpdateStreamInitRequest {
         if let Some(value) = &self.theme {
             writer.write_string(value)?;
         }
+        if let Some(value) = self.disable_navbar {
+            writer.write_bool(value);
+        }
+        if let Some(value) = self.disable_floating_nav {
+            writer.write_bool(value);
+        }
+        if let Some(value) = self.content_width {
+            write_content_width_mode(writer, value)?;
+        }
         writer.write_u64(self.size_bytes);
         Ok(())
     }
@@ -846,7 +986,7 @@ impl WireEncode for ContentUpdateStreamInitRequest {
 
 impl WireDecode for ContentUpdateStreamInitRequest {
     fn decode(reader: &mut WireReader) -> WireResult<Self> {
-        let flags = OptionMap::read(reader, 7)?;
+        let flags = OptionMap::read(reader, 10)?;
         let id = reader.read_string()?;
         let new_alias = if flags[0] {
             Some(reader.read_string()?)
@@ -883,6 +1023,21 @@ impl WireDecode for ContentUpdateStreamInitRequest {
         } else {
             None
         };
+        let disable_navbar = if flags[7] {
+            Some(reader.read_bool()?)
+        } else {
+            None
+        };
+        let disable_floating_nav = if flags[8] {
+            Some(reader.read_bool()?)
+        } else {
+            None
+        };
+        let content_width = if flags[9] {
+            Some(read_content_width_mode(reader)?)
+        } else {
+            None
+        };
         let size_bytes = reader.read_u64()?;
         Ok(Self {
             id,
@@ -893,6 +1048,9 @@ impl WireDecode for ContentUpdateStreamInitRequest {
             nav_parent_id,
             nav_order,
             theme,
+            disable_navbar,
+            disable_floating_nav,
+            content_width,
             size_bytes,
         })
     }
@@ -909,6 +1067,20 @@ impl WireDecode for ContentUpdateStreamCommitRequest {
     fn decode(reader: &mut WireReader) -> WireResult<Self> {
         Ok(Self {
             upload_id: reader.read_u32()?,
+        })
+    }
+}
+
+impl WireEncode for ContentAliasStatusRequest {
+    fn encode(&self, writer: &mut WireWriter) -> WireResult<()> {
+        writer.write_string(&self.alias)
+    }
+}
+
+impl WireDecode for ContentAliasStatusRequest {
+    fn decode(reader: &mut WireReader) -> WireResult<Self> {
+        Ok(Self {
+            alias: reader.read_string()?,
         })
     }
 }
@@ -954,6 +1126,9 @@ impl WireEncode for ContentSummary {
         if let Some(value) = &self.original_filename {
             writer.write_string(value)?;
         }
+        writer.write_bool(self.disable_navbar);
+        writer.write_bool(self.disable_floating_nav);
+        write_content_width_mode(writer, self.content_width)?;
         writer.write_bool(self.is_markdown);
         Ok(())
     }
@@ -991,6 +1166,9 @@ impl WireDecode for ContentSummary {
         } else {
             None
         };
+        let disable_navbar = reader.read_bool()?;
+        let disable_floating_nav = reader.read_bool()?;
+        let content_width = read_content_width_mode(reader)?;
         let is_markdown = reader.read_bool()?;
         Ok(Self {
             id,
@@ -1002,6 +1180,9 @@ impl WireDecode for ContentSummary {
             nav_parent_id,
             nav_order,
             original_filename,
+            disable_navbar,
+            disable_floating_nav,
+            content_width,
             is_markdown,
         })
     }
@@ -1104,6 +1285,79 @@ impl WireDecode for ContentNavIndexResponse {
     }
 }
 
+impl WireEncode for ContentAliasStatusResponse {
+    fn encode(&self, writer: &mut WireWriter) -> WireResult<()> {
+        let option_flags = [
+            self.id.is_some(),
+            self.version.is_some(),
+            self.mime.is_some(),
+            self.is_markdown.is_some(),
+            self.title.is_some(),
+        ];
+        OptionMap::from_flags(&option_flags)?.write(writer)?;
+        writer.write_string(&self.canonical_alias)?;
+        writer.write_bool(self.exists);
+        if let Some(value) = &self.id {
+            writer.write_string(value)?;
+        }
+        if let Some(value) = self.version {
+            writer.write_u32(value);
+        }
+        if let Some(value) = &self.mime {
+            writer.write_string(value)?;
+        }
+        if let Some(value) = self.is_markdown {
+            writer.write_bool(value);
+        }
+        if let Some(value) = &self.title {
+            writer.write_string(value)?;
+        }
+        Ok(())
+    }
+}
+
+impl WireDecode for ContentAliasStatusResponse {
+    fn decode(reader: &mut WireReader) -> WireResult<Self> {
+        let flags = OptionMap::read(reader, 5)?;
+        let canonical_alias = reader.read_string()?;
+        let exists = reader.read_bool()?;
+        let id = if flags[0] {
+            Some(reader.read_string()?)
+        } else {
+            None
+        };
+        let version = if flags[1] {
+            Some(reader.read_u32()?)
+        } else {
+            None
+        };
+        let mime = if flags[2] {
+            Some(reader.read_string()?)
+        } else {
+            None
+        };
+        let is_markdown = if flags[3] {
+            Some(reader.read_bool()?)
+        } else {
+            None
+        };
+        let title = if flags[4] {
+            Some(reader.read_string()?)
+        } else {
+            None
+        };
+        Ok(Self {
+            canonical_alias,
+            exists,
+            id,
+            version,
+            mime,
+            is_markdown,
+            title,
+        })
+    }
+}
+
 impl WireEncode for ContentReadResponse {
     fn encode(&self, writer: &mut WireWriter) -> WireResult<()> {
         let option_flags = [
@@ -1141,6 +1395,9 @@ impl WireEncode for ContentReadResponse {
         if let Some(value) = &self.theme {
             writer.write_string(value)?;
         }
+        writer.write_bool(self.disable_navbar);
+        writer.write_bool(self.disable_floating_nav);
+        write_content_width_mode(writer, self.content_width)?;
         if let Some(value) = &self.content {
             writer.write_string(value)?;
         }
@@ -1194,6 +1451,9 @@ impl WireDecode for ContentReadResponse {
         } else {
             None
         };
+        let disable_navbar = reader.read_bool()?;
+        let disable_floating_nav = reader.read_bool()?;
+        let content_width = read_content_width_mode(reader)?;
         let content = if flags[6] {
             Some(reader.read_string()?)
         } else {
@@ -1225,6 +1485,9 @@ impl WireDecode for ContentReadResponse {
             nav_order,
             original_filename,
             theme,
+            disable_navbar,
+            disable_floating_nav,
+            content_width,
             content,
             stream_id,
             chunk_bytes,

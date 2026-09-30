@@ -263,6 +263,9 @@ fn scan_content_root(
                 nav_title,
                 nav_parent_id,
                 nav_order,
+                disable_navbar: sidecar.disable_navbar,
+                disable_floating_nav: sidecar.disable_floating_nav,
+                content_width: sidecar.content_width,
                 original_filename: sidecar.original_filename,
                 last_modified,
                 is_markdown,
@@ -387,7 +390,7 @@ fn normalize_nav_parent_id(raw: &Option<String>, has_nav_title: bool) -> Option<
 mod tests {
     use super::*;
     use nop_content_store::flat_storage::{
-        ContentSidecar, blob_path, sidecar_path, write_sidecar_atomic,
+        ContentSidecar, ContentWidthMode, blob_path, sidecar_path, write_sidecar_atomic,
     };
     use std::fs;
     use tempfile::TempDir;
@@ -455,6 +458,9 @@ mod tests {
                 nav_title: None,
                 nav_parent_id: None,
                 nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
                 original_filename: None,
                 theme: None,
             }],
@@ -466,6 +472,87 @@ mod tests {
             .expect("alias resolved");
         assert_eq!(object.alias, "docs/getting-started");
         assert!(harness.cache.get_by_alias("Docs/Getting-Started").is_some());
+    }
+
+    #[test]
+    fn test_cache_propagates_disable_navbar() {
+        let harness = build_cache(
+            "",
+            vec![ContentSidecar {
+                alias: "landing".to_string(),
+                title: Some("Landing".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: Vec::new(),
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                disable_navbar: true,
+                disable_floating_nav: false,
+                content_width: Default::default(),
+                original_filename: None,
+                theme: None,
+            }],
+        );
+
+        let object = harness
+            .cache
+            .get_by_alias("landing")
+            .expect("alias resolved");
+        assert!(object.disable_navbar);
+    }
+
+    #[test]
+    fn test_cache_propagates_disable_floating_nav() {
+        let harness = build_cache(
+            "",
+            vec![ContentSidecar {
+                alias: "landing".to_string(),
+                title: Some("Landing".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: Vec::new(),
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: true,
+                content_width: Default::default(),
+                original_filename: None,
+                theme: None,
+            }],
+        );
+
+        let object = harness
+            .cache
+            .get_by_alias("landing")
+            .expect("alias resolved");
+        assert!(object.disable_floating_nav);
+    }
+
+    #[test]
+    fn test_cache_propagates_content_width() {
+        let harness = build_cache(
+            "",
+            vec![ContentSidecar {
+                alias: "landing".to_string(),
+                title: Some("Landing".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: Vec::new(),
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: ContentWidthMode::Narrow,
+                original_filename: None,
+                theme: None,
+            }],
+        );
+
+        let object = harness
+            .cache
+            .get_by_alias("landing")
+            .expect("alias resolved");
+        assert_eq!(object.content_width, ContentWidthMode::Narrow);
     }
 
     #[test]
@@ -481,6 +568,9 @@ mod tests {
                 nav_title: None,
                 nav_parent_id: None,
                 nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
                 original_filename: None,
                 theme: None,
             }],
@@ -504,6 +594,9 @@ mod tests {
                 nav_title: None,
                 nav_parent_id: None,
                 nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
                 original_filename: None,
                 theme: None,
             }],
@@ -537,6 +630,9 @@ admin-only:
                 nav_title: None,
                 nav_parent_id: None,
                 nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
                 original_filename: None,
                 theme: None,
             }],
@@ -580,6 +676,9 @@ tag-c:
                     nav_title: None,
                     nav_parent_id: None,
                     nav_order: None,
+                    disable_navbar: false,
+                    disable_floating_nav: false,
+                    content_width: Default::default(),
                     original_filename: None,
                     theme: None,
                 },
@@ -591,6 +690,9 @@ tag-c:
                     nav_title: None,
                     nav_parent_id: None,
                     nav_order: None,
+                    disable_navbar: false,
+                    disable_floating_nav: false,
+                    content_width: Default::default(),
                     original_filename: None,
                     theme: None,
                 },

@@ -26,11 +26,13 @@ pub mod cli_helper;
 mod codec;
 mod connection_ids;
 mod content;
+mod content_stream;
 mod core;
 mod mime;
 mod registry;
 mod roles;
 mod search;
+mod settings;
 pub mod socket;
 mod system;
 mod tags;
@@ -44,6 +46,7 @@ pub use blocking::{BlockingError, BlockingPool};
 pub use bus::ManagementBus;
 pub use codec::CodecRegistry;
 pub use connection_ids::next_connection_id;
+pub use content_stream::{ContentStreamPlan, assign_content_stream_id, open_content_blob_stream};
 pub use core::{ManagementContext, VersionInfo};
 pub use registry::{ManagementHandler, ManagementRegistry, RegistryError};
 pub use upload_registry::UploadRegistry;
@@ -75,5 +78,6 @@ pub fn build_default_registry() -> Result<ManagementRegistry, RegistryError> {
     tags::register(&mut registry)?;
     content::register(&mut registry)?;
     search::register(&mut registry)?;
+    settings::register(&mut registry)?;
     Ok(registry)
 }

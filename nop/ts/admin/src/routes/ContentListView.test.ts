@@ -182,7 +182,44 @@ describe("ContentListView", () => {
     expect(contentMocks.listContent).toHaveBeenCalledTimes(1);
   });
 
-  it("sorts search results locally after findSearch", async () => {
+  it("keeps rows in place without showing updating text during search refresh", async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let resolveSearch: (value: { hits: [] }) => void = () => undefined;
+    searchMocks.findSearch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSearch = resolve;
+      }),
+    );
+    const { container, getAllByPlaceholderText, queryByText } = render(ContentListView);
+
+    await waitFor(() => expect(contentMocks.listContent).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(container.querySelector('tr[data-row-index="0"]')).not.toBeNull();
+    });
+
+    const input = getAllByPlaceholderText("Search")[0];
+    await user.clear(input);
+    await user.type(input, "abc");
+    await vi.advanceTimersByTimeAsync(450);
+
+    await waitFor(() => expect(searchMocks.findSearch).toHaveBeenCalledTimes(1));
+    expect(queryByText("Updating results...")).toBeNull();
+    expect(container.querySelector('tr[data-row-index="0"]')?.textContent).toContain("First Item");
+
+    resolveSearch({ hits: [] });
+  });
+
+  it("uses a textless gradient for initial empty loading", async () => {
+    contentMocks.listContent.mockReturnValueOnce(new Promise(() => undefined));
+
+    const { getAllByTestId, queryByText } = render(ContentListView);
+
+    expect(queryByText("Loading content...")).toBeNull();
+    expect(getAllByTestId("loading-gradient").length).toBeGreaterThan(0);
+  });
+
+  it("keeps backend search order when default title sort is active", async () => {
     searchMocks.findSearch.mockResolvedValueOnce({
       hits: [
         {
@@ -229,8 +266,59 @@ describe("ContentListView", () => {
       expect(container.querySelectorAll('tr[data-row-index]').length).toBe(2);
     });
     const rows = container.querySelectorAll('tr[data-row-index]');
-    expect(rows[0].textContent).toContain("Alpha");
-    expect(rows[1].textContent).toContain("Zeta");
+    expect(rows[0].textContent).toContain("Zeta");
+    expect(rows[1].textContent).toContain("Alpha");
+  });
+
+  it("sorts search results locally after findSearch when non-default sort is active", async () => {
+    searchMocks.findSearch.mockResolvedValueOnce({
+      hits: [
+        {
+          id: "z-id",
+          alias: "zeta",
+          title: "Zeta",
+          mime: "text/markdown",
+          tags: [],
+          navTitle: null,
+          navParentId: null,
+          navOrder: null,
+          originalFilename: null,
+          isMarkdown: true,
+        },
+        {
+          id: "a-id",
+          alias: "alpha",
+          title: "Alpha",
+          mime: "text/markdown",
+          tags: [],
+          navTitle: null,
+          navParentId: null,
+          navOrder: null,
+          originalFilename: null,
+          isMarkdown: true,
+        },
+      ],
+    });
+
+    setContentListState({
+      query: "alpha",
+      page: 1,
+      pageSize: 25,
+      markdownOnly: false,
+      tags: [],
+      sortField: "title",
+      sortDirection: "desc",
+    });
+
+    const { container } = render(ContentListView);
+
+    await waitFor(() => expect(searchMocks.findSearch).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(container.querySelectorAll('tr[data-row-index]').length).toBe(2);
+    });
+    const rows = container.querySelectorAll('tr[data-row-index]');
+    expect(rows[0].textContent).toContain("Zeta");
+    expect(rows[1].textContent).toContain("Alpha");
   });
 
   it("clears the search query on Escape", async () => {

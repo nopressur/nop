@@ -14,11 +14,13 @@ The code and documentation in this repository is licensed under the GNU Affero G
   import CompactButton from "../components/CompactButton.svelte";
   import Input from "../components/Input.svelte";
   import InsertContentModal from "../components/InsertContentModal.svelte";
+  import StateToggle, { type StateToggleOption } from "../components/StateToggle.svelte";
   import {
     type InsertEventDetail,
     type InsertMode,
     buildModalInsertSnippet,
   } from "../services/insertSnippet";
+  import { convertMarkdownLinkToLinkCard } from "../services/markdownLinkCard";
   import UnsavedChangesModal from "../components/UnsavedChangesModal.svelte";
   import Select from "../components/Select.svelte";
   import UploadOverlay from "../components/UploadOverlay.svelte";
@@ -71,6 +73,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let navParentId = "";
   let navOrder = "";
   let theme = "";
+  let disableNavbar = false;
+  let disableFloatingNav = false;
+  let contentWidth: "auto" | "wide" | "narrow" = "auto";
   let availableThemes: string[] = [];
   let mime = "text/markdown";
   let originalFilename = "";
@@ -89,6 +94,20 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let navParentOptions: { value: string; label: string }[] = [];
   let hasNavChildren = false;
 
+  const navbarToggleOptions: StateToggleOption[] = [
+    { value: "enabled", label: "Navbar Enabled", tone: "success" },
+    { value: "disabled", label: "Navbar Disabled", tone: "danger" },
+  ];
+  const floatingNavToggleOptions: StateToggleOption[] = [
+    { value: "enabled", label: "Floating Nav Enabled", tone: "success" },
+    { value: "disabled", label: "Floating Nav Disabled", tone: "danger" },
+  ];
+  const widthToggleOptions: StateToggleOption[] = [
+    { value: "auto", label: "Auto Width", tone: "success" },
+    { value: "wide", label: "Wide", tone: "warning" },
+    { value: "narrow", label: "Narrow", tone: "danger" },
+  ];
+
   let initialState: ContentEditorSnapshot = buildEditorSnapshot({
     alias: "",
     title: "",
@@ -97,6 +116,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
     navParentId: "",
     navOrder: "",
     theme: "",
+    disableNavbar: false,
+    disableFloatingNav: false,
+    contentWidth: "auto",
     contentValue: "",
     isMarkdown: true,
   });
@@ -154,17 +176,17 @@ The code and documentation in this repository is licensed under the GNU Affero G
     navOrder = "";
   }
 
-  $: downloadPath = currentAlias
-    ? `/${currentAlias}`
-    : contentId
-      ? `/id/${contentId}`
+  $: downloadPath = contentId
+    ? `/id/${contentId}`
+    : currentAlias
+      ? `/${currentAlias}`
       : "#";
   $: isDisplayableImage = !isMarkdown && Boolean(mime?.startsWith("image/"));
   $: imageAltText =
     title?.trim() || originalFilename?.trim() || currentAlias?.trim() || "Image preview";
 
   $: viewPagePath = isMarkdown && contentId
-    ? buildContentPublicPath({ id: contentId })
+    ? buildContentPublicPath({ id: contentId, alias: currentAlias })
     : null;
   $: setContentEditorViewPagePath(viewPagePath);
 
@@ -178,6 +200,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
     navParentId,
     navOrder,
     theme,
+    disableNavbar,
+    disableFloatingNav,
+    contentWidth,
     contentValue,
     isMarkdown,
   });
@@ -193,6 +218,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
       navParentId,
       navOrder,
       theme,
+      disableNavbar,
+      disableFloatingNav,
+      contentWidth,
       contentValue,
       isMarkdown,
     });
@@ -286,6 +314,39 @@ The code and documentation in this repository is licensed under the GNU Affero G
       editorRef.focus();
     }
     pushNotification("Pasted and merged references", "success");
+  }
+
+  async function convertLinkToLinkCard(): Promise<void> {
+    if (!isMarkdown || !editorRef) {
+      return;
+    }
+
+    const aceDocument = editorRef.session.getDocument();
+    const range = editorRef.getSelectionRange();
+    const selectionStartOffset = aceDocument.positionToIndex(range.start, 0);
+    const selectionEndOffset = aceDocument.positionToIndex(range.end, 0);
+    const conversion = convertMarkdownLinkToLinkCard(
+      contentValue || "",
+      selectionStartOffset,
+      selectionEndOffset,
+    );
+    if (!conversion) {
+      pushNotification("Select a Markdown link or place the cursor on one", "error");
+      return;
+    }
+
+    contentValue = [
+      contentValue.slice(0, conversion.startOffset),
+      conversion.shortcode,
+      contentValue.slice(conversion.endOffset),
+    ].join("");
+    sizeBytes = getContentSizeBytes(contentValue || "");
+    await tick();
+    const position = aceDocument.indexToPosition(conversion.cursorOffset, 0);
+    editorRef.moveCursorToPosition(position);
+    editorRef.clearSelection();
+    editorRef.focus();
+    pushNotification("Converted link to link card", "success");
   }
 
   function syncTagsWithAvailable(): void {
@@ -477,6 +538,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
     navParentId = "";
     navOrder = "";
     theme = "";
+    disableNavbar = false;
+    disableFloatingNav = false;
+    contentWidth = "auto";
     mime = "text/markdown";
     originalFilename = "";
     sizeBytes = null;
@@ -507,6 +571,20 @@ The code and documentation in this repository is licensed under the GNU Affero G
     return getAliasValidation(alias).value;
   }
 
+  function handleNavbarToggle(event: CustomEvent<string>): void {
+    disableNavbar = event.detail === "disabled";
+  }
+
+  function handleFloatingNavToggle(event: CustomEvent<string>): void {
+    disableFloatingNav = event.detail === "disabled";
+  }
+
+  function handleWidthToggle(event: CustomEvent<string>): void {
+    if (event.detail === "auto" || event.detail === "wide" || event.detail === "narrow") {
+      contentWidth = event.detail;
+    }
+  }
+
   async function loadContent(requestedId: string): Promise<void> {
     loading = true;
     detailsOpen = false;
@@ -521,6 +599,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
       navParentId = payload.navParentId || "";
       navOrder = payload.navOrder === null ? "" : payload.navOrder.toString();
       theme = payload.theme || "";
+      disableNavbar = payload.disableNavbar;
+      disableFloatingNav = payload.disableFloatingNav;
+      contentWidth = payload.contentWidth;
       mime = payload.mime;
       originalFilename = payload.originalFilename || "";
       sizeBytes =
@@ -606,6 +687,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
           navParentId: navTitleValue ? navParentValue || null : null,
           navOrder: navTitleValue ? navOrderValue : null,
           theme: trimmedTheme || null,
+          disableNavbar,
+          disableFloatingNav,
+          contentWidth,
           content: contentValue || ""
         });
         pushNotification("Content created", "success");
@@ -638,6 +722,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
           navParentId: navTitleValue ? navParentValue : "",
           navOrder: navTitleValue ? navOrderValue : null,
           theme: trimmedTheme,
+          disableNavbar,
+          disableFloatingNav,
+          contentWidth,
           content: contentValue || ""
         });
         sizeBytes = getContentSizeBytes(contentValue || "");
@@ -651,6 +738,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
           navParentId: navTitleValue ? navParentValue : "",
           navOrder: navTitleValue ? navOrderValue : null,
           theme: trimmedTheme,
+          disableNavbar,
+          disableFloatingNav,
+          contentWidth,
           content: null
         });
       }
@@ -935,6 +1025,26 @@ The code and documentation in this repository is licensed under the GNU Affero G
               {/each}
             </Select>
           </div>
+          <div class="flex flex-wrap items-center gap-2 md:col-span-2">
+            <StateToggle
+              value={disableNavbar ? "disabled" : "enabled"}
+              options={navbarToggleOptions}
+              disabled={!isMarkdown}
+              on:change={handleNavbarToggle}
+            />
+            <StateToggle
+              value={disableFloatingNav ? "disabled" : "enabled"}
+              options={floatingNavToggleOptions}
+              disabled={!isMarkdown}
+              on:change={handleFloatingNavToggle}
+            />
+            <StateToggle
+              value={contentWidth}
+              options={widthToggleOptions}
+              disabled={!isMarkdown}
+              on:change={handleWidthToggle}
+            />
+          </div>
           <div class="md:col-span-2">
             <label for="content-tags" class="text-[11px] uppercase tracking-[0.3em] text-muted">Tags</label>
             <div class="mt-2">
@@ -1001,6 +1111,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
         </CompactButton>
         <CompactButton variant="outline" disabled={!isMarkdown} on:click={pasteMergeFromClipboard}>
           Paste-Merge
+        </CompactButton>
+        <CompactButton variant="outline" disabled={!isMarkdown} on:click={convertLinkToLinkCard}>
+          Link-Card
         </CompactButton>
         <CompactButton variant="outline" on:click={openUploadOverlay}>
           Upload

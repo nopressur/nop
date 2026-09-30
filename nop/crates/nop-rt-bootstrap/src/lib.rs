@@ -276,8 +276,31 @@ upload:
                 .join("roles.yaml")
                 .exists()
         );
+        let oidc = result
+            .validated_config
+            .users
+            .oidc()
+            .expect("validated OIDC config");
+        assert_eq!(oidc.server_url, "https://example.com");
+        assert_eq!(oidc.realm, "example");
+        assert_eq!(oidc.client_id, "nop");
+        assert_eq!(oidc.redirect_uri, "http://127.0.0.1:8080/login/callback");
+        assert_eq!(
+            result.validated_config.settings.name.as_deref(),
+            Some("NoPressure")
+        );
+        assert!(
+            result
+                .validated_config
+                .upload
+                .allowed_extensions
+                .iter()
+                .any(|extension| extension == "woff2")
+        );
+
         let config_after = fs::read_to_string(&config_path).unwrap();
-        assert_eq!(config, config_after);
+        assert!(config_after.contains("auth_method: oidc"));
+        assert!(config_after.contains("settings:"));
     }
 
     #[test]

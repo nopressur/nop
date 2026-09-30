@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
+mod common;
+
+use actix_web::http::StatusCode;
 use nop_config::{
     AdminConfig, AppConfig, AuthMethod, Config, JwtConfig, LocalAuthConfig, LoggingConfig,
     LoggingRotationConfig, NavigationConfig, OidcConfig, PasswordHashingConfig, RenderingConfig,
@@ -10,6 +13,7 @@ use nop_config::{
 };
 use nop_iam_passwords::build_password_provider_block;
 use nop_management_bus::socket::ManagementSocket;
+use nop_management_bus::socket::client::{SocketClient, SocketConnect};
 use nop_management_bus::{ManagementBus, ManagementContext, build_default_registry};
 use nop_management_contract::AccessRule;
 use nop_rt_iam::UserServices;
@@ -24,7 +28,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Notify;
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, sleep, timeout};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct PasswordProviderFixture {
@@ -158,10 +162,10 @@ fn write_local_config(root: &Path) {
             hsts_preload: false,
         },
         tls: None,
-        app: AppConfig {
+        app: Some(AppConfig {
             name: "Test App".to_string(),
             description: "Test Description".to_string(),
-        },
+        }),
         upload: UploadConfig {
             max_file_size_mb: 100,
             allowed_extensions: vec!["md".to_string()],
@@ -170,6 +174,7 @@ fn write_local_config(root: &Path) {
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
         search: nop_config::SearchConfig::default(),
+        settings: Default::default(),
         dev_mode: None,
     };
 
@@ -226,10 +231,10 @@ fn write_oidc_config(root: &Path) {
             hsts_preload: false,
         },
         tls: None,
-        app: AppConfig {
+        app: Some(AppConfig {
             name: "Test App".to_string(),
             description: "Test Description".to_string(),
-        },
+        }),
         upload: UploadConfig {
             max_file_size_mb: 100,
             allowed_extensions: vec!["md".to_string()],
@@ -238,6 +243,7 @@ fn write_oidc_config(root: &Path) {
         shortcodes: ShortcodeConfig::default(),
         rendering: RenderingConfig::default(),
         search: nop_config::SearchConfig::default(),
+        settings: Default::default(),
         dev_mode: None,
     };
 
@@ -324,7 +330,7 @@ fn cli_system_ping() {
     let output = run_cli(fixture.path(), &["system", "ping"]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Version match"));
+    assert!(stdout.contains("Release "));
 }
 
 #[test]
@@ -357,6 +363,126 @@ fn cli_system_ping_uses_socket_when_available() {
 
     let output = run_cli(root, &["system", "ping"]);
     assert!(output.status.success());
+}
+
+#[test]
+fn cli_settings_roundtrip_bypass() {
+    let fixture = TestFixtureRoot::new_unique("cli-settings").unwrap();
+    fixture.init_runtime_layout().unwrap();
+    write_local_config(fixture.path());
+
+    let output = run_cli(fixture.path(), &["settings", "show"]);
+    assert_cli_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("name=Test App"));
+    assert!(stdout.contains("title=<unset>"));
+    assert!(stdout.contains("description=Test Description"));
+
+    let output = run_cli(
+        fixture.path(),
+        &["settings", "title", "set", "--title", "Example Site"],
+    );
+    assert_cli_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("title=Example Site"));
+    assert_eq!(
+        Config::load(fixture.path())
+            .unwrap()
+            .settings
+            .title
+            .as_deref(),
+        Some("Example Site")
+    );
+
+    let output = run_cli(fixture.path(), &["settings", "title", "clear"]);
+    assert_cli_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("title=<unset>"));
+    assert_eq!(Config::load(fixture.path()).unwrap().settings.title, None);
+}
+
+#[test]
+fn cli_settings_validation_errors_use_usage_exit_code() {
+    let fixture = TestFixtureRoot::new_unique("cli-settings-usage").unwrap();
+    fixture.init_runtime_layout().unwrap();
+    write_local_config(fixture.path());
+
+    let output = run_cli(fixture.path(), &["settings", "title", "set"]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--title"));
+
+    let output = run_cli(
+        fixture.path(),
+        &["settings", "title", "set", "--name", "Example"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Unknown flag"));
+}
+
+#[test]
+fn cli_settings_set_uses_socket_when_available() {
+    let temp = tempfile::Builder::new()
+        .prefix("cli-settings-sock")
+        .tempdir_in("/tmp")
+        .expect("tempdir");
+    let root = temp.path();
+    write_local_config(root);
+
+    let validated_config = Config::load_and_validate(root).expect("validate config");
+    let runtime_paths = RuntimePaths::from_root(root, &validated_config).expect("runtime paths");
+    let registry = build_default_registry().expect("registry");
+    let context = ManagementContext::from_components(
+        runtime_paths.root.clone(),
+        Arc::new(validated_config),
+        runtime_paths.clone(),
+    )
+    .expect("context");
+    let runtime_settings = context.runtime_settings.clone();
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = runtime.enter();
+    let bus = ManagementBus::start(registry, context);
+    let _socket = runtime
+        .block_on(async { ManagementSocket::start(&runtime_paths, bus.clone()).await })
+        .expect("socket");
+
+    let output = run_cli(
+        root,
+        &["settings", "title", "set", "--title", "Example Site"],
+    );
+    assert_cli_success(&output);
+    assert_eq!(
+        runtime_settings.website_title().as_deref(),
+        Some("Example Site")
+    );
+}
+
+#[actix_web::test]
+async fn cli_settings_update_is_visible_in_public_title_after_reload() {
+    let harness = common::TestHarness::new().await;
+    write_local_config(harness.fixture.path());
+
+    let output = run_cli(
+        harness.fixture.path(),
+        &["settings", "title", "set", "--title", "Example Site"],
+    );
+    assert_cli_success(&output);
+
+    let reloaded = Config::load_and_validate(harness.fixture.path()).expect("reload config");
+    let mut bundle = harness.app_bundle();
+    bundle.runtime_settings = Arc::new(nop_config::RuntimeSettings::new(&reloaded.settings));
+
+    let app = actix_web::test::init_service(common::build_test_app(bundle)).await;
+    let req = actix_web::test::TestRequest::get()
+        .uri("/docs/intro")
+        .to_request();
+    let resp = actix_web::test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = actix_web::test::read_body(resp).await;
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("<title>Intro | Example Site</title>"));
 }
 
 #[test]
@@ -612,9 +738,25 @@ fn cli_user_queue_full_returns_retryable_error() {
     .expect("context");
 
     let bus = ManagementBus::start(registry, context);
+    let socket_registry = bus.registry();
     let _socket = runtime
         .block_on(async { ManagementSocket::start(&runtime_paths, bus.clone()).await })
         .expect("socket");
+    let socket_path = runtime_paths.state_sys_dir.join("management.sock");
+    runtime.block_on(async {
+        for _ in 0..50 {
+            match SocketClient::connect(&socket_path, socket_registry.clone()).await {
+                Ok(SocketConnect::Ready(_client)) => return,
+                Ok(SocketConnect::Stale) => {}
+                Ok(SocketConnect::Incompatible(message)) => {
+                    panic!("socket incompatible: {}", message)
+                }
+                Err(err) => panic!("socket connect failed: {}", err),
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        panic!("management socket did not become ready");
+    });
 
     let password_block =
         build_password_provider_block("busy-pass", &password_params).expect("password block");
@@ -1048,6 +1190,37 @@ fn cli_content_roundtrip_bypass() {
     );
     assert_cli_success(&output);
     assert_eq!(output.stdout, b"Updated from CLI\n");
+
+    let mut large_markdown = b"# Large\r\n".to_vec();
+    large_markdown.extend(std::iter::repeat_n(b'a', 64 * 1024));
+    large_markdown.extend_from_slice("€".as_bytes());
+    large_markdown.extend_from_slice(b"\r\nCLI streamed Markdown.\r\n");
+    let large_path = input_dir.path().join("large.md");
+    std::fs::write(&large_path, &large_markdown).expect("write large markdown");
+    let output = run_cli(
+        fixture.path(),
+        &[
+            "content",
+            "store",
+            "--title",
+            "Large",
+            large_path.to_str().expect("path"),
+        ],
+    );
+    assert_cli_success(&output);
+    let large_id = parse_content_id(&output);
+
+    let output = run_cli_owned(
+        fixture.path(),
+        &[
+            "content".to_string(),
+            "stream".to_string(),
+            large_id,
+            "-".to_string(),
+        ],
+    );
+    assert_cli_success(&output);
+    assert_eq!(output.stdout, large_markdown);
 
     let output = run_cli_owned(
         fixture.path(),

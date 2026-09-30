@@ -112,7 +112,7 @@ pub(super) async fn profile_password_salt(
 
     let ip = match require_client_ip(&req, &config, "Profile password salt") {
         Ok(ip) => ip,
-        Err(response) => return Ok(response),
+        Err(response) => return Ok(*response),
     };
     if let Err(response) = check_auth_action_rate_limit(
         security_tools.as_ref(),
@@ -124,7 +124,7 @@ pub(super) async fn profile_password_salt(
     )
     .await
     {
-        return Ok(response);
+        return Ok(*response);
     }
 
     let salt_payload = match user_services
@@ -174,7 +174,7 @@ pub(super) async fn profile_password_change(
 
     let ip = match require_client_ip(&req, &config, "Profile password change") {
         Ok(ip) => ip,
-        Err(response) => return Ok(response),
+        Err(response) => return Ok(*response),
     };
     if let Err(response) = check_auth_action_rate_limit(
         security_tools.as_ref(),
@@ -186,7 +186,7 @@ pub(super) async fn profile_password_change(
     )
     .await
     {
-        return Ok(response);
+        return Ok(*response);
     }
 
     if let Err(err) = validate_front_end_hash(&payload.current_front_end_hash, &config) {

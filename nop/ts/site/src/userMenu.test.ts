@@ -112,4 +112,73 @@ describe('user menu', () => {
     const adminLink = adminButton?.querySelector('a');
     expect(adminLink?.getAttribute('href')).toBe('/admin');
   });
+
+  it('populates menu drawer rows in order when authenticated', async () => {
+    document.body.innerHTML = `
+      <div data-site-menu-drawer>
+        <div data-site-drawer-search></div>
+        <div data-site-drawer-rows></div>
+        <nav data-site-drawer-nav></nav>
+      </div>
+      <div class="navbar-end" data-site-content-id="0000000000000001"><div data-site-user-menu></div></div>`;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        authenticated: true,
+        display_name: 'Admin User',
+        menu_items: [
+          { key: 'profile', label: 'Profile', href: '/login/profile' },
+          { key: 'admin', label: 'Admin', href: '/admin' },
+          { key: 'logout', label: 'Logout', href: '/login/logout-api', method: 'POST' }
+        ]
+      })
+    }));
+
+    initUserMenu();
+    await flush();
+
+    const drawer = document.querySelector<HTMLElement>('[data-site-menu-drawer]')!;
+    const order = ["[data-site-edit-button]", "[data-site-admin-button]", "[data-site-drawer-profile]"]
+      .map((selector) => drawer.querySelector(selector))
+      .filter((element): element is HTMLElement => element !== null);
+    expect(order.length).toBe(3);
+    const positions = order.map((element) =>
+      Array.from(drawer.querySelectorAll('*')).indexOf(element));
+    const sorted = [...positions].sort((a, b) => a - b);
+    expect(positions).toEqual(sorted);
+
+    const profileToggle = drawer.querySelector('[data-site-drawer-profile] [data-site-expander-toggle]');
+    expect(profileToggle?.textContent).toContain('Admin User');
+    expect(profileToggle?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('places the drawer profile chevron after the display name', async () => {
+    document.body.innerHTML = `
+      <div data-site-menu-drawer>
+        <div data-site-drawer-search></div>
+        <div data-site-drawer-rows></div>
+        <nav data-site-drawer-nav></nav>
+      </div>
+      <div class="navbar-end" data-site-content-id="0000000000000001"><div data-site-user-menu></div></div>`;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        authenticated: true,
+        display_name: 'Admin User',
+        menu_items: [
+          { key: 'profile', label: 'Profile', href: '/login/profile' },
+          { key: 'admin', label: 'Admin', href: '/admin' }
+        ]
+      })
+    }));
+
+    initUserMenu();
+    await flush();
+
+    const toggle = document.querySelector('[data-site-drawer-profile] [data-site-expander-toggle]');
+    const chevron = toggle?.querySelector('[data-site-expander-chevron]');
+    expect(chevron).not.toBeNull();
+    expect(toggle?.lastChild).toBe(chevron);
+    expect(toggle?.firstChild?.textContent).toContain('Admin User');
+  });
 });

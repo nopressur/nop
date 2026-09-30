@@ -9,8 +9,20 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/rust-crates.sh"
 
+# Shared compilation cache on shared storage (never root fs or home).
+# An explicitly set SCCACHE_DIR or RUSTC_WRAPPER always wins.
+if [[ -z "${SCCACHE_DIR:-}" ]]; then
+  SCCACHE_DIR="/mnt/shared/cache"
+  export SCCACHE_DIR
+fi
+mkdir -p "${SCCACHE_DIR}" 2>/dev/null || SCCACHE_DIR=""
+if [[ -z "${RUSTC_WRAPPER:-}" && -n "${SCCACHE_DIR}" && -x /usr/bin/sccache ]]; then
+  export RUSTC_WRAPPER=/usr/bin/sccache
+fi
+
 ADMIN_DIR="$NOP_DIR/ts/admin"
 LOGIN_DIR="$NOP_DIR/ts/login"
+SITE_DIR="$NOP_DIR/ts/site"
 
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$NOP_DIR/target/full-testing-scope}"
 
@@ -27,7 +39,11 @@ require_tool() {
 ensure_node_modules() {
   local dir="$1"
   if [[ ! -d "$dir/node_modules" || ! -x "$dir/node_modules/.bin/vitest" ]]; then
-    (cd "$dir" && npm install)
+    if [[ -f "$dir/package-lock.json" ]]; then
+      (cd "$dir" && npm ci)
+    else
+      (cd "$dir" && npm install)
+    fi
   fi
 }
 
@@ -95,6 +111,10 @@ if [[ ! -d "$LOGIN_DIR" ]]; then
   echo "Login SPA directory not found: $LOGIN_DIR" >&2
   exit 1
 fi
+if [[ ! -d "$SITE_DIR" ]]; then
+  echo "Site bundle directory not found: $SITE_DIR" >&2
+  exit 1
+fi
 
 run_rust_full_testing_scope
 
@@ -107,7 +127,24 @@ echo "Running admin SPA tests..."
 
 echo "Ensuring login SPA dependencies..."
 ensure_node_modules "$LOGIN_DIR"
+echo "Running login Argon2 asm.js compatibility checks..."
+(cd "$LOGIN_DIR" && npm run argon2-asm:check)
 echo "Running login SPA checks..."
 (cd "$LOGIN_DIR" && npm run check)
 echo "Running login SPA tests..."
 (cd "$LOGIN_DIR" && npm run test)
+echo "Building login SPA bundle..."
+(cd "$LOGIN_DIR" && npm run build)
+
+echo "Ensuring public site dependencies..."
+ensure_node_modules "$SITE_DIR"
+echo "Running public site checks..."
+(cd "$SITE_DIR" && npm run check)
+echo "Running public site tests..."
+(cd "$SITE_DIR" && npm run test)
+echo "Building public site bundle..."
+(cd "$SITE_DIR" && npm run build)
+
+if [[ -n "${SCCACHE_DIR:-}" && -d "${SCCACHE_DIR}" ]]; then
+  echo "sccache cache: $(du -sh "${SCCACHE_DIR}" 2>/dev/null | cut -f1) in ${SCCACHE_DIR}"
+fi

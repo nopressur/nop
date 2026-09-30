@@ -92,7 +92,7 @@ pub fn generate_csp_nonce() -> String {
 
 pub fn set_strict_csp(req: &HttpRequest, nonce: &str) {
     let policy = format!(
-        "default-src 'self'; img-src 'self' data:; style-src 'self' 'nonce-{}'; script-src 'self' 'nonce-{}' 'wasm-unsafe-eval'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self';",
+        "default-src 'self'; img-src 'self' data:; font-src 'self'; style-src 'self' 'nonce-{}'; script-src 'self' 'nonce-{}' 'wasm-unsafe-eval'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self';",
         nonce, nonce
     );
     if let Ok(value) = HeaderValue::from_str(&policy) {
@@ -215,7 +215,7 @@ where
                 CONTENT_SECURITY_POLICY,
                 &directives.content_security_policy,
                 Some(HeaderValue::from_static(
-                    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self';",
+                    "default-src 'self'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self';",
                 )),
             );
 
@@ -544,6 +544,7 @@ mod tests {
                     shortcodes: ShortcodeConfig::default(),
                     rendering: RenderingConfig::default(),
                     search: SearchConfig::default(),
+                    settings: Default::default(),
                     dev_mode: None,
                 },
             }
@@ -614,6 +615,9 @@ mod tests {
             nav_title: None,
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: None,
             theme: None,
         };
@@ -741,6 +745,13 @@ mod tests {
         assert_eq!(referrer, "strict-origin-when-cross-origin");
         assert!(permissions.contains("geolocation=()"));
         assert!(permissions.contains("microphone=()"));
+        let csp = resp
+            .headers()
+            .get(CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("font-src 'self'"));
     }
 
     #[actix_web::test]
@@ -765,6 +776,7 @@ mod tests {
             .unwrap();
 
         assert!(csp.contains("'nonce-nonce-test'"));
+        assert!(csp.contains("font-src 'self'"));
         assert!(csp.contains("'wasm-unsafe-eval'"));
         assert!(!csp.contains("unsafe-inline"));
     }

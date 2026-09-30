@@ -4,20 +4,24 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use crate::markdown::HtmlSanitizer;
-use crate::markdown::render_pipeline_support_hooks::{
-    PageRenderHookContext, RenderPipelineSupportHooks,
+use crate::markdown::document_structure::{
+    HeadingDraft, MarkdownHeading, assign_heading_anchor_ids, select_document_structure,
 };
+use crate::markdown::render_pipeline_support_hooks::{PageRenderState, RenderPipelineSupportHooks};
 use crate::shortcode::{
     ShortcodeContext, ShortcodeRegistry, process_text_with_shortcodes,
     replace_shortcode_placeholders,
 };
 use getrandom::fill;
 use log::error;
+use nop_content_store::flat_storage::ContentWidthMode;
 use nop_rt_iam::types::User;
 use nop_rt_page_cache::PageMetaCache;
 use nop_rt_security as security;
 use once_cell::sync::Lazy;
-use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd, html};
+use pulldown_cmark::{
+    CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd, html,
+};
 use regex::Regex;
 
 static EXTERNAL_LINK_REGEX: Lazy<Result<Regex, regex::Error>> =
@@ -44,7 +48,7 @@ impl std::error::Error for MarkdownRenderError {}
 pub(super) struct RenderedMarkdown {
     pub(super) html: String,
     pub(super) contains_dynamic_shortcodes: bool,
-    pub(super) use_compact_width: bool,
+    pub(super) render_state: PageRenderState,
 }
 
 pub(super) struct RenderRequest<'a> {
@@ -55,8 +59,8 @@ pub(super) struct RenderRequest<'a> {
     pub(super) cache: &'a PageMetaCache,
     pub(super) md_path: &'a str,
     pub(super) user: Option<&'a User>,
-    pub(super) short_paragraph_length: usize,
     pub(super) hooks: &'a dyn RenderPipelineSupportHooks,
+    pub(super) render_state: PageRenderState,
 }
 
 pub(super) fn generate_html(
@@ -71,11 +75,14 @@ pub(super) fn generate_html(
     let shortcode_result =
         process_text_with_shortcodes(request.markdown, request.shortcode_registry, &shortcode_ctx);
 
-    let use_compact_width = should_use_compact_width(
-        &shortcode_result.processed_text,
-        request.options,
-        request.short_paragraph_length,
-    );
+    let mut render_state = request.render_state.clone();
+    // `Auto` always renders the normal compact width; only an explicit `Wide` sidecar
+    // value opts a page into the wide rendering. Paragraph length never affects width.
+    render_state.use_compact_width = match render_state.content_width {
+        ContentWidthMode::Auto => true,
+        ContentWidthMode::Wide => false,
+        ContentWidthMode::Narrow => true,
+    };
 
     // Parse the markdown content (shortcode strings will be treated as regular text)
     let parser = Parser::new_ext(&shortcode_result.processed_text, *request.options);
@@ -83,15 +90,28 @@ pub(super) fn generate_html(
     let wrapper_nonce = generate_code_block_wrapper_nonce();
 
     // Process events with custom logic for images/links plus code-block wrapper placeholders
-    let events = parser
-        .scan(
-            CodeBlockWrapperState::new(wrapper_nonce.clone()),
-            |state, event| Some(state.process_event(event, request.md_path, request.cache)),
-        )
-        .flatten();
+    let mut event_state = RenderEventState::new(wrapper_nonce.clone());
+    let mut events = Vec::new();
+    for event in parser {
+        let output_start_index = events.len();
+        events.extend(event_state.process_event(
+            event,
+            output_start_index,
+            request.md_path,
+            request.cache,
+        ));
+    }
+
+    let anchored_headings = event_state.into_markdown_headings();
+    apply_heading_ids(&mut events, &anchored_headings);
+    let headings: Vec<MarkdownHeading> = anchored_headings
+        .into_iter()
+        .map(|heading| heading.heading)
+        .collect();
+    render_state.document_structure = select_document_structure(&headings);
 
     let mut html_output = String::new();
-    html::push_html(&mut html_output, events);
+    html::push_html(&mut html_output, events.into_iter());
 
     // Sanitize HTML output from Markdown conversion (shortcode strings are just text so they're safe)
     let sanitized_html = request.sanitizer.clean(&html_output);
@@ -110,7 +130,7 @@ pub(super) fn generate_html(
 
     // Replace shortcode strings with their rendered HTML as the final step
 
-    let hook_context = PageRenderHookContext { use_compact_width };
+    let hook_context = render_state.hook_context();
     let final_html = replace_shortcode_placeholders(
         &wrapper_replaced_html,
         &shortcode_result.hash_to_html_map,
@@ -118,12 +138,55 @@ pub(super) fn generate_html(
         request.hooks,
         &hook_context,
     );
+    render_state.has_hero = shortcode_result.contains_hero;
+    let final_html = assemble_balanced_content_stream(
+        final_html,
+        request.hooks,
+        &hook_context,
+    );
 
     Ok(RenderedMarkdown {
         html: final_html,
         contains_dynamic_shortcodes: shortcode_result.contains_dynamic_shortcodes,
-        use_compact_width,
+        render_state,
     })
+}
+
+/// Wraps the substituted body in content segments so `{content}` is a fully
+/// balanced stream handed to the layout grid: a leading escape's closes are
+/// drained because nothing is open yet, a trailing escape's return is
+/// truncated because nothing follows it, initial opens are skipped when
+/// leading-drained, and final closes are skipped when trailing-truncated.
+fn assemble_balanced_content_stream(
+    mut html: String,
+    hooks: &dyn RenderPipelineSupportHooks,
+    hook_context: &crate::markdown::PageRenderHookContext,
+) -> String {
+    let closes = hooks.close_content_segment();
+    let leading_escape = html.starts_with(&closes);
+    if leading_escape {
+        html.drain(..closes.len());
+    }
+
+    // A trailing return only reopens a segment nothing follows, so strip the
+    // reopened opens but keep the band close.
+    let reopened = hooks.open_content_segment(hook_context);
+    let trimmed_len = html.trim_end().len();
+    let trailing_escape = html[..trimmed_len].ends_with(&reopened);
+    if trailing_escape {
+        let new_len = trimmed_len - reopened.len();
+        html.truncate(new_len);
+    }
+
+    let mut stream = String::new();
+    if !leading_escape {
+        stream.push_str(&hooks.open_content_segment(hook_context));
+    }
+    stream.push_str(&html);
+    if !trailing_escape {
+        stream.push_str(&hooks.close_content_segment());
+    }
+    stream
 }
 
 fn generate_code_block_wrapper_nonce() -> Option<String> {
@@ -147,20 +210,34 @@ fn encode_hex(bytes: &[u8]) -> String {
     out
 }
 
-struct CodeBlockWrapperState {
+struct RenderEventState {
     nonce: Option<String>,
     in_wrapped_code_block: bool,
     start_count: usize,
     end_count: usize,
+    current_heading: Option<HeadingLabelBuilder>,
+    heading_drafts: Vec<PendingHeadingDraft>,
 }
 
-impl CodeBlockWrapperState {
+struct PendingHeadingDraft {
+    draft: HeadingDraft,
+    event_index: usize,
+}
+
+struct AnchoredMarkdownHeading {
+    heading: MarkdownHeading,
+    event_index: usize,
+}
+
+impl RenderEventState {
     fn new(nonce: Option<String>) -> Self {
         Self {
             nonce,
             in_wrapped_code_block: false,
             start_count: 0,
             end_count: 0,
+            current_heading: None,
+            heading_drafts: Vec::new(),
         }
     }
 
@@ -181,11 +258,64 @@ impl CodeBlockWrapperState {
     fn process_event<'a>(
         &mut self,
         event: Event<'a>,
+        output_start_index: usize,
         current_md_path: &str,
         cache: &PageMetaCache,
     ) -> Vec<Event<'a>> {
         let event = process_event(event, current_md_path, cache);
         match event {
+            Event::Start(Tag::Heading {
+                level,
+                id,
+                classes,
+                attrs,
+            }) => {
+                self.current_heading = Some(HeadingLabelBuilder::new(level, output_start_index));
+                vec![Event::Start(Tag::Heading {
+                    level,
+                    id,
+                    classes,
+                    attrs,
+                })]
+            }
+            Event::End(TagEnd::Heading(level)) => {
+                if let Some(builder) = self.current_heading.take()
+                    && let Some(heading) = builder.finish()
+                {
+                    self.heading_drafts.push(heading);
+                }
+                vec![Event::End(TagEnd::Heading(level))]
+            }
+            Event::Text(text) => {
+                if let Some(builder) = self.current_heading.as_mut() {
+                    builder.push_text(&text);
+                }
+                vec![Event::Text(text)]
+            }
+            Event::Code(text) => {
+                if let Some(builder) = self.current_heading.as_mut() {
+                    builder.push_text(&text);
+                }
+                vec![Event::Code(text)]
+            }
+            Event::Html(html) => {
+                if let Some(builder) = self.current_heading.as_mut() {
+                    builder.observe_raw_html(&html);
+                }
+                vec![Event::Html(html)]
+            }
+            Event::SoftBreak => {
+                if let Some(builder) = self.current_heading.as_mut() {
+                    builder.push_break();
+                }
+                vec![Event::SoftBreak]
+            }
+            Event::HardBreak => {
+                if let Some(builder) = self.current_heading.as_mut() {
+                    builder.push_break();
+                }
+                vec![Event::HardBreak]
+            }
             Event::Start(Tag::CodeBlock(kind)) => {
                 let should_wrap = self.nonce.is_some() && matches!(kind, CodeBlockKind::Fenced(_));
                 self.in_wrapped_code_block = should_wrap;
@@ -213,6 +343,185 @@ impl CodeBlockWrapperState {
             other => vec![other],
         }
     }
+
+    fn into_markdown_headings(self) -> Vec<AnchoredMarkdownHeading> {
+        let mut event_indices = Vec::with_capacity(self.heading_drafts.len());
+        let drafts = self
+            .heading_drafts
+            .into_iter()
+            .map(|heading| {
+                event_indices.push(heading.event_index);
+                heading.draft
+            })
+            .collect();
+
+        assign_heading_anchor_ids(drafts)
+            .into_iter()
+            .zip(event_indices)
+            .map(|(heading, event_index)| AnchoredMarkdownHeading {
+                heading,
+                event_index,
+            })
+            .collect()
+    }
+}
+
+struct HeadingLabelBuilder {
+    rank: u8,
+    label: String,
+    suppressed_raw_tag: Option<&'static str>,
+    start_event_index: usize,
+}
+
+impl HeadingLabelBuilder {
+    fn new(level: HeadingLevel, start_event_index: usize) -> Self {
+        Self {
+            rank: heading_level_rank(level),
+            label: String::new(),
+            suppressed_raw_tag: None,
+            start_event_index,
+        }
+    }
+
+    fn push_text(&mut self, text: &str) {
+        if self.suppressed_raw_tag.is_some() {
+            return;
+        }
+
+        let mut plain_text = String::with_capacity(text.len());
+        let mut cursor = 0;
+        while cursor < text.len() {
+            let remainder = &text[cursor..];
+            if let Some(consumed) = consume_shortcode_hash(remainder) {
+                cursor += consumed;
+                continue;
+            }
+
+            let Some(ch) = remainder.chars().next() else {
+                break;
+            };
+            plain_text.push(ch);
+            cursor += ch.len_utf8();
+        }
+
+        for part in plain_text.split_whitespace() {
+            if !self.label.is_empty() {
+                self.label.push(' ');
+            }
+            self.label.push_str(part);
+        }
+    }
+
+    fn push_break(&mut self) {
+        if self.suppressed_raw_tag.is_some() {
+            return;
+        }
+        if !self.label.ends_with(' ') && !self.label.is_empty() {
+            self.label.push(' ');
+        }
+    }
+
+    fn observe_raw_html(&mut self, html: &str) {
+        if let Some(tag) = self.suppressed_raw_tag {
+            if is_closing_raw_tag(html, tag) {
+                self.suppressed_raw_tag = None;
+            }
+            return;
+        }
+
+        self.suppressed_raw_tag = removed_raw_html_tag(html);
+    }
+
+    fn finish(self) -> Option<PendingHeadingDraft> {
+        let label = self.label.trim().to_string();
+        if label.is_empty() {
+            return None;
+        }
+
+        Some(PendingHeadingDraft {
+            draft: HeadingDraft {
+                rank: self.rank,
+                label,
+            },
+            event_index: self.start_event_index,
+        })
+    }
+}
+
+fn apply_heading_ids<'a>(events: &mut [Event<'a>], headings: &[AnchoredMarkdownHeading]) {
+    for heading in headings {
+        if let Some(Event::Start(Tag::Heading { id, .. })) = events.get_mut(heading.event_index) {
+            *id = Some(CowStr::Boxed(
+                heading.heading.anchor_id.clone().into_boxed_str(),
+            ));
+        }
+    }
+}
+
+fn consume_shortcode_hash(s: &str) -> Option<usize> {
+    const PREFIX: &str = "SHORTCODE_HASH_";
+    const HASH_LEN: usize = 128;
+    let bytes = s.as_bytes();
+    if bytes.len() >= PREFIX.len() + HASH_LEN
+        && bytes.starts_with(PREFIX.as_bytes())
+        && bytes[PREFIX.len()..PREFIX.len() + HASH_LEN]
+            .iter()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        Some(PREFIX.len() + HASH_LEN)
+    } else {
+        None
+    }
+}
+
+fn removed_raw_html_tag(html: &str) -> Option<&'static str> {
+    let tag = opening_tag_name(html)?;
+    if tag.eq_ignore_ascii_case("script") {
+        Some("script")
+    } else if tag.eq_ignore_ascii_case("link") {
+        Some("link")
+    } else if tag.eq_ignore_ascii_case("iframe") {
+        Some("iframe")
+    } else if tag.eq_ignore_ascii_case("object") {
+        Some("object")
+    } else if tag.eq_ignore_ascii_case("embed") {
+        Some("embed")
+    } else {
+        None
+    }
+}
+
+fn opening_tag_name(html: &str) -> Option<&str> {
+    let trimmed = html.trim_start();
+    let rest = trimmed.strip_prefix('<')?;
+    if rest.starts_with('/') || rest.starts_with('!') || rest.starts_with('?') {
+        return None;
+    }
+    let end = rest
+        .char_indices()
+        .find(|(_, ch)| ch.is_whitespace() || *ch == '>' || *ch == '/')
+        .map(|(index, _)| index)
+        .unwrap_or(rest.len());
+    if end == 0 {
+        return None;
+    }
+    Some(&rest[..end])
+}
+
+fn is_closing_raw_tag(html: &str, tag: &str) -> bool {
+    let trimmed = html.trim_start().to_ascii_lowercase();
+    trimmed.starts_with(&format!("</{}", tag))
+}
+
+fn heading_level_rank(level: HeadingLevel) -> u8 {
+    match level {
+        HeadingLevel::H1 => 1,
+        HeadingLevel::H2 => 2,
+        HeadingLevel::H3 => 3,
+        HeadingLevel::H4 => 4,
+        HeadingLevel::H5 => 5,
+        HeadingLevel::H6 => 6,
+    }
 }
 
 fn replace_code_block_wrapper_placeholders_best_effort(
@@ -227,7 +536,7 @@ fn replace_code_block_wrapper_placeholders_best_effort(
         return html.to_string();
     }
 
-    let wrapper_start = r#"<figure data-site-code-block="true"><figcaption><button type="button" data-site-code-copy="true" aria-label="Copy code block">Copy</button></figcaption>"#;
+    let wrapper_start = r#"<figure data-site-code-block="true"><figcaption><button type="button" data-site-code-copy="true" aria-label="Copy code block"><img src="/builtin/copy.svg" alt="" width="16" height="16"><span class="site-visually-hidden" data-site-code-copy-status="true"></span></button></figcaption>"#;
     let wrapper_end = r#"</figure>"#;
 
     let mut out = String::with_capacity(html.len() + 256);
@@ -288,194 +597,6 @@ fn replace_code_block_wrapper_placeholders_best_effort(
     }
 
     out
-}
-
-struct ParagraphLengthStats {
-    total_paragraphs: usize,
-    long_paragraphs: usize,
-}
-
-struct ItemLengthStats {
-    current_len: usize,
-    has_non_whitespace: bool,
-    has_paragraph: bool,
-}
-
-fn should_use_compact_width(
-    markdown: &str,
-    options: &Options,
-    short_paragraph_length: usize,
-) -> bool {
-    if short_paragraph_length == 0 {
-        return false;
-    }
-
-    let stats = count_paragraph_lengths(markdown, options, short_paragraph_length);
-    if stats.total_paragraphs == 0 {
-        return true;
-    }
-
-    stats.long_paragraphs == 0
-}
-
-fn count_paragraph_lengths(
-    markdown: &str,
-    options: &Options,
-    short_paragraph_length: usize,
-) -> ParagraphLengthStats {
-    let parser = Parser::new_ext(markdown, *options);
-    let mut in_paragraph = false;
-    let mut in_image = false;
-    let mut current_len = 0usize;
-    let mut has_non_whitespace = false;
-    let mut item_stack: Vec<ItemLengthStats> = Vec::new();
-    let mut stats = ParagraphLengthStats {
-        total_paragraphs: 0,
-        long_paragraphs: 0,
-    };
-
-    for event in parser {
-        match event {
-            Event::Start(Tag::Item) => {
-                item_stack.push(ItemLengthStats {
-                    current_len: 0,
-                    has_non_whitespace: false,
-                    has_paragraph: false,
-                });
-            }
-            Event::End(TagEnd::Item) => {
-                if let Some(item_stats) = item_stack.pop()
-                    && !item_stats.has_paragraph
-                    && item_stats.has_non_whitespace
-                {
-                    stats.total_paragraphs += 1;
-                    if item_stats.current_len > short_paragraph_length {
-                        stats.long_paragraphs += 1;
-                    }
-                }
-            }
-            Event::Start(Tag::Paragraph) => {
-                in_paragraph = true;
-                in_image = false;
-                current_len = 0;
-                has_non_whitespace = false;
-                if let Some(item_stats) = item_stack.last_mut() {
-                    item_stats.has_paragraph = true;
-                }
-            }
-            Event::End(TagEnd::Paragraph) => {
-                if in_paragraph && has_non_whitespace {
-                    stats.total_paragraphs += 1;
-                    if current_len > short_paragraph_length {
-                        stats.long_paragraphs += 1;
-                    }
-                }
-                in_paragraph = false;
-                in_image = false;
-            }
-            Event::Start(Tag::Image { .. }) if in_paragraph || !item_stack.is_empty() => {
-                in_image = true;
-            }
-            Event::End(TagEnd::Image) if in_paragraph || !item_stack.is_empty() => {
-                in_image = false;
-            }
-            Event::Text(text) | Event::Html(text) if in_paragraph && !in_image => {
-                let (len, has_text) = count_text_stats_excluding_placeholders(&text);
-                current_len += len;
-                if has_text {
-                    has_non_whitespace = true;
-                }
-            }
-            Event::Text(text) | Event::Html(text) if !in_paragraph && !in_image => {
-                if let Some(item_stats) = item_stack.last_mut() {
-                    let (len, has_text) = count_text_stats_excluding_placeholders(&text);
-                    item_stats.current_len += len;
-                    if has_text {
-                        item_stats.has_non_whitespace = true;
-                    }
-                }
-            }
-            Event::Code(text) if in_paragraph && !in_image => {
-                let len = text.chars().count();
-                current_len += len;
-                if text.chars().any(|ch| !ch.is_whitespace()) {
-                    has_non_whitespace = true;
-                }
-            }
-            Event::Code(text) if !in_paragraph && !in_image => {
-                if let Some(item_stats) = item_stack.last_mut() {
-                    let len = text.chars().count();
-                    item_stats.current_len += len;
-                    if text.chars().any(|ch| !ch.is_whitespace()) {
-                        item_stats.has_non_whitespace = true;
-                    }
-                }
-            }
-            Event::FootnoteReference(text) if in_paragraph && !in_image => {
-                let len = text.chars().count();
-                current_len += len;
-                if !text.is_empty() {
-                    has_non_whitespace = true;
-                }
-            }
-            Event::FootnoteReference(text) if !in_paragraph && !in_image => {
-                if let Some(item_stats) = item_stack.last_mut() {
-                    let len = text.chars().count();
-                    item_stats.current_len += len;
-                    if !text.is_empty() {
-                        item_stats.has_non_whitespace = true;
-                    }
-                }
-            }
-            Event::SoftBreak | Event::HardBreak if in_paragraph => {
-                current_len += 1;
-            }
-            Event::SoftBreak | Event::HardBreak if !in_paragraph => {
-                if let Some(item_stats) = item_stack.last_mut() {
-                    item_stats.current_len += 1;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    stats
-}
-
-fn count_text_stats_excluding_placeholders(text: &str) -> (usize, bool) {
-    const PREFIX: &str = "SHORTCODE_HASH_";
-    const HASH_LEN: usize = 128;
-
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    let mut count = 0usize;
-    let mut has_non_whitespace = false;
-
-    while index < bytes.len() {
-        if bytes[index..].starts_with(PREFIX.as_bytes()) {
-            let after_prefix = index + PREFIX.len();
-            if bytes.len() >= after_prefix + HASH_LEN
-                && bytes[after_prefix..after_prefix + HASH_LEN]
-                    .iter()
-                    .all(|byte| byte.is_ascii_hexdigit())
-            {
-                index = after_prefix + HASH_LEN;
-                continue;
-            }
-        }
-
-        let ch = match text[index..].chars().next() {
-            Some(ch) => ch,
-            None => break,
-        };
-        count += 1;
-        if !ch.is_whitespace() {
-            has_non_whitespace = true;
-        }
-        index += ch.len_utf8();
-    }
-
-    (count, has_non_whitespace)
 }
 
 fn post_process_html(
@@ -737,6 +858,7 @@ mod tests {
     use super::*;
     use crate::PageRenderContext;
     use crate::markdown::render_pipeline_support_hooks::DefaultRenderPipelineSupportHooks;
+    use crate::markdown::{DocumentStructure, DocumentStructureEntry};
     use crate::nav::generate_navigation_with_user;
     use crate::shortcode::{ShortcodeRegistry, ShortcodeType, link_card, video};
     use crate::test_support::TestFixtureRoot;
@@ -746,8 +868,8 @@ mod tests {
         UploadConfig, ValidatedConfig, test_local_users_config,
     };
     use nop_content_store::flat_storage::{
-        ContentId, ContentSidecar, ContentVersion, blob_path, content_id_hex, sidecar_path,
-        write_sidecar_atomic,
+        ContentId, ContentSidecar, ContentVersion, ContentWidthMode, blob_path, content_id_hex,
+        sidecar_path, write_sidecar_atomic,
     };
     use nop_rt_paths::RuntimePaths;
     use nop_rt_release::ReleaseTracker;
@@ -827,6 +949,7 @@ mod tests {
             },
             rendering: RenderingConfig::default(),
             search: nop_config::SearchConfig::default(),
+            settings: Default::default(),
             dev_mode: None,
         }
     }
@@ -857,7 +980,7 @@ mod tests {
         sanitizer: &HtmlSanitizer,
         cache: &PageMetaCache,
         md_path: &str,
-        short_paragraph_length: usize,
+        content_width: ContentWidthMode,
     ) -> RenderedMarkdown {
         let hooks = DefaultRenderPipelineSupportHooks;
         generate_html(&RenderRequest {
@@ -868,10 +991,60 @@ mod tests {
             cache,
             md_path,
             user: None,
-            short_paragraph_length,
             hooks: &hooks,
+            render_state: PageRenderState::new(false, false, content_width),
         })
         .expect("render markdown")
+    }
+
+    fn container_escape_test_registry() -> ShortcodeRegistry {
+        let mut registry = ShortcodeRegistry::new();
+        registry.register(
+            "breakout",
+            |_shortcode, _ctx| Ok(r#"<section class="breakout-test">Hero</section>"#.to_string()),
+            ShortcodeType {
+                dynamic: false,
+                container_escape: true,
+            },
+        );
+        registry
+    }
+
+    fn heading_html_shortcode_registry() -> ShortcodeRegistry {
+        let mut registry = ShortcodeRegistry::new();
+        registry.register(
+            "heading-html",
+            |_shortcode, _ctx| {
+                Ok((1..=6)
+                    .map(|rank| format!("<h{rank}>Shortcode H{rank}</h{rank}>"))
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            },
+            ShortcodeType::default(),
+        );
+        registry.register(
+            "opaque",
+            |shortcode, _ctx| {
+                let title = shortcode
+                    .attributes
+                    .get("title")
+                    .map(String::as_str)
+                    .unwrap_or("");
+                Ok(format!(r#"<p class="opaque-shortcode">{title}</p>"#))
+            },
+            ShortcodeType::default(),
+        );
+        registry
+    }
+
+    fn structure_entries(rendered: &RenderedMarkdown) -> Vec<(String, String, u8)> {
+        rendered
+            .render_state
+            .document_structure
+            .entries
+            .iter()
+            .map(|entry| (entry.id.clone(), entry.label.clone(), entry.level))
+            .collect()
     }
 
     #[test]
@@ -920,12 +1093,12 @@ Here's a [link to example](https://example.com).
             &sanitizer,
             &cache,
             "test.md",
-            256,
+            ContentWidthMode::Auto,
         );
         let html = rendered.html;
 
         // Check basic markdown elements are rendered
-        assert!(html.contains("<h1>Test Heading</h1>"));
+        assert!(html.contains(r#"<h1 id="test-heading">Test Heading</h1>"#));
         assert!(html.contains("<strong>bold</strong>"));
         assert!(html.contains("<em>italic</em>"));
         assert!(html.contains("<ul>"));
@@ -933,6 +1106,7 @@ Here's a [link to example](https://example.com).
         assert!(html.contains("<li>List item 2</li>"));
         assert!(html.contains(r#"data-site-code-block="true""#));
         assert!(html.contains(r#"data-site-code-copy="true""#));
+        assert!(html.contains(r#"<img src="/builtin/copy.svg" alt="""#));
         assert!(!html.contains("NOP_CODEBLOCK_WRAPPER_START_"));
         assert!(!html.contains("NOP_CODEBLOCK_WRAPPER_END_"));
         assert!(html.contains("<pre><code"));
@@ -954,6 +1128,173 @@ Here's a [link to example](https://example.com).
             r#"<a href="https://example.com" rel="noopener noreferrer" target="_blank""#
         ));
         assert!(!rendered.contains_dynamic_shortcodes);
+    }
+
+    #[test]
+    fn leading_container_escape_renders_band_then_first_segment() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-leading-breakout");
+        let registry = container_escape_test_registry();
+        let options = Options::empty();
+        let sanitizer = create_test_sanitizer();
+        let cache = create_test_cache(&runtime_paths);
+
+        let rendered = render_markdown(
+            "((breakout))\n\nAfter hero.",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "landing",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(
+            rendered
+                .html
+                .starts_with("<div class=\"site-doc-band\">")
+        );
+        assert!(
+            rendered
+                .html
+                .contains("</div><div class=\"content-wrapper")
+        );
+        assert!(
+            rendered
+                .html
+                .contains(r#"<div class="container content-container""#)
+        );
+        assert!(rendered.html.contains("<p>After hero.</p>"));
+        assert_eq!(
+            rendered.html.matches("<div").count(),
+            rendered.html.matches("</div>").count()
+        );
+        assert!(!rendered.render_state.has_hero);
+    }
+
+    #[test]
+    fn mid_content_escape_splits_segments_around_band() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-mid-breakout");
+        let registry = container_escape_test_registry();
+        let options = Options::empty();
+        let sanitizer = create_test_sanitizer();
+        let cache = create_test_cache(&runtime_paths);
+
+        let rendered = render_markdown(
+            "Before\n\n((breakout))\n\nAfter.",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "landing",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(
+            rendered
+                .html
+                .contains("</div></div></div><div class=\"site-doc-band\">")
+        );
+        assert!(
+            rendered
+                .html
+                .contains("</div><div class=\"content-wrapper")
+        );
+        assert_eq!(
+            rendered.html.matches("<div").count(),
+            rendered.html.matches("</div>").count()
+        );
+        assert_eq!(
+            rendered.html.matches("content-wrapper").count(),
+            2
+        );
+    }
+
+    #[test]
+    fn only_container_escape_renders_bare_band() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-only-breakout");
+        let registry = container_escape_test_registry();
+        let options = Options::empty();
+        let sanitizer = create_test_sanitizer();
+        let cache = create_test_cache(&runtime_paths);
+
+        let rendered = render_markdown(
+            "((breakout))",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "landing",
+            ContentWidthMode::Auto,
+        );
+
+        assert_eq!(
+            rendered.html,
+            r#"<div class="site-doc-band"><section class="breakout-test">Hero</section></div>"#
+        );
+    }
+
+    #[test]
+    fn trailing_container_escape_leaves_no_empty_segment() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-trailing-breakout");
+        let registry = container_escape_test_registry();
+        let options = Options::empty();
+        let sanitizer = create_test_sanitizer();
+        let cache = create_test_cache(&runtime_paths);
+
+        let rendered = render_markdown(
+            "After.\n\n((breakout))",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "landing",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(rendered.html.ends_with("</div>"));
+        assert_eq!(
+            rendered.html.matches("content-wrapper").count(),
+            1
+        );
+        assert_eq!(
+            rendered.html.matches("<div").count(),
+            rendered.html.matches("</div>").count()
+        );
+    }
+
+    fn hero_escape_test_registry() -> ShortcodeRegistry {
+        let mut registry = ShortcodeRegistry::new();
+        registry.register(
+            "hero-img",
+            |_shortcode, _ctx| Ok(r#"<div class="sc-hero-img">Hero</div>"#.to_string()),
+            ShortcodeType {
+                dynamic: false,
+                container_escape: true,
+            },
+        );
+        registry
+    }
+
+    #[test]
+    fn hero_shortcode_sets_has_hero_flag() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-hero-flag");
+        let registry = hero_escape_test_registry();
+        let options = Options::empty();
+        let sanitizer = create_test_sanitizer();
+        let cache = create_test_cache(&runtime_paths);
+
+        let rendered = render_markdown(
+            "((hero-img src=\"a.png\"))\n\n# Title\n\n## Alpha\n\n## Beta",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "landing",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(rendered.render_state.has_hero);
+        assert!(!rendered.render_state.document_structure.is_empty());
     }
 
     #[test]
@@ -985,7 +1326,7 @@ Some text after the videos."#;
             &sanitizer,
             &cache,
             "test.md",
-            256,
+            ContentWidthMode::Auto,
         );
         let html = rendered.html;
 
@@ -1013,7 +1354,7 @@ Some text after the videos."#;
         assert!(html.contains("Your browser does not support the video") && html.contains("tag."));
 
         // Check that regular markdown is still processed
-        assert!(html.contains("<h1>Video Test</h1>"));
+        assert!(html.contains(r#"<h1 id="video-test">Video Test</h1>"#));
         assert!(html.contains("Some text after the videos."));
         assert!(!rendered.contains_dynamic_shortcodes);
     }
@@ -1040,7 +1381,7 @@ After."#;
             &sanitizer,
             &cache,
             "test.md",
-            256,
+            ContentWidthMode::Auto,
         );
 
         let html = rendered.html;
@@ -1073,7 +1414,7 @@ Some text after."#;
             &sanitizer,
             &cache,
             "test.md",
-            256,
+            ContentWidthMode::Auto,
         );
         let html = rendered.html;
 
@@ -1113,7 +1454,7 @@ Some text after the cards."#;
             &sanitizer,
             &cache,
             "test.md",
-            256,
+            ContentWidthMode::Auto,
         );
         let html = rendered.html;
 
@@ -1140,7 +1481,7 @@ Some text after the cards."#;
         assert!(html.contains("@media (max-width: 768px)"));
 
         // Check that regular markdown is still processed
-        assert!(html.contains("<h1>Link Card Test</h1>"));
+        assert!(html.contains(r#"<h1 id="link-card-test">Link Card Test</h1>"#));
         assert!(html.contains("Some text after the cards."));
         assert!(!rendered.contains_dynamic_shortcodes);
     }
@@ -1174,7 +1515,7 @@ Some text after."#;
             &sanitizer,
             &cache,
             "test.md",
-            256,
+            ContentWidthMode::Auto,
         );
         let html = rendered.html;
 
@@ -1234,7 +1575,7 @@ End of content with ~~strikethrough~~."#;
             &sanitizer,
             &cache,
             "test.md",
-            256,
+            ContentWidthMode::Auto,
         );
         let html = rendered.html;
 
@@ -1255,8 +1596,8 @@ End of content with ~~strikethrough~~."#;
         assert!(html.contains(r#"<p class="title">Second Link</p>"#));
 
         // Check regular markdown
-        assert!(html.contains("<h1>Mixed Content Test</h1>"));
-        assert!(html.contains("<h2>Video Section</h2>"));
+        assert!(html.contains(r#"<h1 id="mixed-content-test">Mixed Content Test</h1>"#));
+        assert!(html.contains(r#"<h2 id="video-section">Video Section</h2>"#));
         assert!(html.contains("<strong>bold text</strong>"));
         assert!(html.contains("<table>"));
         assert!(html.contains("<th>Feature</th>"));
@@ -1277,6 +1618,281 @@ End of content with ~~strikethrough~~."#;
         assert!(table_pos < second_card_pos);
         assert!(second_card_pos < second_video_pos);
         assert!(!rendered.contains_dynamic_shortcodes);
+    }
+
+    #[test]
+    fn displayed_headings_receive_unique_generated_ids() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-heading-ids");
+        let registry = create_default_registry();
+        let options = Options::empty();
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+
+        let rendered = render_markdown(
+            "# Page Title\n\n## Repeat!\n\nText.\n\n## Repeat\n\n### Child\n\n### Child",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(
+            rendered
+                .html
+                .contains(r#"<h1 id="page-title">Page Title</h1>"#)
+        );
+        assert!(rendered.html.contains(r#"<h2 id="repeat">Repeat!</h2>"#));
+        assert!(rendered.html.contains(r#"<h2 id="repeat-2">Repeat</h2>"#));
+        assert!(rendered.html.contains(r#"<h3 id="child">Child</h3>"#));
+        assert!(rendered.html.contains(r#"<h3 id="child-2">Child</h3>"#));
+        assert_eq!(rendered.render_state.document_structure.entries.len(), 4);
+    }
+
+    #[test]
+    fn heading_structure_labels_are_plain_text_for_markup_rendering() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-heading-labels");
+        let registry = create_default_registry();
+        let options = Options::empty();
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+
+        let rendered = render_markdown(
+            "## A & `B`\n\n## <span>C</span>\n",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Auto,
+        );
+
+        let labels: Vec<_> = rendered
+            .render_state
+            .document_structure
+            .entries
+            .iter()
+            .map(|entry| entry.label.as_str())
+            .collect();
+        assert_eq!(labels, vec!["A & B", "C"]);
+    }
+
+    #[test]
+    fn empty_markdown_headings_do_not_invent_section_entries_or_shift_ids() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-empty-heading-labels");
+        let registry = create_default_registry();
+        let options = Options::empty();
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+
+        let rendered = render_markdown(
+            "# Page\n\n##\n\n## Alpha\n\n###\n\n## Beta\n\n### Detail",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(!rendered.html.contains(r#"id="section"#));
+        assert!(rendered.html.contains("<h2></h2>"));
+        assert!(rendered.html.contains("<h3></h3>"));
+        assert!(rendered.html.contains(r#"<h2 id="alpha">Alpha</h2>"#));
+        assert!(rendered.html.contains(r#"<h2 id="beta">Beta</h2>"#));
+        assert!(rendered.html.contains(r#"<h3 id="detail">Detail</h3>"#));
+        assert_eq!(
+            structure_entries(&rendered),
+            vec![
+                ("alpha".to_string(), "Alpha".to_string(), 1),
+                ("beta".to_string(), "Beta".to_string(), 1),
+                ("detail".to_string(), "Detail".to_string(), 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn shortcode_output_headings_do_not_affect_document_structure() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-shortcode-heading-opaque");
+        let registry = heading_html_shortcode_registry();
+        let options = Options::empty();
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+
+        let rendered = render_markdown(
+            "# Page\n\n## Markdown One\n\n((heading-html))\n\n## Markdown Two\n\n### Markdown Detail",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(rendered.html.contains("<h1>Shortcode H1</h1>"));
+        assert!(rendered.html.contains("<h6>Shortcode H6</h6>"));
+        assert_eq!(
+            structure_entries(&rendered),
+            vec![
+                ("markdown-one".to_string(), "Markdown One".to_string(), 1),
+                ("markdown-two".to_string(), "Markdown Two".to_string(), 1),
+                (
+                    "markdown-detail".to_string(),
+                    "Markdown Detail".to_string(),
+                    2,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn raw_html_headings_do_not_affect_document_structure() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-raw-heading-opaque");
+        let registry = create_default_registry();
+        let options = Options::empty();
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+
+        let rendered = render_markdown(
+            r#"# Page
+
+<h1>Raw H1</h1>
+<h2>Raw H2</h2>
+<h3>Raw H3</h3>
+<h4>Raw H4</h4>
+<h5>Raw H5</h5>
+<h6>Raw H6</h6>
+
+## Markdown One
+
+## Markdown Two
+
+### Markdown Detail"#,
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(rendered.html.contains("<h1>Raw H1</h1>"));
+        assert!(rendered.html.contains("<h6>Raw H6</h6>"));
+        assert_eq!(
+            structure_entries(&rendered),
+            vec![
+                ("markdown-one".to_string(), "Markdown One".to_string(), 1),
+                ("markdown-two".to_string(), "Markdown Two".to_string(), 1),
+                (
+                    "markdown-detail".to_string(),
+                    "Markdown Detail".to_string(),
+                    2,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn markdown_headings_retain_selected_levels_labels_and_anchors() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-heading-structure-levels");
+        let registry = create_default_registry();
+        let options = Options::empty();
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+
+        let rendered = render_markdown(
+            "# Page\n\n## One\n\n### Detail A\n\n#### Deep\n\n##### Deeper\n\n###### Deepest\n\n## Two\n\n### Detail B",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(rendered.html.contains(r#"<h1 id="page">Page</h1>"#));
+        assert!(rendered.html.contains(r#"<h6 id="deepest">Deepest</h6>"#));
+        assert_eq!(
+            structure_entries(&rendered),
+            vec![
+                ("one".to_string(), "One".to_string(), 1),
+                ("detail-a".to_string(), "Detail A".to_string(), 2),
+                ("two".to_string(), "Two".to_string(), 1),
+                ("detail-b".to_string(), "Detail B".to_string(), 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn mixed_markdown_shortcode_and_raw_html_headings_keep_markdown_structure_only() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-mixed-heading-sources");
+        let registry = heading_html_shortcode_registry();
+        let options = Options::empty();
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+
+        let rendered = render_markdown(
+            r#"# Page
+
+<h2>Raw Alpha</h2>
+
+## Alpha
+
+((heading-html))
+
+<h3>Raw Detail</h3>
+
+## Beta"#,
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(rendered.html.contains("<h2>Raw Alpha</h2>"));
+        assert!(rendered.html.contains("<h2>Shortcode H2</h2>"));
+        assert_eq!(
+            structure_entries(&rendered),
+            vec![
+                ("alpha".to_string(), "Alpha".to_string(), 1),
+                ("beta".to_string(), "Beta".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn multiline_shortcode_attribute_hashes_do_not_create_or_shift_headings() {
+        let (_fixture, runtime_paths) =
+            create_fixture_paths("markdown-multiline-shortcode-heading");
+        let registry = heading_html_shortcode_registry();
+        let options = Options::empty();
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+
+        let rendered = render_markdown(
+            "# Page\n\n## Alpha\n\n((opaque title=\"Intro\n# Phantom One\n## Phantom Two\"))\n\n## Beta\n\n### Detail",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(rendered.html.contains("Phantom One"));
+        assert!(!rendered.html.contains(r#"<h1 id="phantom-one">"#));
+        assert!(!rendered.html.contains(r#"<h2 id="phantom-two">"#));
+        assert_eq!(
+            structure_entries(&rendered),
+            vec![
+                ("alpha".to_string(), "Alpha".to_string(), 1),
+                ("beta".to_string(), "Beta".to_string(), 1),
+                ("detail".to_string(), "Detail".to_string(), 2),
+            ]
+        );
     }
 
     #[test]
@@ -1319,7 +1935,7 @@ JavaScript in user content: <a href="javascript:alert('bad')">bad link</a>"#;
             &sanitizer,
             &cache,
             "test.md",
-            256,
+            ContentWidthMode::Auto,
         );
         let html = rendered.html;
 
@@ -1339,7 +1955,7 @@ JavaScript in user content: <a href="javascript:alert('bad')">bad link</a>"#;
         assert!(html.contains(r#"<p class="title">Safe Link</p>"#));
 
         // Check that safe user content is preserved
-        assert!(html.contains("<h1>Security Test</h1>"));
+        assert!(html.contains(r#"<h1 id="security-test">Security Test</h1>"#));
         assert!(html.contains("User content with dangerous HTML"));
         assert!(html.contains("More user content"));
         assert!(html.contains(r#"<figure style="float:right"#));
@@ -1378,12 +1994,12 @@ Just regular **markdown** content.
             &sanitizer,
             &cache,
             "test.md",
-            256,
+            ContentWidthMode::Auto,
         );
         let html = rendered.html;
 
         // Check that regular markdown is processed
-        assert!(html.contains("<h1>No Shortcodes</h1>"));
+        assert!(html.contains(r#"<h1 id="no-shortcodes">No Shortcodes</h1>"#));
         assert!(html.contains("<strong>markdown</strong>"));
         assert!(html.contains("<ul>"));
         assert!(html.contains("<li>Item 1</li>"));
@@ -1428,6 +2044,9 @@ font-body-family "Test Font", sans-serif
             nav_title: None,
             nav_parent_id: None,
             nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
             original_filename: Some("about.md".to_string()),
             theme: Some("blue".to_string()),
         };
@@ -1467,32 +2086,40 @@ font-body-family "Test Font", sans-serif
             &sanitizer,
             &cache,
             "about",
-            256,
+            ContentWidthMode::Auto,
         );
         let navigation =
             generate_navigation_with_user(&cache, None, config.navigation.max_dropdown_items);
         let release_tracker = ReleaseTracker::new();
         let templates = MiniJinjaEngine::new();
+        let settings = config
+            .settings
+            .normalized_with_legacy_app(Some(&config.app))
+            .expect("normalized runtime settings");
+        let runtime_settings = nop_config::RuntimeSettings::new(&settings);
 
         let content_id_hex_value = content_id_hex(content_id);
         let render_ctx = PageRenderContext {
             config: &config,
+            runtime_settings: &runtime_settings,
             runtime_paths: &runtime_paths,
             theme,
             release_tracker: &release_tracker,
             template_engine: &templates,
+            app_version: "Release 1",
+            show_admin_version_footer: false,
         };
         let html_page = runtime.block_on(generate_html_page_with_user(
             title,
             &rendered.html,
             &navigation,
-            rendered.use_compact_width,
+            &rendered.render_state,
             &content_id_hex_value,
             &render_ctx,
         ));
 
         assert!(html_page.contains("<title>About NoPressure</title>"));
-        assert!(html_page.contains("<h1>About NoPressure</h1>"));
+        assert!(html_page.contains(r#"<h1 id="about-nopressure">About NoPressure</h1>"#));
         assert!(html_page.contains("/builtin/theme-preset.css?v="));
         assert!(html_page.contains("--color-background-primary-light: #3366ff;"));
         assert!(html_page.contains("Test App"));
@@ -1501,10 +2128,239 @@ font-body-family "Test Font", sans-serif
             "data-site-content-id=\"{}\"",
             content_id_hex_value
         )));
+        assert!(!html_page.contains("data-site-doc-structure"));
+        assert!(!html_page.contains("data-site-doc-structure-menu"));
+        assert!(html_page.contains(r#"class="doc-layout""#));
         assert!(!html_page.contains("{title}"));
         assert!(!html_page.contains("{content}"));
         assert!(!html_page.contains("{nav_html}"));
         assert!(!html_page.contains("{user_nav_html}"));
+    }
+
+    #[test]
+    fn disabled_navbar_omits_narrow_structure_menu_but_keeps_desktop_panel() {
+        let fixture = TestFixtureRoot::new_unique("markdown-disabled-navbar-structure")
+            .expect("fixture root");
+        fixture.init_runtime_layout().expect("layout init");
+        let runtime_paths = fixture.runtime_paths().expect("runtime paths");
+        let config = create_test_config();
+        let settings = config
+            .settings
+            .normalized_with_legacy_app(Some(&config.app))
+            .expect("normalized runtime settings");
+        let runtime_settings = nop_config::RuntimeSettings::new(&settings);
+        let release_tracker = ReleaseTracker::new();
+        let templates = MiniJinjaEngine::new();
+        let mut render_state = PageRenderState::new(true, false, ContentWidthMode::Auto);
+        render_state.document_structure = DocumentStructure {
+            entries: vec![DocumentStructureEntry {
+                id: "section".to_string(),
+                label: "Section".to_string(),
+                level: 1,
+            }],
+            title: None,
+        };
+        let render_ctx = PageRenderContext {
+            config: &config,
+            runtime_settings: &runtime_settings,
+            runtime_paths: &runtime_paths,
+            theme: None,
+            release_tracker: &release_tracker,
+            template_engine: &templates,
+            app_version: "Release 1",
+            show_admin_version_footer: false,
+        };
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+
+        let html_page = runtime.block_on(generate_html_page_with_user(
+            "Disabled Navbar",
+            r#"<h2 id="section">Section</h2>"#,
+            &[],
+            &render_state,
+            "0000000000000001",
+            &render_ctx,
+        ));
+
+        assert!(!html_page.contains("data-site-navbar"));
+        assert!(html_page.contains("data-site-doc-structure"));
+        assert!(html_page.contains(r##"href="#section""##));
+        assert!(!html_page.contains("data-site-doc-structure-menu"));
+        assert!(!html_page.contains("data-site-doc-structure-menu-toggle"));
+    }
+
+    #[test]
+    fn hero_presence_omits_panel_but_keeps_drawer_and_topbar() {
+        let fixture =
+            TestFixtureRoot::new_unique("markdown-hero-structure").expect("fixture root");
+        fixture.init_runtime_layout().expect("layout init");
+        let runtime_paths = fixture.runtime_paths().expect("runtime paths");
+        let config = create_test_config();
+        let settings = config
+            .settings
+            .normalized_with_legacy_app(Some(&config.app))
+            .expect("normalized runtime settings");
+        let runtime_settings = nop_config::RuntimeSettings::new(&settings);
+        let release_tracker = ReleaseTracker::new();
+        let templates = MiniJinjaEngine::new();
+        let mut render_state = PageRenderState::new(false, false, ContentWidthMode::Auto);
+        render_state.has_hero = true;
+        render_state.document_structure = DocumentStructure {
+            entries: vec![DocumentStructureEntry {
+                id: "section".to_string(),
+                label: "Section".to_string(),
+                level: 1,
+            }],
+            title: None,
+        };
+        let render_ctx = PageRenderContext {
+            config: &config,
+            runtime_settings: &runtime_settings,
+            runtime_paths: &runtime_paths,
+            theme: None,
+            release_tracker: &release_tracker,
+            template_engine: &templates,
+            app_version: "Release 1",
+            show_admin_version_footer: false,
+        };
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+
+        let html_page = runtime.block_on(generate_html_page_with_user(
+            "Hero Page",
+            r#"<h2 id="section">Section</h2>"#,
+            &[],
+            &render_state,
+            "0000000000000001",
+            &render_ctx,
+        ));
+
+        assert!(html_page.contains("data-site-navbar"));
+        assert!(!html_page.contains("<aside"));
+        assert!(html_page.contains("data-site-structure-drawer"));
+        assert!(html_page.contains("data-site-topbar"));
+        assert!(html_page.contains(r##"href="#section""##));
+    }
+
+    #[test]
+    fn disabled_floating_nav_omits_structure_panel_and_mobile_links() {
+        let fixture =
+            TestFixtureRoot::new_unique("markdown-disabled-floating-nav").expect("fixture root");
+        fixture.init_runtime_layout().expect("layout init");
+        let runtime_paths = fixture.runtime_paths().expect("runtime paths");
+        let config = create_test_config();
+        let settings = config
+            .settings
+            .normalized_with_legacy_app(Some(&config.app))
+            .expect("normalized runtime settings");
+        let runtime_settings = nop_config::RuntimeSettings::new(&settings);
+        let release_tracker = ReleaseTracker::new();
+        let templates = MiniJinjaEngine::new();
+        let mut render_state = PageRenderState::new(false, true, ContentWidthMode::Auto);
+        render_state.document_structure = DocumentStructure {
+            entries: vec![DocumentStructureEntry {
+                id: "section".to_string(),
+                label: "Section".to_string(),
+                level: 1,
+            }],
+            title: None,
+        };
+        let render_ctx = PageRenderContext {
+            config: &config,
+            runtime_settings: &runtime_settings,
+            runtime_paths: &runtime_paths,
+            theme: None,
+            release_tracker: &release_tracker,
+            template_engine: &templates,
+            app_version: "Release 1",
+            show_admin_version_footer: false,
+        };
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+
+        let html_page = runtime.block_on(generate_html_page_with_user(
+            "Disabled Floating Nav",
+            r#"<h2 id="section">Section</h2>"#,
+            &[],
+            &render_state,
+            "0000000000000001",
+            &render_ctx,
+        ));
+
+        assert!(html_page.contains("data-site-navbar"));
+        assert!(!html_page.contains("data-site-doc-structure"));
+        assert!(!html_page.contains("data-site-doc-structure-menu"));
+        assert!(!html_page.contains(r##"href="#section""##));
+    }
+
+    #[test]
+    fn navbar_omits_structure_menu_links() {
+        let fixture =
+            TestFixtureRoot::new_unique("markdown-navbar-structure-menu").expect("fixture root");
+        fixture.init_runtime_layout().expect("layout init");
+        let runtime_paths = fixture.runtime_paths().expect("runtime paths");
+        let config = create_test_config();
+        let settings = config
+            .settings
+            .normalized_with_legacy_app(Some(&config.app))
+            .expect("normalized runtime settings");
+        let runtime_settings = nop_config::RuntimeSettings::new(&settings);
+        let release_tracker = ReleaseTracker::new();
+        let templates = MiniJinjaEngine::new();
+        let mut render_state = PageRenderState::new(false, false, ContentWidthMode::Auto);
+        render_state.document_structure = DocumentStructure {
+            entries: vec![DocumentStructureEntry {
+                id: "section".to_string(),
+                label: "Section".to_string(),
+                level: 1,
+            }],
+            title: None,
+        };
+        let render_ctx = PageRenderContext {
+            config: &config,
+            runtime_settings: &runtime_settings,
+            runtime_paths: &runtime_paths,
+            theme: None,
+            release_tracker: &release_tracker,
+            template_engine: &templates,
+            app_version: "Release 1",
+            show_admin_version_footer: false,
+        };
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+
+        let html_page = runtime.block_on(generate_html_page_with_user(
+            "Navbar Structure",
+            r#"<h2 id="section">Section</h2>"#,
+            &[],
+            &render_state,
+            "0000000000000001",
+            &render_ctx,
+        ));
+
+        let mobile_menu_start = html_page
+            .find(r#"data-site-mobile-menu"#)
+            .expect("mobile menu");
+        let navbar_end = html_page[mobile_menu_start..]
+            .find("</nav>")
+            .map(|offset| mobile_menu_start + offset)
+            .expect("navbar end");
+
+        assert!(html_page.contains("data-site-doc-structure"));
+        assert!(html_page.contains(r##"data-site-doc-structure-link href="#section""##));
+        assert!(!html_page.contains("data-site-doc-structure-menu"));
+        assert!(!html_page.contains("data-site-doc-structure-menu-toggle"));
+        assert!(!html_page.contains("data-site-doc-structure-menu-panel"));
+        assert!(!html_page.contains(">Structure<"));
+        assert!(!html_page[mobile_menu_start..navbar_end].contains("data-site-doc-structure-link"));
     }
 
     fn make_paragraph(len: usize) -> String {
@@ -1512,60 +2368,62 @@ font-body-family "Test Font", sans-serif
     }
 
     #[test]
-    fn compact_width_defaults_when_all_short() {
-        let short = make_paragraph(10);
-        let markdown = format!("{short}\n\n{short}");
+    fn content_width_auto_stays_compact_for_long_paragraphs() {
+        let (_fixture, runtime_paths) = create_fixture_paths("content-width-auto");
+        let registry = create_default_registry();
         let options = Options::empty();
-        assert!(should_use_compact_width(&markdown, &options, 256));
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+        let rendered = render_markdown(
+            &make_paragraph(300),
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Auto,
+        );
+
+        assert!(rendered.render_state.use_compact_width);
     }
 
     #[test]
-    fn compact_width_skips_when_any_long() {
-        let short = make_paragraph(10);
-        let long = make_paragraph(300);
-        let markdown = format!("{short}\n\n{long}");
+    fn content_width_wide_overrides_short_paragraphs() {
+        let (_fixture, runtime_paths) = create_fixture_paths("content-width-wide");
+        let registry = create_default_registry();
         let options = Options::empty();
-        assert!(!should_use_compact_width(&markdown, &options, 256));
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+        let rendered = render_markdown(
+            &make_paragraph(10),
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Wide,
+        );
+
+        assert!(!rendered.render_state.use_compact_width);
     }
 
     #[test]
-    fn compact_width_disabled_when_threshold_zero() {
-        let short = make_paragraph(10);
-        let markdown = format!("{short}\n\n{short}");
+    fn content_width_narrow_overrides_long_paragraphs() {
+        let (_fixture, runtime_paths) = create_fixture_paths("content-width-narrow");
+        let registry = create_default_registry();
         let options = Options::empty();
-        assert!(!should_use_compact_width(&markdown, &options, 0));
-    }
+        let cache = create_test_cache(&runtime_paths);
+        let sanitizer = create_test_sanitizer();
+        let rendered = render_markdown(
+            &make_paragraph(300),
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            ContentWidthMode::Narrow,
+        );
 
-    #[test]
-    fn compact_width_counts_tight_list_items() {
-        let short = make_paragraph(10);
-        let markdown = format!("- {short}\n- {short}");
-        let options = Options::empty();
-        assert!(should_use_compact_width(&markdown, &options, 256));
-    }
-
-    #[test]
-    fn compact_width_skips_tight_list_items_when_any_long() {
-        let short = make_paragraph(10);
-        let long = make_paragraph(300);
-        let markdown = format!("- {short}\n- {long}\n- {long}");
-        let options = Options::empty();
-        assert!(!should_use_compact_width(&markdown, &options, 256));
-    }
-
-    #[test]
-    fn compact_width_ignores_shortcode_placeholders() {
-        let placeholder = format!("SHORTCODE_HASH_{}", "a".repeat(128));
-        let markdown = format!("{placeholder} {placeholder} {placeholder}");
-        let options = Options::empty();
-        assert!(should_use_compact_width(&markdown, &options, 256));
-    }
-
-    #[test]
-    fn compact_width_ignores_image_only_paragraphs() {
-        let short = make_paragraph(10);
-        let markdown = format!("![alt](/id/abcdef)\n\n{short}\n\n{short}");
-        let options = Options::empty();
-        assert!(should_use_compact_width(&markdown, &options, 256));
+        assert!(rendered.render_state.use_compact_width);
     }
 }

@@ -63,6 +63,16 @@ Notes:
 - `system logging set` requires both `--max-size-mb` and `--max-files`, and both must be
   numeric.
 
+#### settings (alias: `cfg`)
+
+- `settings show`
+- `settings website-title set --title <title>`
+- `settings website-title clear`
+
+Notes:
+- Website Title is persisted in `config.yaml` under `settings.website_title`.
+- When Website Title is set, public browser titles render as `<page title> | <website title>`.
+
 #### user (alias: `u`)
 
 - `user add <email> --name <display-name> [--roles <role> ...] [--password <password>]`
@@ -110,8 +120,8 @@ Notes:
 
 #### content (alias: `c`)
 
-- `content store [--alias <alias>] [--title <title>] [--tag <tag> ...] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] <file|->`
-- `content change <id> [--alias <alias>] [--title <title>] [--tag <tag> ...] [--clear-tags] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [<file|->]`
+- `content store [--alias <alias>] [--title <title>] [--tag <tag> ...] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar] <file|->`
+- `content change <id> [--alias <alias>] [--title <title>] [--tag <tag> ...] [--clear-tags] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar|--enable-navbar] [<file|->]`
 - `content stream <id> <file|->`
 - `content delete <id>`
 
@@ -120,10 +130,16 @@ Notes:
 - `content store` requires a file argument and fails if the filename has no extension.
 - `content store` requires `--title` for markdown content.
 - `content store` derives MIME on the server; no CLI flag is provided for it.
+- `content store` with an alias that already resolves to non-markdown content creates a new version
+  under the existing content ID. If the alias resolves to markdown content, use `content change`
+  instead.
 - When `content store` reads from standard input, it uses `cli-store-YYYY-MM-DD-HH-MM-SS.<ext>` as the generated filename (extension derived from the detected MIME type; `application/octet-stream` uses `.bin`).
 - `--tag` may be repeated to apply multiple tags.
 - `--clear-tags` cannot be combined with `--tag`.
-- `--theme`, `--nav-title`, `--nav-parent`, and `--nav-order` apply to markdown content only.
+- `--theme`, `--nav-title`, `--nav-parent`, `--nav-order`, `--disable-navbar`, and
+  `--enable-navbar` apply to markdown content only.
+- `--disable-navbar` omits the public navbar on that page. `content change --enable-navbar` clears
+  the flag.
 - `content change` only updates metadata for non-markdown files; markdown body updates use the optional file/stdin input. Omit the file argument for metadata-only changes.
 - `content change` file input must be a markdown file (`.md`/`.markdown`) and cannot be empty.
 - `content stream` returns markdown content inline and streams binary content bytes via `content.read` with `stream_content` enabled.
@@ -136,6 +152,9 @@ nop -F -C ./runtime
 
 # Ping the daemon
 nop -C ./runtime system ping
+
+# Set the public Website Title suffix
+nop -C ./runtime settings website-title set --title "Example Site"
 
 # Add a local user and set their password
 nop -C ./runtime user add alice@example.com --name "Alice" --roles admin

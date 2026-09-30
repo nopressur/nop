@@ -64,7 +64,7 @@ pub(super) async fn password_email(
 
     let ip = match require_client_ip(&req, &config, "Login email") {
         Ok(ip) => ip,
-        Err(response) => return Ok(response),
+        Err(response) => return Ok(*response),
     };
     let _session = match login_state
         .login_sessions
@@ -137,7 +137,7 @@ pub(super) async fn password_login(
 
     let ip = match require_client_ip(&req, &config, "Login") {
         Ok(ip) => ip,
-        Err(response) => return Ok(response),
+        Err(response) => return Ok(*response),
     };
     let session = match login_state
         .login_sessions

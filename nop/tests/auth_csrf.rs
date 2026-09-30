@@ -28,15 +28,34 @@ type HmacSha256 = Hmac<Sha256>;
 
 const TEST_PEER_ADDR: &str = "127.0.0.1:1234";
 const LOGIN_CONFIG_MARKER: &str = "window.nopLoginConfig = ";
+const LOGIN_CONFIG_ATTRIBUTE: &str = r#"data-login-config=""#;
 
 fn extract_login_config(body: &[u8]) -> Value {
     let text = std::str::from_utf8(body).expect("login html");
+    if let Some(start) = text.find(LOGIN_CONFIG_ATTRIBUTE) {
+        let start = start + LOGIN_CONFIG_ATTRIBUTE.len();
+        let remainder = &text[start..];
+        let end = remainder.find('"').expect("login config attribute end");
+        let json = decode_login_config_attribute(&remainder[..end]);
+        return serde_json::from_str(&json).expect("login config json");
+    }
+
     let start =
         text.find(LOGIN_CONFIG_MARKER).expect("login config marker") + LOGIN_CONFIG_MARKER.len();
     let remainder = &text[start..];
     let end = remainder.find(';').expect("login config end");
-    let json = &remainder[..end].trim();
+    let json = remainder[..end].trim();
     serde_json::from_str(json).expect("login config json")
+}
+
+fn decode_login_config_attribute(value: &str) -> String {
+    value
+        .replace("&quot;", "\"")
+        .replace("&#x2f;", "/")
+        .replace("&#x27;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
 }
 
 fn hs256_token(claims: &Claims, secret: &str) -> String {

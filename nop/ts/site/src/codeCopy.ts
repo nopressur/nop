@@ -36,7 +36,7 @@ async function copyText(value: string): Promise<boolean> {
   textarea.style.top = '0';
   textarea.style.left = '0';
   textarea.style.opacity = '0';
-  document.body.append(textarea);
+  document.body.appendChild(textarea);
   textarea.select();
 
   let ok = false;
@@ -45,8 +45,14 @@ async function copyText(value: string): Promise<boolean> {
   } catch {
     ok = false;
   }
-  textarea.remove();
+  if (textarea.parentNode) {
+    textarea.parentNode.removeChild(textarea);
+  }
   return ok;
+}
+
+function withoutTerminalLineBreaks(value: string): string {
+  return value.replace(/(?:\r\n|\r|\n)+$/, '');
 }
 
 function findCodeForButton(button: HTMLElement): HTMLElement | null {
@@ -57,9 +63,14 @@ function findCodeForButton(button: HTMLElement): HTMLElement | null {
   return wrapper.querySelector<HTMLElement>(SELECTORS.code);
 }
 
-function setButtonLabel(button: HTMLButtonElement, label: string) {
-  button.textContent = label;
+const DEFAULT_LABEL = 'Copy code block';
+
+function setButtonFeedback(button: HTMLButtonElement, label: string, status: string) {
   button.setAttribute('aria-label', label);
+  const statusNode = button.querySelector('[data-site-code-copy-status="true"]');
+  if (statusNode) {
+    statusNode.textContent = status;
+  }
 }
 
 export function initCodeCopyButtons(root: ParentNode = document) {
@@ -78,21 +89,20 @@ export function initCodeCopyButtons(root: ParentNode = document) {
       }
 
       const code = findCodeForButton(button);
-      const text = code?.textContent ?? '';
+      const text = withoutTerminalLineBreaks(code?.textContent ?? '');
       if (!text.trim()) {
         return;
       }
 
       const ok = await copyText(text);
       if (!ok) {
-        setButtonLabel(button, 'Failed');
-        resetTimer = window.setTimeout(() => setButtonLabel(button, 'Copy'), 2000);
+        setButtonFeedback(button, 'Copy code block failed', 'Failed');
+        resetTimer = window.setTimeout(() => setButtonFeedback(button, DEFAULT_LABEL, ''), 2000);
         return;
       }
 
-      setButtonLabel(button, 'Copied');
-      resetTimer = window.setTimeout(() => setButtonLabel(button, 'Copy'), 2000);
+      setButtonFeedback(button, 'Code copied to clipboard', 'Copied');
+      resetTimer = window.setTimeout(() => setButtonFeedback(button, DEFAULT_LABEL, ''), 2000);
     });
   });
 }
-

@@ -22,6 +22,7 @@ runtime/
 **/__pycache__/
 
 node_modules/
+nop/ts/login/argon2-asm/build/
 tests/playwright/.cache/
 tests/playwright/test-results/
 tests/playwright/report/

@@ -29,6 +29,9 @@ describe("content protocol decode", () => {
       itemWriter.writeI32(3);
       itemWriter.writeString("intro.md");
       itemWriter.writeBool(true);
+      itemWriter.writeBool(false);
+      itemWriter.writeString("wide");
+      itemWriter.writeBool(true);
     });
 
     const decoded = decodeContentListResponse(writer.toUint8Array());
@@ -38,6 +41,9 @@ describe("content protocol decode", () => {
     expect(decoded.items[0].navParentId).toBe("parent-id");
     expect(decoded.items[0].navOrder).toBe(3);
     expect(decoded.items[0].originalFilename).toBe("intro.md");
+    expect(decoded.items[0].disableNavbar).toBe(true);
+    expect(decoded.items[0].disableFloatingNav).toBe(false);
+    expect(decoded.items[0].contentWidth).toBe("wide");
     expect(decoded.items[0].isMarkdown).toBe(true);
   });
 
@@ -65,6 +71,9 @@ describe("content protocol decode", () => {
     writer.writeI32(2);
     writer.writeString("setup.md");
     writer.writeString("default");
+    writer.writeBool(true);
+    writer.writeBool(false);
+    writer.writeString("narrow");
     writer.writeString("# Setup\n");
 
     const decoded = decodeContentReadResponse(writer.toUint8Array());
@@ -73,6 +82,9 @@ describe("content protocol decode", () => {
     expect(decoded.navOrder).toBe(2);
     expect(decoded.originalFilename).toBe("setup.md");
     expect(decoded.theme).toBe("default");
+    expect(decoded.disableNavbar).toBe(true);
+    expect(decoded.disableFloatingNav).toBe(false);
+    expect(decoded.contentWidth).toBe("narrow");
     expect(decoded.content).toBe("# Setup\n");
     expect(decoded.streamId).toBeNull();
     expect(decoded.chunkBytes).toBeNull();

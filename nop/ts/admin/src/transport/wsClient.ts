@@ -12,8 +12,9 @@ import {
   FRAME_ERROR,
   FRAME_REQUEST,
   FRAME_RESPONSE,
-  STREAM_FLAG_FINAL,
   FRAME_STREAM_CHUNK,
+  STREAM_FLAG_COMPRESSED,
+  STREAM_FLAG_FINAL,
 } from "../protocol/ws-protocol";
 import type {
   AckFrame,
@@ -40,16 +41,41 @@ import { WsCoordinator } from "./ws-coordinator";
 const AUTH_TIMEOUT_MS = 6000;
 const REQUEST_TIMEOUT_MS = 10000;
 const STREAM_ACK_TIMEOUT_MS = 15000;
+const STREAM_RESPONSE_TIMEOUT_MS = 30000;
+
+export type StreamMetadata = {
+  streamId: number | null;
+  chunkBytes: number | null;
+  sizeBytes: number | null;
+};
+
+export type StreamedResponse = {
+  response: ResponseFrame;
+  streamBytes: Uint8Array | null;
+};
 
 type PendingRequest = {
-  resolve: (frame: ResponseFrame) => void;
+  resolve: (value: ResponseFrame | StreamedResponse) => void;
   reject: (error: Error) => void;
   timeoutId: number;
+  streamMetadata?: (frame: ResponseFrame) => StreamMetadata | null;
 };
 
 type PendingAck = {
   resolve: () => void;
   reject: (error: Error) => void;
+  timeoutId: number;
+};
+
+type ActiveInboundStream = {
+  workflowId: number;
+  response: ResponseFrame;
+  streamId: number;
+  chunkBytes: number;
+  sizeBytes: number;
+  expectedSeq: number;
+  receivedBytes: number;
+  chunks: Uint8Array[];
   timeoutId: number;
 };
 
@@ -60,6 +86,7 @@ export class AdminWsClient {
   private workflowCounter = new WorkflowCounter();
   private pending = new Map<number, PendingRequest>();
   private pendingAcks = new Map<string, PendingAck>();
+  private inboundStreams = new Map<number, ActiveInboundStream>();
   private authResolve?: () => void;
   private authReject?: (error: Error) => void;
   private authPromise: Promise<void>;
@@ -110,8 +137,50 @@ export class AdminWsClient {
         reject(new Error("Request timed out"));
       }, REQUEST_TIMEOUT_MS);
 
-      this.pending.set(workflowId, { resolve, reject, timeoutId });
+      this.pending.set(workflowId, {
+        resolve: (value) => resolve(value as ResponseFrame),
+        reject,
+        timeoutId,
+      });
       logAdminInfo(LOG_SCOPE, "Request sent", { workflowId, domainId, actionId });
+      this.coordinator.send(frame);
+    });
+  }
+
+  async requestWithStream(
+    domainId: number,
+    actionId: number,
+    payload: Uint8Array,
+    streamMetadata: (frame: ResponseFrame) => StreamMetadata | null,
+  ): Promise<StreamedResponse> {
+    await this.connect();
+
+    const workflowId = this.workflowCounter.next();
+    const frame: RequestFrame = {
+      frameType: FRAME_REQUEST,
+      domainId,
+      actionId,
+      workflowId,
+      payload,
+    };
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setBrowserTimeout(() => {
+        this.pending.delete(workflowId);
+        reject(new Error("Request timed out"));
+      }, REQUEST_TIMEOUT_MS);
+
+      this.pending.set(workflowId, {
+        resolve: resolve as (value: ResponseFrame | StreamedResponse) => void,
+        reject,
+        timeoutId,
+        streamMetadata,
+      });
+      logAdminInfo(LOG_SCOPE, "Stream-capable request sent", {
+        workflowId,
+        domainId,
+        actionId,
+      });
       this.coordinator.send(frame);
     });
   }
@@ -197,7 +266,7 @@ export class AdminWsClient {
         this.handleAck(frame);
         return;
       case FRAME_STREAM_CHUNK:
-        this.ackStreamChunk(frame);
+        this.handleStreamChunk(frame);
         return;
       default:
         logAdminWarn(LOG_SCOPE, "Unexpected frame", frame);
@@ -214,12 +283,12 @@ export class AdminWsClient {
       });
       return;
     }
-    clearBrowserTimeout(pending.timeoutId);
-    this.pending.delete(frame.workflowId);
     if (
       frame.domainId === SYSTEM_DOMAIN_ID &&
       frame.actionId === SYSTEM_ACTION_PONG_ERROR
     ) {
+      clearBrowserTimeout(pending.timeoutId);
+      this.pending.delete(frame.workflowId);
       let message = "Request failed";
       try {
         message = decodeMessageResponse(frame.payload).message;
@@ -229,6 +298,31 @@ export class AdminWsClient {
       pending.reject(new Error(message));
       return;
     }
+    if (pending.streamMetadata) {
+      let metadata: StreamMetadata | null;
+      try {
+        metadata = pending.streamMetadata(frame);
+      } catch (error) {
+        clearBrowserTimeout(pending.timeoutId);
+        this.pending.delete(frame.workflowId);
+        pending.reject(
+          error instanceof Error
+            ? error
+            : new Error("Failed to decode stream metadata"),
+        );
+        return;
+      }
+      if (metadata?.streamId !== null && metadata?.streamId !== undefined) {
+        this.registerInboundStream(frame, pending, metadata);
+        return;
+      }
+      clearBrowserTimeout(pending.timeoutId);
+      this.pending.delete(frame.workflowId);
+      pending.resolve({ response: frame, streamBytes: null });
+      return;
+    }
+    clearBrowserTimeout(pending.timeoutId);
+    this.pending.delete(frame.workflowId);
     logAdminInfo(LOG_SCOPE, "Response received", {
       workflowId: frame.workflowId,
       actionId: frame.actionId,
@@ -238,6 +332,10 @@ export class AdminWsClient {
 
   private failAll(message: string): void {
     const shouldNotify = this.pending.size > 0 || !this.authCompleted;
+    for (const stream of this.inboundStreams.values()) {
+      clearBrowserTimeout(stream.timeoutId);
+    }
+    this.inboundStreams.clear();
     for (const pending of this.pending.values()) {
       clearBrowserTimeout(pending.timeoutId);
       pending.reject(new Error(message));
@@ -253,6 +351,107 @@ export class AdminWsClient {
     }
   }
 
+  private registerInboundStream(
+    frame: ResponseFrame,
+    pending: PendingRequest,
+    metadata: StreamMetadata,
+  ): void {
+    const { streamId, chunkBytes, sizeBytes } = metadata;
+    if (
+      streamId === null ||
+      streamId === undefined ||
+      chunkBytes === null ||
+      chunkBytes === undefined ||
+      sizeBytes === null ||
+      sizeBytes === undefined
+    ) {
+      clearBrowserTimeout(pending.timeoutId);
+      this.pending.delete(frame.workflowId);
+      pending.reject(new Error("Incomplete stream metadata"));
+      return;
+    }
+    if (chunkBytes <= 0 || sizeBytes < 0) {
+      clearBrowserTimeout(pending.timeoutId);
+      this.pending.delete(frame.workflowId);
+      pending.reject(new Error("Invalid stream metadata"));
+      return;
+    }
+    if (this.inboundStreams.has(streamId)) {
+      clearBrowserTimeout(pending.timeoutId);
+      this.pending.delete(frame.workflowId);
+      pending.reject(new Error("Duplicate inbound stream"));
+      return;
+    }
+    clearBrowserTimeout(pending.timeoutId);
+    const timeoutId = setBrowserTimeout(() => {
+      this.failInboundStream(streamId, "Stream response timed out");
+    }, STREAM_RESPONSE_TIMEOUT_MS);
+    this.inboundStreams.set(streamId, {
+      workflowId: frame.workflowId,
+      response: frame,
+      streamId,
+      chunkBytes,
+      sizeBytes,
+      expectedSeq: 0,
+      receivedBytes: 0,
+      chunks: [],
+      timeoutId,
+    });
+    logAdminInfo(LOG_SCOPE, "Stream response registered", {
+      workflowId: frame.workflowId,
+      streamId,
+      sizeBytes,
+    });
+  }
+
+  private handleStreamChunk(frame: StreamChunkFrame): void {
+    const stream = this.inboundStreams.get(frame.streamId);
+    if (!stream) {
+      logAdminWarn(LOG_SCOPE, "Stream chunk without registered stream", {
+        streamId: frame.streamId,
+        seq: frame.seq,
+      });
+      this.failAll("Unexpected stream chunk");
+      return;
+    }
+    if ((frame.flags & STREAM_FLAG_COMPRESSED) !== 0) {
+      this.failInboundStream(frame.streamId, "Compressed response streams are not supported");
+      return;
+    }
+    if (frame.seq !== stream.expectedSeq) {
+      this.failInboundStream(
+        frame.streamId,
+        `Unexpected stream sequence ${frame.seq}`,
+      );
+      return;
+    }
+    if (frame.payload.length > stream.chunkBytes) {
+      this.failInboundStream(frame.streamId, "Stream chunk exceeds negotiated size");
+      return;
+    }
+    const nextSize = stream.receivedBytes + frame.payload.length;
+    if (nextSize > stream.sizeBytes) {
+      this.failInboundStream(frame.streamId, "Stream response exceeded expected size");
+      return;
+    }
+    stream.chunks.push(frame.payload);
+    stream.receivedBytes = nextSize;
+
+    if (frame.flags & STREAM_FLAG_FINAL) {
+      if (stream.receivedBytes !== stream.sizeBytes) {
+        this.failInboundStream(frame.streamId, "Stream response size mismatch");
+        return;
+      }
+      this.ackStreamChunk(frame);
+      this.resolveInboundStream(stream);
+      return;
+    }
+
+    stream.expectedSeq += 1;
+    this.refreshInboundStreamTimeout(stream);
+    this.ackStreamChunk(frame);
+  }
+
   private ackStreamChunk(frame: StreamChunkFrame): void {
     const ack: AckFrame = {
       frameType: FRAME_ACK,
@@ -260,6 +459,42 @@ export class AdminWsClient {
       seq: frame.seq,
     };
     this.coordinator.send(ack);
+  }
+
+  private resolveInboundStream(stream: ActiveInboundStream): void {
+    const pending = this.pending.get(stream.workflowId);
+    if (!pending) {
+      this.inboundStreams.delete(stream.streamId);
+      clearBrowserTimeout(stream.timeoutId);
+      return;
+    }
+    const bytes = concatChunks(stream.chunks, stream.sizeBytes);
+    this.inboundStreams.delete(stream.streamId);
+    this.pending.delete(stream.workflowId);
+    clearBrowserTimeout(stream.timeoutId);
+    pending.resolve({
+      response: stream.response,
+      streamBytes: bytes,
+    });
+  }
+
+  private refreshInboundStreamTimeout(stream: ActiveInboundStream): void {
+    clearBrowserTimeout(stream.timeoutId);
+    stream.timeoutId = setBrowserTimeout(() => {
+      this.failInboundStream(stream.streamId, "Stream response timed out");
+    }, STREAM_RESPONSE_TIMEOUT_MS);
+  }
+
+  private failInboundStream(streamId: number, message: string): void {
+    const stream = this.inboundStreams.get(streamId);
+    if (!stream) {
+      return;
+    }
+    const pending = this.pending.get(stream.workflowId);
+    clearBrowserTimeout(stream.timeoutId);
+    this.inboundStreams.delete(streamId);
+    this.pending.delete(stream.workflowId);
+    pending?.reject(new Error(message));
   }
 
   private handleAck(frame: AckFrame): void {
@@ -361,6 +596,16 @@ function buildWsUrl(wsPath: string): string {
   const url = new URL(wsPath, getLocationOrigin());
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
+}
+
+function concatChunks(chunks: Uint8Array[], sizeBytes: number): Uint8Array {
+  const bytes = new Uint8Array(sizeBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
 }
 
 async function fetchWsTicket(wsTicketPath: string): Promise<string> {

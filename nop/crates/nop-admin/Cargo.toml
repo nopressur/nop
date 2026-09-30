@@ -1,6 +1,6 @@
 [package]
 name = "nop-admin"
-version = "0.1.29"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
@@ -30,6 +30,7 @@ uuid = { version = "1.20.0", features = ["v4"] }
 [dev-dependencies]
 awc = { version = "3.8.1", default-features = false, features = ["cookies", "compress-gzip", "rustls-0_23-webpki-roots"] }
 futures-util = { version = "0.3", features = ["sink"] }
+nop-content-store = { path = "../nop-content-store" }
 nop-testing = { path = "../nop-testing" }
 rustls = { version = "0.23.36", default-features = false, features = ["ring", "std"] }
 tempfile = "3.24.0"

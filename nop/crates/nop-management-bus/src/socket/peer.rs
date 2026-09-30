@@ -50,7 +50,7 @@ pub fn peer_uid(stream: &UnixStream) -> SocketResult<u32> {
                 ),
             ));
         }
-        return Ok(cred.uid);
+        Ok(cred.uid)
     }
 
     #[cfg(any(

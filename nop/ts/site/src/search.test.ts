@@ -26,6 +26,10 @@ function setupDom() {
   `
 }
 
+function removeSearchButtons() {
+  document.querySelectorAll('[data-site-search-button]').forEach((button) => button.remove())
+}
+
 async function flushAsync() {
   await Promise.resolve()
   await Promise.resolve()
@@ -258,6 +262,42 @@ describe('search overlay', () => {
     expect(navigateSpy).toHaveBeenCalledWith('/id/0000000000000002')
   })
 
+  it('keeps hovered result nodes stable so the first click navigates', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { id: '0000000000000001', alias: 'docs/alpha', title: 'Alpha' },
+        { id: '0000000000000002', alias: '', title: 'Beta' }
+      ]
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const navigateSpy = vi.fn()
+    ;(window as Window & typeof globalThis & { __nopSiteNavigate?: (path: string) => void }).__nopSiteNavigate =
+      navigateSpy
+
+    controller = initSearchOverlay(document)
+    const button = document.querySelector<HTMLElement>('.site-search-trigger--desktop')!
+    const input = document.querySelector<HTMLInputElement>('[data-site-search-input]')!
+
+    button.click()
+    input.value = 'alpha'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    vi.advanceTimersByTime(250)
+    await flushAsync()
+
+    const second = document.querySelectorAll<HTMLButtonElement>('[data-site-search-result-index]')[1]!
+    second.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
+
+    expect(document.querySelectorAll<HTMLButtonElement>('[data-site-search-result-index]')[1]).toBe(
+      second
+    )
+    expect(second.classList.contains('is-active')).toBe(true)
+
+    second.click()
+    expect(navigateSpy).toHaveBeenCalledTimes(1)
+    expect(navigateSpy).toHaveBeenCalledWith('/id/0000000000000002')
+  })
+
   it('applies passive typing guard for editable targets', () => {
     controller = initSearchOverlay(document)
     const overlay = document.querySelector<HTMLElement>('[data-site-search-overlay]')!
@@ -278,6 +318,28 @@ describe('search overlay', () => {
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true }))
     expect(overlay.hidden).toBe(false)
     expect(searchInput.value).toBe('s')
+  })
+
+  it('initializes keyboard search triggers when navbar search buttons are absent', () => {
+    removeSearchButtons()
+
+    controller = initSearchOverlay(document)
+    const overlay = document.querySelector<HTMLElement>('[data-site-search-overlay]')!
+    const searchInput = document.querySelector<HTMLInputElement>('[data-site-search-input]')!
+
+    expect(controller).not.toBeNull()
+
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true }))
+    expect(overlay.hidden).toBe(false)
+    expect(searchInput.value).toBe('s')
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    vi.advanceTimersByTime(200)
+    expect(overlay.hidden).toBe(true)
+
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }))
+    expect(overlay.hidden).toBe(false)
+    expect(searchInput.value).toBe('')
   })
 
   it('opens on slash even when focused on media elements', () => {
@@ -343,6 +405,22 @@ describe('search overlay', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     vi.advanceTimersByTime(200)
     expect(overlay.hidden).toBe(true)
+    expect(document.body.style.overflow).toBe('')
+  })
+
+  it('destroy force-closes an open overlay without leaving a dead layer', () => {
+    controller = initSearchOverlay(document)
+    const button = document.querySelector<HTMLElement>('[data-site-search-button]')!
+    const overlay = document.querySelector<HTMLElement>('[data-site-search-overlay]')!
+
+    button.click()
+    expect(overlay.hidden).toBe(false)
+    expect(document.body.style.overflow).toBe('hidden')
+
+    controller!.destroy()
+    controller = null
+    expect(overlay.hidden).toBe(true)
+    expect(overlay.classList.contains('is-open')).toBe(false)
     expect(document.body.style.overflow).toBe('')
   })
 })

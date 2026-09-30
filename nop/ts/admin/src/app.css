@@ -24,6 +24,7 @@
   --accent-strong: #0a5c53;
   --danger: #b9382e;
   --success: #2f855a;
+  --warning: #b7791f;
   --focus: #0f766e;
   --toast-info-bg: #cfe9e7;
   --toast-success-bg: #d7f1de;
@@ -61,6 +62,7 @@ body {
     --accent-strong: #3bb6aa;
     --danger: #f07167;
     --success: #63c07f;
+    --warning: #d69e2e;
     --focus: #5bd1c6;
     --shadow-soft: 0 18px 40px rgba(0, 0, 0, 0.35);
   }
@@ -83,5 +85,24 @@ body {
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
+  }
+}
+
+@layer components {
+  .np-loading-gradient {
+    background: linear-gradient(90deg, var(--surface-2), var(--border), var(--surface-2));
+    background-size: 240% 100%;
+    opacity: 0.78;
+    animation: np-loading-gradient 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes np-loading-gradient {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -120% 0;
   }
 }

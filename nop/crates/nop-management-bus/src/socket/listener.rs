@@ -8,22 +8,21 @@ use super::protocol::{
     write_stream_frame,
 };
 use super::{SocketError, SocketErrorKind, SocketResult, peer};
+use crate::content_stream::{
+    ContentStreamPlan, assign_content_stream_id, open_content_blob_stream,
+};
 use crate::registry::ManagementRegistry;
-use crate::ws::WS_MAX_STREAM_CHUNK_BYTES;
-use crate::ws::protocol::{STREAM_FLAG_FINAL, StreamAckFrame, StreamChunkFrame};
+use crate::ws::StreamErrorKind;
+use crate::ws::protocol::StreamAckFrame;
 use crate::{ManagementBus, WorkflowTracker, next_connection_id};
-use nop_content_store::flat_storage::{blob_path, parse_content_id_hex};
-use nop_content_store::reserved_paths::ReservedPaths;
 use nop_management_contract::system::{
     SYSTEM_ACTION_PING, SYSTEM_ACTION_PONG_ERROR, SYSTEM_DOMAIN_ID,
 };
 use nop_management_contract::{
-    DomainActionKey, ManagementRequest, ManagementResponse, MessageResponse, ResponsePayload,
+    DomainActionKey, ManagementRequest, ManagementResponse, MessageResponse,
 };
-use nop_rt_page_cache::PageMetaCache;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::io::AsyncReadExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot;
 use tokio::time::{Duration, timeout};
@@ -166,8 +165,9 @@ async fn handle_connection(
             return Err(err);
         }
 
-        let response = handle_request(envelope, &bus, &registry, connection_id).await?;
-        let stream_plan = content_stream_plan(&response);
+        let mut response = handle_request(envelope, &bus, &registry, connection_id).await?;
+        let stream_id = response.workflow_id;
+        let stream_plan = assign_content_stream_id(&mut response, stream_id);
         let envelope = encode_response(&response, &registry)?;
         write_envelope(&mut stream, &envelope).await?;
         if let Some(plan) = stream_plan {
@@ -371,143 +371,21 @@ fn truncate_message(message: &str) -> String {
     message.chars().take(MAX_CHARS).collect()
 }
 
-struct ContentStreamPlan {
-    content_id: String,
-    stream_id: u32,
-    chunk_bytes: u32,
-    size_bytes: u64,
-}
-
-fn content_stream_plan(response: &ManagementResponse) -> Option<ContentStreamPlan> {
-    match &response.payload {
-        ResponsePayload::ContentRead(payload) => {
-            if payload.content.is_some() {
-                return None;
-            }
-            Some(ContentStreamPlan {
-                content_id: payload.id.clone(),
-                stream_id: payload.stream_id?,
-                chunk_bytes: payload.chunk_bytes?,
-                size_bytes: payload.size_bytes?,
-            })
-        }
-        _ => None,
-    }
-}
-
 async fn stream_binary_content(
     stream: &mut UnixStream,
     context: &crate::core::ManagementContext,
     plan: &ContentStreamPlan,
 ) -> SocketResult<()> {
-    if plan.chunk_bytes == 0 || plan.chunk_bytes as usize > WS_MAX_STREAM_CHUNK_BYTES {
-        return Err(SocketError::new(
-            SocketErrorKind::Protocol,
-            "Stream chunk size exceeds supported limits",
-        ));
-    }
+    let mut producer = open_content_blob_stream(context, plan)
+        .await
+        .map_err(stream_error_to_socket)?;
 
-    let content_id = parse_content_id_hex(&plan.content_id).map_err(|err| {
-        SocketError::new(
-            SocketErrorKind::Protocol,
-            format!("Invalid content id for streaming: {}", err),
-        )
-    })?;
-    let cache = get_cache_for_stream(context).await?;
-    let object = cache.get_by_id(content_id).ok_or_else(|| {
-        SocketError::new(SocketErrorKind::Protocol, "Content not found for streaming")
-    })?;
-    let blob_path = blob_path(
-        &context.runtime_paths.content_dir,
-        object.key.id,
-        object.key.version,
-    );
-    let metadata = tokio::fs::metadata(&blob_path).await.map_err(|err| {
-        SocketError::new(
-            SocketErrorKind::Io,
-            format!("Failed to stat content blob: {}", err),
-        )
-    })?;
-    if metadata.len() != plan.size_bytes {
-        return Err(SocketError::new(
-            SocketErrorKind::Protocol,
-            format!(
-                "Content size mismatch for streaming (expected {}, got {})",
-                plan.size_bytes,
-                metadata.len()
-            ),
-        ));
-    }
-
-    let mut file = tokio::fs::File::open(&blob_path).await.map_err(|err| {
-        SocketError::new(
-            SocketErrorKind::Io,
-            format!("Failed to open content blob: {}", err),
-        )
-    })?;
-
-    if plan.size_bytes == 0 {
-        let frame = StreamChunkFrame {
-            stream_id: plan.stream_id,
-            seq: 0,
-            flags: STREAM_FLAG_FINAL,
-            payload: Vec::new(),
-        };
-        write_stream_frame(stream, &crate::ws::WsFrame::StreamChunk(frame)).await?;
-        let ack = read_stream_frame_with_timeout(stream, IDLE_TIMEOUT).await?;
-        match ack {
-            crate::ws::WsFrame::Ack(StreamAckFrame { stream_id, seq })
-                if stream_id == plan.stream_id && seq == 0 => {}
-            crate::ws::WsFrame::Ack(ack) => {
-                return Err(SocketError::new(
-                    SocketErrorKind::Protocol,
-                    format!("Unexpected ack stream {} seq {}", ack.stream_id, ack.seq),
-                ));
-            }
-            other => {
-                return Err(SocketError::new(
-                    SocketErrorKind::Protocol,
-                    format!("Unexpected stream frame: {:?}", other),
-                ));
-            }
-        }
-        return Ok(());
-    }
-
-    let mut seq = 0u32;
-    let mut bytes_sent = 0u64;
-    let mut buffer = vec![0u8; plan.chunk_bytes as usize];
-    loop {
-        let read = file.read(&mut buffer).await.map_err(|err| {
-            SocketError::new(
-                SocketErrorKind::Io,
-                format!("Failed to read content blob: {}", err),
-            )
-        })?;
-        if read == 0 {
-            if bytes_sent != plan.size_bytes {
-                return Err(SocketError::new(
-                    SocketErrorKind::Protocol,
-                    format!(
-                        "Content stream ended early (sent {}, expected {})",
-                        bytes_sent, plan.size_bytes
-                    ),
-                ));
-            }
-            break;
-        }
-
-        bytes_sent = bytes_sent.saturating_add(read as u64);
-        let mut flags = 0u8;
-        if bytes_sent >= plan.size_bytes {
-            flags |= STREAM_FLAG_FINAL;
-        }
-        let frame = StreamChunkFrame {
-            stream_id: plan.stream_id,
-            seq,
-            flags,
-            payload: buffer[..read].to_vec(),
-        };
+    while let Some(frame) = producer
+        .next_chunk()
+        .await
+        .map_err(stream_error_to_socket)?
+    {
+        let expected_seq = frame.seq;
         write_stream_frame(stream, &crate::ws::WsFrame::StreamChunk(frame)).await?;
 
         let ack = read_stream_frame_with_timeout(stream, IDLE_TIMEOUT).await?;
@@ -515,7 +393,7 @@ async fn stream_binary_content(
             crate::ws::WsFrame::Ack(StreamAckFrame {
                 stream_id,
                 seq: ack_seq,
-            }) if stream_id == plan.stream_id && ack_seq == seq => {}
+            }) if stream_id == plan.stream_id && ack_seq == expected_seq => {}
             crate::ws::WsFrame::Ack(ack) => {
                 return Err(SocketError::new(
                     SocketErrorKind::Protocol,
@@ -529,35 +407,17 @@ async fn stream_binary_content(
                 ));
             }
         }
-
-        if flags & STREAM_FLAG_FINAL != 0 {
-            break;
-        }
-        seq = seq.saturating_add(1);
     }
 
     Ok(())
 }
 
-async fn get_cache_for_stream(
-    context: &crate::core::ManagementContext,
-) -> SocketResult<PageMetaCache> {
-    if let Some(cache) = context.page_cache.as_ref() {
-        return Ok(cache.as_ref().clone());
-    }
-
-    let cache = PageMetaCache::new(
-        context.runtime_paths.content_dir.clone(),
-        context.runtime_paths.state_sys_dir.clone(),
-        ReservedPaths::from_config(&context.config),
-    );
-    cache.rebuild_cache(true).await.map_err(|err| {
-        SocketError::new(
-            SocketErrorKind::Protocol,
-            format!("Failed to rebuild cache: {}", err),
-        )
-    })?;
-    Ok(cache)
+fn stream_error_to_socket(err: crate::ws::StreamError) -> SocketError {
+    let kind = match err.kind() {
+        StreamErrorKind::SourceReadFailed => SocketErrorKind::Io,
+        _ => SocketErrorKind::Protocol,
+    };
+    SocketError::new(kind, err.to_string())
 }
 
 async fn read_stream_frame_with_timeout(
@@ -634,6 +494,7 @@ mod tests {
             shortcodes: ShortcodeConfig::default(),
             rendering: RenderingConfig::default(),
             search: nop_config::SearchConfig::default(),
+            settings: Default::default(),
             dev_mode: None,
         }
     }

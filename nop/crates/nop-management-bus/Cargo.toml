@@ -1,12 +1,11 @@
 [package]
 name = "nop-management-bus"
-version = "0.1.29"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 async-trait = "0.1.89"
 chrono = { version = "0.4.43", features = ["serde"] }
-flate2 = "1.1.8"
 futures-util = "0.3"
 log = "0.4.29"
 libc = "0.2.180"
@@ -21,6 +20,7 @@ nop-management-tags = { path = "../nop-management-tags" }
 nop-management-users = { path = "../nop-management-users" }
 nop-management-content = { path = "../nop-management-content" }
 nop-management-search = { path = "../nop-management-search" }
+nop-management-settings = { path = "../nop-management-settings" }
 nop-management-system = { path = "../nop-management-system" }
 nop-management-workflows = { path = "../nop-management-workflows" }
 nop-roles = { path = "../nop-roles" }

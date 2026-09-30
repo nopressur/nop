@@ -925,6 +925,9 @@
       "action_id": 3,
       "payload": {
         "content": "# Hello",
+        "content_width": "narrow",
+        "disable_floating_nav": true,
+        "disable_navbar": true,
         "id": "0000000000000001",
         "nav_order": 2,
         "nav_parent_id": null,
@@ -937,7 +940,7 @@
         "theme": "default",
         "title": "Getting Started"
       },
-      "hex": "ef100000003030303030303030303030303030303114000000646f63732f67657474696e672d737461727465640f00000047657474696e67205374617274656402000000050000006775696465050000007374617274050000005374617274020000000700000064656661756c7407000000232048656c6c6f"
+      "hex": "ef07100000003030303030303030303030303030303114000000646f63732f67657474696e672d737461727465640f00000047657474696e67205374617274656402000000050000006775696465050000007374617274050000005374617274020000000700000064656661756c740101060000006e6172726f7707000000232048656c6c6f"
     },
     {
       "name": "content.delete.request",
@@ -962,6 +965,9 @@
           3,
           4
         ],
+        "content_width": "wide",
+        "disable_floating_nav": false,
+        "disable_navbar": true,
         "mime": "text/markdown",
         "nav_order": 1,
         "nav_parent_id": "root",
@@ -973,7 +979,7 @@
         "theme": "default",
         "title": "New Doc"
       },
-      "hex": "7f08000000646f63732f6e6577070000004e657720446f630d000000746578742f6d61726b646f776e0100000003000000646f63030000004e657704000000726f6f7401000000060000006e65772e6d640700000064656661756c740400000001020304"
+      "hex": "7f08000000646f63732f6e6577070000004e657720446f630d000000746578742f6d61726b646f776e0100000003000000646f63030000004e657704000000726f6f7401000000060000006e65772e6d640700000064656661756c74010004000000776964650400000001020304"
     },
     {
       "name": "content.nav_index.request",
@@ -1029,6 +1035,9 @@
       "action_id": 10,
       "payload": {
         "alias": "docs/stream",
+        "content_width": "narrow",
+        "disable_floating_nav": false,
+        "disable_navbar": true,
         "nav_order": null,
         "nav_parent_id": null,
         "nav_title": null,
@@ -1039,7 +1048,7 @@
         "theme": "default",
         "title": "Stream Doc"
       },
-      "hex": "230b000000646f63732f73747265616d0a00000053747265616d20446f63010000000600000073747265616d0700000064656661756c740903000000000000"
+      "hex": "230b000000646f63732f73747265616d0a00000053747265616d20446f63010000000600000073747265616d0700000064656661756c740100060000006e6172726f770903000000000000"
     },
     {
       "name": "content.upload_stream_commit.request",
@@ -1057,6 +1066,9 @@
       "domain_id": 12,
       "action_id": 12,
       "payload": {
+        "content_width": "auto",
+        "disable_floating_nav": false,
+        "disable_navbar": false,
         "id": "0000000000000003",
         "nav_order": null,
         "nav_parent_id": null,
@@ -1067,7 +1079,7 @@
         "theme": null,
         "title": "Streamed"
       },
-      "hex": "0210000000303030303030303030303030303030330800000053747265616d65640903000000000000"
+      "hex": "820310000000303030303030303030303030303030330800000053747265616d65640000040000006175746f0903000000000000"
     },
     {
       "name": "content.update_stream_commit.request",
@@ -1080,6 +1092,16 @@
       "hex": "0a000000"
     },
     {
+      "name": "content.alias_status.request",
+      "direction": "request",
+      "domain_id": 12,
+      "action_id": 14,
+      "payload": {
+        "alias": "images/photo"
+      },
+      "hex": "0c000000696d616765732f70686f746f"
+    },
+    {
       "name": "content.list_ok.response",
       "direction": "response",
       "domain_id": 12,
@@ -1088,6 +1110,9 @@
         "items": [
           {
             "alias": "docs/intro",
+            "content_width": "wide",
+            "disable_floating_nav": false,
+            "disable_navbar": true,
             "id": "1",
             "is_markdown": true,
             "mime": "text/markdown",
@@ -1105,7 +1130,7 @@
         "page_size": 20,
         "total": 1
       },
-      "hex": "010000000100000014000000010000001b01000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d6401"
+      "hex": "010000000100000014000000010000001b01000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d640100040000007769646501"
     },
     {
       "name": "content.list_err.response",
@@ -1126,6 +1151,9 @@
         "alias": "docs/intro",
         "chunk_bytes": null,
         "content": "# Intro",
+        "content_width": "wide",
+        "disable_floating_nav": false,
+        "disable_navbar": true,
         "id": "1",
         "mime": "text/markdown",
         "nav_order": 1,
@@ -1140,7 +1168,7 @@
         "theme": "default",
         "title": "Intro"
       },
-      "hex": "7b0001000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d640700000064656661756c74070000002320496e74726f"
+      "hex": "7b0001000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d640700000064656661756c7401000400000077696465070000002320496e74726f"
     },
     {
       "name": "content.read_stream_ok.response",
@@ -1151,6 +1179,9 @@
         "alias": "assets/sample.bin",
         "chunk_bytes": 64495,
         "content": null,
+        "content_width": "auto",
+        "disable_floating_nav": false,
+        "disable_navbar": false,
         "id": "4",
         "mime": "application/octet-stream",
         "nav_order": null,
@@ -1163,7 +1194,7 @@
         "theme": null,
         "title": null
       },
-      "hex": "90030100000034110000006173736574732f73616d706c652e62696e180000006170706c69636174696f6e2f6f637465742d73747265616d000000000a00000073616d706c652e62696e2a000000effb00004000000000000000"
+      "hex": "90030100000034110000006173736574732f73616d706c652e62696e180000006170706c69636174696f6e2f6f637465742d73747265616d000000000a00000073616d706c652e62696e0000040000006175746f2a000000effb00004000000000000000"
     },
     {
       "name": "content.read_err.response",
@@ -1266,6 +1297,48 @@
         "message": "nav index failed"
       },
       "hex": "100000006e617620696e646578206661696c6564"
+    },
+    {
+      "name": "content.alias_status_ok.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1401,
+      "payload": {
+        "canonical_alias": "images/photo",
+        "exists": true,
+        "id": "0000000000000003",
+        "is_markdown": false,
+        "mime": "image/png",
+        "title": "Photo",
+        "version": 2
+      },
+      "hex": "1f0c000000696d616765732f70686f746f0110000000303030303030303030303030303030330200000009000000696d6167652f706e67000500000050686f746f"
+    },
+    {
+      "name": "content.alias_status_missing.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1401,
+      "payload": {
+        "canonical_alias": "images/new",
+        "exists": false,
+        "id": null,
+        "is_markdown": null,
+        "mime": null,
+        "title": null,
+        "version": null
+      },
+      "hex": "000a000000696d616765732f6e657700"
+    },
+    {
+      "name": "content.alias_status_err.response",
+      "direction": "response",
+      "domain_id": 12,
+      "action_id": 1402,
+      "payload": {
+        "message": "alias status failed"
+      },
+      "hex": "13000000616c69617320737461747573206661696c6564"
     },
     {
       "name": "content.binary_prevalidate_ok.response",
@@ -1465,6 +1538,9 @@
         "hits": [
           {
             "alias": "docs/intro",
+            "content_width": "wide",
+            "disable_floating_nav": false,
+            "disable_navbar": true,
             "id": "1",
             "is_markdown": true,
             "mime": "text/markdown",
@@ -1479,7 +1555,7 @@
           }
         ]
       },
-      "hex": "010000001b01000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d6401"
+      "hex": "010000001b01000000310a000000646f63732f696e74726f05000000496e74726f0d000000746578742f6d61726b646f776e0100000005000000677569646505000000496e74726f0100000008000000696e74726f2e6d640100040000007769646501"
     },
     {
       "name": "search.find_err.response",
@@ -1530,6 +1606,152 @@
         "message": "search reset error"
       },
       "hex": "12000000736561726368207265736574206572726f72"
+    },
+    {
+      "name": "settings.get.request",
+      "direction": "request",
+      "domain_id": 22,
+      "action_id": 1,
+      "payload": {},
+      "hex": ""
+    },
+    {
+      "name": "settings.set_name.request",
+      "direction": "request",
+      "domain_id": 22,
+      "action_id": 2,
+      "payload": {
+        "name": "Example"
+      },
+      "hex": "070000004578616d706c65"
+    },
+    {
+      "name": "settings.set_title.request",
+      "direction": "request",
+      "domain_id": 22,
+      "action_id": 3,
+      "payload": {
+        "title": "Example Site"
+      },
+      "hex": "010c0000004578616d706c652053697465"
+    },
+    {
+      "name": "settings.clear_title.request",
+      "direction": "request",
+      "domain_id": 22,
+      "action_id": 3,
+      "payload": {
+        "title": null
+      },
+      "hex": "00"
+    },
+    {
+      "name": "settings.set_description.request",
+      "direction": "request",
+      "domain_id": 22,
+      "action_id": 4,
+      "payload": {
+        "description": "Example description"
+      },
+      "hex": "01130000004578616d706c65206465736372697074696f6e"
+    },
+    {
+      "name": "settings.clear_description.request",
+      "direction": "request",
+      "domain_id": 22,
+      "action_id": 4,
+      "payload": {
+        "description": null
+      },
+      "hex": "00"
+    },
+    {
+      "name": "settings.get_ok.response",
+      "direction": "response",
+      "domain_id": 22,
+      "action_id": 101,
+      "payload": {
+        "description": "Example description",
+        "name": "Example",
+        "title": "Example Site"
+      },
+      "hex": "070000004578616d706c65030c0000004578616d706c652053697465130000004578616d706c65206465736372697074696f6e"
+    },
+    {
+      "name": "settings.get_err.response",
+      "direction": "response",
+      "domain_id": 22,
+      "action_id": 102,
+      "payload": {
+        "message": "settings unavailable"
+      },
+      "hex": "1400000073657474696e677320756e617661696c61626c65"
+    },
+    {
+      "name": "settings.set_name_ok.response",
+      "direction": "response",
+      "domain_id": 22,
+      "action_id": 201,
+      "payload": {
+        "description": "Example description",
+        "name": "Example",
+        "title": "Example Site"
+      },
+      "hex": "070000004578616d706c65030c0000004578616d706c652053697465130000004578616d706c65206465736372697074696f6e"
+    },
+    {
+      "name": "settings.set_title_ok.response",
+      "direction": "response",
+      "domain_id": 22,
+      "action_id": 301,
+      "payload": {
+        "description": "Example description",
+        "name": "Example",
+        "title": "Example Site"
+      },
+      "hex": "070000004578616d706c65030c0000004578616d706c652053697465130000004578616d706c65206465736372697074696f6e"
+    },
+    {
+      "name": "settings.set_title_err.response",
+      "direction": "response",
+      "domain_id": 22,
+      "action_id": 302,
+      "payload": {
+        "message": "invalid title"
+      },
+      "hex": "0d000000696e76616c6964207469746c65"
+    },
+    {
+      "name": "settings.set_name_err.response",
+      "direction": "response",
+      "domain_id": 22,
+      "action_id": 202,
+      "payload": {
+        "message": "invalid name"
+      },
+      "hex": "0c000000696e76616c6964206e616d65"
+    },
+    {
+      "name": "settings.set_description_ok.response",
+      "direction": "response",
+      "domain_id": 22,
+      "action_id": 401,
+      "payload": {
+        "description": "Example description",
+        "name": "Example",
+        "title": "Example Site"
+      },
+      "hex": "070000004578616d706c65030c0000004578616d706c652053697465130000004578616d706c65206465736372697074696f6e"
+    },
+    {
+      "name": "settings.set_description_err.response",
+      "direction": "response",
+      "domain_id": 22,
+      "action_id": 402,
+      "payload": {
+        "message": "invalid description"
+      },
+      "hex": "13000000696e76616c6964206465736372697074696f6e"
     }
   ]
 }

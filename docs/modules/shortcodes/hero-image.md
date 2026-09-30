@@ -6,7 +6,9 @@ Status: Developed
 
 - Provide a `hero-img` shortcode that renders a full-viewport-width hero block carrying an image and optional title/subtitle text.
 - The image is centred and fitted via cover semantics — it always fills the block, is never stretched, and the image's centre stays at the centre of the block.
-- The block is full viewport width and 45% of viewport height (`45vh`) by default; height is theme-overridable via `sc-hero-img-size-height`.
+- The block is full viewport width. Its height is based on viewport height, with the active height
+  variable selected by viewport-width breakpoint: `45vh` on small and medium widths, `65vh` on large
+  widths by default.
 - Title and subtitle render centred horizontally and vertically over the image, inside a single caption block whose maximum width matches the layout's wide content width.
 - Typography (font family, font size) and text colour for title and subtitle are theme-driven via dedicated theme variables.
 - A separate dark-mode image can be supplied; when omitted, the base image is used in both modes.
@@ -51,9 +53,9 @@ Examples:
 
 The hero is structured as a relatively-positioned wrapper with the image as an absolutely-positioned background-equivalent and the caption as the centred foreground.
 
-- **Wrapper** (`<div class="sc-hero-img">`): `width: 100vw; height: var(--sc-hero-img-size-height, 45vh); position: relative; display: flex; align-items: center; justify-content: center;` plus a minimum `padding` so the caption never touches the wrapper edges. The wrapper sits between the layout's `escape_container()` and `return_to_container()` fragments — produced by the substitution step because the shortcode is registered with `container_escape: true` — so it spans the full viewport regardless of the surrounding `.content` container.
+- **Wrapper** (`<div class="sc-hero-img">`): `width: 100%; height: var(--sc-hero-img-size-height-sm, 45vh); position: relative; display: flex; align-items: center; justify-content: center;` plus a minimum `padding` so the caption never touches the wrapper edges. Medium viewport widths use `sc-hero-img-size-height-md` with a `45vh` fallback, and large viewport widths use `sc-hero-img-size-height-lg` with a `65vh` fallback. The wrapper sits inside a full-width escape band (`<div class="site-doc-band">`, `grid-column: 1 / -1`) between the layout's `escape_container()` and `return_to_container()` fragments — produced by the substitution step because the shortcode is registered with `container_escape: true` — so it spans the full viewport at any page position. The escape closes `.content`, `.container.content-container`, and `.content-wrapper`, and reopens them after the band; the pipeline owns the whole balanced stream. A page-leading hero emits no close divs because nothing is open yet: the band comes first, followed by the first wrapper and container opening. A hero-final page emits no empty trailing segment. Any `hero-img` on the page sets `PageRenderState.has_hero`, which omits only the overlay document-structure aside; the narrow structure drawer and topbar button are unaffected.
 - **Image** (`<picture>` with optional dark `<source>` and a fallback `<img>`): `position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center;`. If the image is wider than the wrapper, its left/right edges are cropped equally; if taller, top/bottom edges are cropped equally. The image is never stretched.
-- **Caption block** (`<div class="sc-hero-img__caption">`): `position: relative; z-index: 1; max-width: 1152px; margin: 0 auto; text-align: center;` containing the optional title (`<h2 class="sc-hero-img__title">`) and subtitle (`<p class="sc-hero-img__subtitle">`), both inheriting `text-align: center`. Vertical centring of the caption block within the wrapper is handled by the wrapper's flex `align-items: center`. Width is bounded by `max-width` and constrained by the wrapper's padding (the "minimum margins"). The block grows vertically with its contents — title-only is centred; title + subtitle are centred as a single block. The caption block is omitted entirely when both `title` and `subtitle` are absent.
+- **Caption block** (`<div class="sc-hero-img__caption">`): `position: relative; z-index: 1; max-width: 1152px; margin: 0 auto; text-align: center;` containing the optional title (`<h2 class="sc-hero-img__title">`) and subtitle (`<p class="sc-hero-img__subtitle">`), both inheriting `text-align: center`. Vertical centring of the caption block within the wrapper is handled by the wrapper's flex `align-items: center`. Width is bounded by `max-width` and constrained by the wrapper's padding (the "minimum margins"). The block grows vertically with its contents — title-only is centred; title + subtitle are centred as a single block. Title and subtitle reset inherited margins and use a theme-configurable top margin on the subtitle only when it immediately follows the title. The caption block is omitted entirely when both `title` and `subtitle` are absent.
 
 ### Theme variables
 
@@ -65,13 +67,16 @@ All variables follow the `sc-<shortcode-name>-<category>-<rest>` convention defi
 | `sc-hero-img-font-title-size` | Title font size | `3rem` |
 | `sc-hero-img-font-subtitle-family` | Subtitle font family | `var(--font-body-family)` |
 | `sc-hero-img-font-subtitle-size` | Subtitle font size | `1.25rem` |
+| `sc-hero-img-size-title-subtitle-margin` | Top margin between title and subtitle when both are present | `0.5rem` |
 | `sc-hero-img-color-text-light` | Title/subtitle colour in light mode | `var(--color-text-primary-light)` |
 | `sc-hero-img-color-text-dark` | Title/subtitle colour in dark mode | `var(--color-text-primary-dark)` |
 | `sc-hero-img-filter-lightify` | CSS `filter` value applied to the image when `lightify` is set, in light mode | `brightness(1.15)` |
 | `sc-hero-img-filter-darkify` | CSS `filter` value applied to the image when `darkify` is set, in dark mode | `brightness(0.7)` |
 | `sc-hero-img-shadow-light` | CSS `text-shadow` value applied to title/subtitle when `light-shadow` is set, in light mode (light halo for contrast against dark text) | `0 0 12px rgba(255, 255, 255, 0.6)` |
 | `sc-hero-img-shadow-dark` | CSS `text-shadow` value applied to title/subtitle when `dark-shadow` is set, in dark mode (dark halo for contrast against light text) | `0 0 12px rgba(0, 0, 0, 0.6)` |
-| `sc-hero-img-size-height` | Wrapper height (any valid CSS length, typically a `vh` value) | `45vh` |
+| `sc-hero-img-size-height-sm` | Wrapper height below the medium breakpoint (any valid CSS length, typically a `vh` value) | `45vh` |
+| `sc-hero-img-size-height-md` | Wrapper height from the medium breakpoint until large (any valid CSS length, typically a `vh` value) | `45vh` |
+| `sc-hero-img-size-height-lg` | Wrapper height from the large breakpoint upward (any valid CSS length, typically a `vh` value) | `65vh` |
 
 The shadow values are zero-offset blurs (haloes) rather than drop shadows: a soft *brightening* around the letters when `light-shadow` is active in light mode (so dark text gains contrast against a bright image area), and a gentle *darkening* around the letters when `dark-shadow` is active in dark mode (so light text gains contrast against a dark image area). Themes can stack multiple shadow layers in the variable value (e.g. `0 0 2px rgba(255,255,255,0.7), 0 0 6px rgba(255,255,255,0.4)`) without changing the shortcode CSS.
 
@@ -91,6 +96,9 @@ The shadow values are zero-offset blurs (haloes) rather than drop shadows: a sof
 - `title` and `subtitle` both absent → the hero renders with image only; the caption block is omitted.
 - Inline placement (`((hero-img …))` mid-paragraph, surrounded by other text) — the substitution step keeps the surrounding `<p>` and substitutes the rendered HTML literally inside it. The hero does not break out of the content container from inline position, by construction of the paragraph-aware substitution; the editor decides where to place placeholders.
 - Multiple `hero-img` placeholders alone in one paragraph — each renders sequentially as its own breakout block (the substitution step strips the surrounding `<p>` for hash-only paragraphs and wraps each `container_escape` placeholder individually with `escape_container(ctx)` / `return_to_container(ctx)`).
+- Page-leading placement — if a standalone `hero-img` is the first rendered markdown block, no close
+  divs are emitted because nothing is open yet; the hero band comes first, followed by the first
+  wrapper and container opening, which is the reopening.
 
 ### Quoted-value escapes
 

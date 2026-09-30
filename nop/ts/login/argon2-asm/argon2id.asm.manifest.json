@@ -1,0 +1,78 @@
+{
+  "artifact": "dist/argon2id.asm.js",
+  "artifactSha256": "59d69c0032cb7e4443c579d2ce3215f5b21b123780be59978eadb5276061e0eb",
+  "generator": {
+    "command": "npm run argon2-asm:generate",
+    "cwd": ".",
+    "emccPath": "/opt/homebrew/bin/emcc",
+    "emccVersion": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 5.0.7-git\nclang version 23.0.0git\nTarget: wasm32-unknown-emscripten\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/emscripten/5.0.7/libexec/llvm/bin",
+    "emccLinkFlags": [
+      "-O2",
+      "-sWASM=0",
+      "-sMINIMAL_RUNTIME=1",
+      "-sLEGACY_VM_SUPPORT=1",
+      "-sENVIRONMENT=web",
+      "-sFILESYSTEM=0",
+      "-sINITIAL_MEMORY=134217728",
+      "-sINCOMING_MODULE_JS_API=[]",
+      "-sEXPORTED_FUNCTIONS=[\"_Argon2_GetBuffer\",\"_Argon2_SetMemorySize\",\"_Argon2_Calculate\",\"_Blake2b_GetBuffer\",\"_Blake2b_Init\",\"_Blake2b_Update\",\"_Blake2b_Final\",\"_Blake2b_Calculate\"]"
+    ],
+    "postProcessing": [
+      "remove Emscripten empty ready hook so the wrapper owns initialization",
+      "replace local WebAssembly runtime identifier with NopAsmRuntime",
+      "Babel preset-env forceAllTransforms for iOS 9.3 / Safari 9.1",
+      "terser ecma=5 minification"
+    ]
+  },
+  "upstream": {
+    "package": "hash-wasm",
+    "version": "4.12.0",
+    "resolved": "https://registry.npmjs.org/hash-wasm/-/hash-wasm-4.12.0.tgz",
+    "integrity": "sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ==",
+    "license": "MIT"
+  },
+  "argon2": {
+    "variant": "argon2id",
+    "version": "0x13",
+    "exportedNamespace": "NoPressureArgon2id",
+    "exportedFunction": "deriveArgon2id"
+  },
+  "inputs": [
+    {
+      "path": "node_modules/hash-wasm/src/hash-wasm.h",
+      "sha256": "dea4e445cc329c6a627bcc952d5a41788b938fd93e8d8a62bf08f7f4c0b8ea31"
+    },
+    {
+      "path": "node_modules/hash-wasm/src/argon2.c",
+      "sha256": "c6b196de7d7ece5f01ef59d000bb0c65fbf25c8a386d3b20b4c8e96b50710d75"
+    },
+    {
+      "path": "node_modules/hash-wasm/src/blake2b.c",
+      "sha256": "432f19133a9ab339acea071a545320698e17f11b8ca4125751932cb5d98fd138"
+    },
+    {
+      "path": "argon2-asm/src/argon2_bridge.c",
+      "sha256": "b5c8e4aaa68e032b8aec8b8517ec1c9eb2b68a1b33445d22dc25ee5e094d3fa4"
+    },
+    {
+      "path": "argon2-asm/src/wrapper.js",
+      "sha256": "3e26ed08f14a06054455b7af82b09b6b1183ac83880f8f12bec3c18bb6b829f1"
+    },
+    {
+      "path": "argon2-asm/babel.legacy.config.cjs",
+      "sha256": "966b5f23f0ccf92f5bd07e993002c21157145a3b179121dfa88678a168443302"
+    },
+    {
+      "path": "argon2-asm/scripts/generate.mjs",
+      "sha256": "460312068eac234af1d71f521087fe0ee2075c647198d6d9cae965ea7b998790"
+    },
+    {
+      "path": "argon2-asm/scripts/process.mjs",
+      "sha256": "06d651797d21a9031702e631313ce2e0270845275b78dc87872d6ad6580f0313"
+    },
+    {
+      "path": "argon2-asm/scripts/check-compat.mjs",
+      "sha256": "ee33fd3d3a545bf09af91cc9fc4621790f717c2d6e669ad0e9186a67e3329231"
+    }
+  ]
+}

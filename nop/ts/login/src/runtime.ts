@@ -11,8 +11,18 @@ declare global {
   }
 }
 
+function getRawRuntimeConfig(): LoginRuntimeConfig | string | undefined {
+  const mountConfig = document
+    .getElementById('login-app')
+    ?.getAttribute('data-login-config');
+  if (mountConfig) {
+    return mountConfig;
+  }
+  return window.nopLoginConfig;
+}
+
 export function getRuntimeConfig(): LoginRuntimeConfig {
-  const raw = window.nopLoginConfig;
+  const raw = getRawRuntimeConfig();
   if (!raw) {
     throw new Error('Login runtime config is missing');
   }

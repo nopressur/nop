@@ -122,7 +122,36 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   const pageAlias = "docs/ui-test";
   const pageAliasRegex = pageAlias.replace("/", "\\/");
   await expect(page.locator("#content-alias")).toHaveValue(pageAlias);
+  await expect(page.getByRole("link", { name: "View Page" })).toHaveAttribute(
+    "href",
+    `/${pageAlias}`
+  );
   await expect(page.locator("#content-title")).toHaveValue("UI Test");
+  await expect(page.getByText("Navbar state")).toHaveCount(0);
+  await expect(page.getByText("Content width")).toHaveCount(0);
+
+  const navbarToggle = page.getByRole("button", { name: "Navbar Enabled" });
+  const widthToggle = page.getByRole("button", { name: "Auto Width" });
+  await expect(navbarToggle).toBeVisible();
+  await expect(widthToggle).toBeVisible();
+
+  const navbarBox = await navbarToggle.boundingBox();
+  const widthBox = await widthToggle.boundingBox();
+  expect(navbarBox).not.toBeNull();
+  expect(widthBox).not.toBeNull();
+  expect(Math.abs((navbarBox?.y ?? 0) - (widthBox?.y ?? 0))).toBeLessThan(4);
+  expect(widthBox?.x ?? 0).toBeGreaterThan(navbarBox?.x ?? 0);
+
+  const navbarToggleStyle = await navbarToggle.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderColor: style.borderTopColor,
+      color: style.color,
+    };
+  });
+  expect(navbarToggleStyle.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+  expect(navbarToggleStyle.borderColor).toBe(navbarToggleStyle.color);
 
   await tagSelect.selectOption("featured");
   await humanClick(page.getByRole("button", { name: "Save" }), rng);
@@ -319,6 +348,32 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   });
   expect(contentAfterInsert).toContain("[UI Test Updated](/docs/ui-test)");
 
+  const insertedLinkMarkdown = "[UI Test Updated](/docs/ui-test)";
+  await page.evaluate((target: string) => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    const value = editor.getValue();
+    const start = value.lastIndexOf(target);
+    if (start === -1) {
+      throw new Error("Inserted markdown link was not found");
+    }
+    const aceDocument = editor.session.getDocument();
+    editor.selection.setRange({
+      start: aceDocument.indexToPosition(start, 0),
+      end: aceDocument.indexToPosition(start + target.length, 0),
+    });
+  }, insertedLinkMarkdown);
+  await humanClick(page.getByRole("button", { name: "Link-Card" }), rng);
+  const contentAfterLinkCard = await page.evaluate(() => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    return editor.getValue();
+  });
+  expect(contentAfterLinkCard).not.toContain(insertedLinkMarkdown);
+  expect(contentAfterLinkCard).toContain(
+    '((link-card title="UI Test Updated" link="/docs/ui-test" noblank))'
+  );
+
   await page.keyboard.press(insertShortcut);
   const imageInsertModal = page.getByRole("dialog", { name: "Insert content" });
   await expect(imageInsertModal).toBeVisible();
@@ -335,7 +390,17 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
     "true"
   );
   await page.keyboard.press("ArrowRight");
+  await expect(imageInsertModal.getByRole("radio", { name: "Hero" })).toHaveAttribute(
+    "aria-checked",
+    "true"
+  );
+  await page.keyboard.press("ArrowRight");
   await expect(imageInsertModal.getByRole("radio", { name: "Link" })).toHaveAttribute(
+    "aria-checked",
+    "true"
+  );
+  await page.keyboard.press("ArrowLeft");
+  await expect(imageInsertModal.getByRole("radio", { name: "Hero" })).toHaveAttribute(
     "aria-checked",
     "true"
   );
@@ -504,6 +569,85 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await expect(page.getByPlaceholder("Search")).toHaveValue("UI Test");
 });
 
+test("large markdown editor load and save roundtrip", async ({ page, harness, rng }) => {
+  test.setTimeout(120000);
+
+  await login({
+    page,
+    baseUrl: harness.baseUrl,
+    user: harness.users.admin,
+    rng,
+    returnPath: "/admin/pages",
+    expectedPath: "/admin/pages",
+  });
+
+  const ensureDetailsOpen = async () => {
+    const expandButton = page.getByRole("button", { name: "Expand details" });
+    if (await expandButton.isVisible()) {
+      await humanClick(expandButton, rng);
+    }
+  };
+
+  const largeMarkdown =
+    "# Large Stream\r\n\r\n" +
+    "a".repeat(72 * 1024) +
+    "\r\nEuro boundary: €\r\nFinal CRLF line.\r\n";
+
+  await expect(page.getByRole("heading", { name: "Content Library" })).toBeVisible();
+  await humanClick(page.getByRole("button", { name: "New Page" }), rng);
+  await expect(page.getByRole("heading", { name: "Create Content" })).toBeVisible();
+  await ensureDetailsOpen();
+  await humanType(page.locator("#content-alias"), "Docs/Large-Stream", rng);
+  await humanType(page.locator("#content-title"), "Large Stream", rng);
+  await page.waitForFunction(
+    () => (window as Window & { ace?: any }).ace && document.querySelector(".ace_editor")
+  );
+  await page.evaluate((content) => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    editor.setValue(content);
+    editor.clearSelection();
+  }, largeMarkdown);
+
+  await humanClick(page.getByRole("button", { name: "Save" }), rng);
+  await page.waitForURL(/\/admin\/pages\/edit\//);
+  const editUrl = page.url();
+
+  await page.goto(editUrl);
+  await expect(page.getByRole("heading", { name: "Edit Content" })).toBeVisible();
+  await page.waitForFunction(
+    () => (window as Window & { ace?: any }).ace && document.querySelector(".ace_editor")
+  );
+  const loadedMarkdown = await page.evaluate(() => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    return editor.getValue();
+  });
+  expect(loadedMarkdown).toBe(largeMarkdown);
+
+  const updatedMarkdown = `${largeMarkdown}\r\nSaved again.\r\n`;
+  await page.evaluate((content) => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    editor.setValue(content);
+    editor.clearSelection();
+  }, updatedMarkdown);
+  await humanClick(page.getByRole("button", { name: "Save" }), rng);
+  await expect(page.getByText("Content saved").last()).toBeVisible({ timeout: 10000 });
+
+  await page.goto(editUrl);
+  await expect(page.getByRole("heading", { name: "Edit Content" })).toBeVisible();
+  await page.waitForFunction(
+    () => (window as Window & { ace?: any }).ace && document.querySelector(".ace_editor")
+  );
+  const reloadedMarkdown = await page.evaluate(() => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    return editor.getValue();
+  });
+  expect(reloadedMarkdown).toBe(updatedMarkdown);
+});
+
 test("content editor unsaved changes modal", async ({ page, harness, rng }) => {
   await login({
     page,
@@ -584,6 +728,49 @@ test("content editor unsaved changes modal", async ({ page, harness, rng }) => {
     rng
   );
   await expect(page.locator("tr", { hasText: "Unsaved Close Test Saved" })).toBeVisible();
+});
+
+test("content upload versions repeated font aliases", async ({ page, harness, rng }) => {
+  test.setTimeout(90000);
+  await login({
+    page,
+    baseUrl: harness.baseUrl,
+    user: harness.users.admin,
+    rng,
+    returnPath: "/admin/pages",
+    expectedPath: "/admin/pages",
+  });
+
+  await expect(page.getByRole("heading", { name: "Content Library" })).toBeVisible();
+
+  const uploadFont = async (buffer: Buffer, expectPendingVersion: boolean) => {
+    await humanClick(page.getByRole("button", { name: "Upload", exact: true }), rng);
+    const overlay = page.getByRole("dialog", { name: "Drop files to upload" });
+    await expect(overlay).toBeVisible();
+    await overlay.locator('input[type="file"]').setInputFiles({
+      name: "Brand Font.woff2",
+      mimeType: "font/woff2",
+      buffer,
+    });
+
+    const uploadModal = page.getByRole("dialog", { name: "Upload Content" });
+    await expect(uploadModal).toBeVisible();
+    await expect(uploadModal.locator('input[id^="upload-alias-"]').first()).toHaveValue(
+      "fonts/brand-font.woff2",
+    );
+    if (expectPendingVersion) {
+      await expect(uploadModal.getByText(/New version of .* v2/)).toBeVisible();
+    }
+    await humanClick(uploadModal.getByRole("button", { name: "Save" }), rng);
+    await expect(uploadModal).toBeHidden();
+  };
+
+  await uploadFont(Buffer.from("font-v1"), false);
+  await uploadFont(Buffer.from("font-v2"), true);
+
+  const fontResponse = await page.request.get(`${harness.baseUrl}/fonts/brand-font.woff2`);
+  expect(fontResponse.ok()).toBeTruthy();
+  expect(await fontResponse.body()).toEqual(Buffer.from("font-v2"));
 });
 
 test("content list sorting", async ({ page, harness, rng }) => {

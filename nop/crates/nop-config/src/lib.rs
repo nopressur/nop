@@ -9,8 +9,13 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
+use std::sync::RwLock;
 
 pub const SEARCH_MAX_WORKER_COUNT: usize = 16;
+pub const DEFAULT_WEBSITE_NAME: &str = "NoPressure";
+pub const WEBSITE_NAME_MAX_CHARS: usize = 120;
+pub const WEBSITE_TITLE_MAX_CHARS: usize = 120;
+pub const WEBSITE_DESCRIPTION_MAX_CHARS: usize = 240;
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -106,6 +111,13 @@ fn default_allowed_extensions() -> Vec<String> {
         "js".to_string(),
         "json".to_string(),
         "xml".to_string(),
+        // Fonts
+        "woff".to_string(),
+        "woff2".to_string(),
+        "ttf".to_string(),
+        "otf".to_string(),
+        "eot".to_string(),
+        "ttc".to_string(),
         // Markdown (will be renamed to .markdown)
         "md".to_string(),
         "markdown".to_string(),
@@ -152,10 +164,6 @@ fn default_start_unibox_search_url() -> String {
     "https://duckduckgo.com?q=<QUERY>".to_string()
 }
 
-fn default_short_paragraph_length() -> usize {
-    256
-}
-
 fn default_search_max_memory_mb() -> u64 {
     128
 }
@@ -181,16 +189,217 @@ impl Default for SearchConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct RenderingConfig {
-    #[serde(default = "default_short_paragraph_length")]
-    pub short_paragraph_length: usize,
+/// Rendering configuration. Content width is fully manual: pages render the normal
+/// compact width unless the sidecar sets `content_width` to `wide`.
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct RenderingConfig {}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq)]
+pub struct SettingsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(
+        default,
+        alias = "website_title",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
-impl Default for RenderingConfig {
-    fn default() -> Self {
+impl SettingsConfig {
+    pub fn normalized(&self) -> Result<Self, ConfigError> {
+        self.normalized_with_legacy_app(None)
+    }
+
+    pub fn normalized_with_legacy_app(
+        &self,
+        legacy_app: Option<&AppConfig>,
+    ) -> Result<Self, ConfigError> {
+        let name_source = self
+            .name
+            .as_deref()
+            .or_else(|| legacy_app.map(|app| app.name.as_str()))
+            .unwrap_or(DEFAULT_WEBSITE_NAME);
+        let description_source = self
+            .description
+            .as_deref()
+            .or_else(|| legacy_app.map(|app| app.description.as_str()));
+        Ok(Self {
+            name: Some(normalize_required_setting(
+                "settings.name",
+                name_source,
+                WEBSITE_NAME_MAX_CHARS,
+            )?),
+            title: normalize_optional_setting(
+                "settings.title",
+                self.title.as_deref(),
+                WEBSITE_TITLE_MAX_CHARS,
+            )?,
+            description: normalize_optional_setting(
+                "settings.description",
+                description_source,
+                WEBSITE_DESCRIPTION_MAX_CHARS,
+            )?,
+        })
+    }
+
+    pub fn name_or_default(&self) -> String {
+        self.name
+            .clone()
+            .unwrap_or_else(|| DEFAULT_WEBSITE_NAME.to_string())
+    }
+}
+
+pub fn normalize_website_title(value: Option<&str>) -> Result<Option<String>, ConfigError> {
+    normalize_optional_setting("settings.title", value, WEBSITE_TITLE_MAX_CHARS)
+}
+
+pub fn normalize_required_setting(
+    field: &str,
+    value: &str,
+    max_chars: usize,
+) -> Result<String, ConfigError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(ConfigError::ValidationError(format!(
+            "{} must not be empty",
+            field
+        )));
+    }
+    validate_setting_value(field, trimmed, max_chars)?;
+    Ok(trimmed.to_string())
+}
+
+pub fn normalize_optional_setting(
+    field: &str,
+    value: Option<&str>,
+    max_chars: usize,
+) -> Result<Option<String>, ConfigError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    validate_setting_value(field, trimmed, max_chars)?;
+    Ok(Some(trimmed.to_string()))
+}
+
+fn validate_setting_value(field: &str, value: &str, max_chars: usize) -> Result<(), ConfigError> {
+    let length = value.chars().count();
+    if length > max_chars {
+        return Err(ConfigError::ValidationError(format!(
+            "{} must be at most {} characters, got {}",
+            field, max_chars, length
+        )));
+    }
+    if value.chars().any(|character| character.is_ascii_control()) {
+        return Err(ConfigError::ValidationError(format!(
+            "{} must not contain ASCII control characters",
+            field
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+pub struct RuntimeSettings {
+    settings: RwLock<SettingsConfig>,
+}
+
+impl RuntimeSettings {
+    pub fn new(settings: &SettingsConfig) -> Self {
         Self {
-            short_paragraph_length: default_short_paragraph_length(),
+            settings: RwLock::new(settings.clone()),
+        }
+    }
+
+    pub fn name(&self) -> String {
+        self.snapshot().name_or_default()
+    }
+
+    pub fn title(&self) -> Option<String> {
+        self.snapshot().title
+    }
+
+    pub fn description(&self) -> Option<String> {
+        self.snapshot().description
+    }
+
+    pub fn website_title(&self) -> Option<String> {
+        self.title()
+    }
+
+    pub fn set_name(&self, value: &str) -> Result<String, ConfigError> {
+        let normalized =
+            normalize_required_setting("settings.name", value, WEBSITE_NAME_MAX_CHARS)?;
+        self.update(|settings| {
+            settings.name = Some(normalized.clone());
+        });
+        Ok(normalized)
+    }
+
+    pub fn set_title(&self, value: Option<&str>) -> Result<Option<String>, ConfigError> {
+        let normalized =
+            normalize_optional_setting("settings.title", value, WEBSITE_TITLE_MAX_CHARS)?;
+        self.update(|settings| {
+            settings.title = normalized.clone();
+        });
+        Ok(normalized)
+    }
+
+    pub fn set_description(&self, value: Option<&str>) -> Result<Option<String>, ConfigError> {
+        let normalized = normalize_optional_setting(
+            "settings.description",
+            value,
+            WEBSITE_DESCRIPTION_MAX_CHARS,
+        )?;
+        self.update(|settings| {
+            settings.description = normalized.clone();
+        });
+        Ok(normalized)
+    }
+
+    pub fn set_website_title(&self, value: Option<&str>) -> Result<Option<String>, ConfigError> {
+        self.set_title(value)
+    }
+
+    pub fn set_settings(&self, settings: &SettingsConfig) {
+        match self.settings.write() {
+            Ok(mut guard) => {
+                *guard = settings.clone();
+            }
+            Err(poisoned) => {
+                log::error!("Runtime settings write lock poisoned; recovering");
+                let mut guard = poisoned.into_inner();
+                *guard = settings.clone();
+            }
+        }
+    }
+
+    pub fn snapshot(&self) -> SettingsConfig {
+        match self.settings.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => {
+                log::error!("Runtime settings read lock poisoned; recovering");
+                poisoned.into_inner().clone()
+            }
+        }
+    }
+
+    fn update(&self, update: impl FnOnce(&mut SettingsConfig)) {
+        match self.settings.write() {
+            Ok(mut guard) => {
+                update(&mut guard);
+            }
+            Err(poisoned) => {
+                log::error!("Runtime settings write lock poisoned; recovering");
+                let mut guard = poisoned.into_inner();
+                update(&mut guard);
+            }
         }
     }
 }
@@ -204,7 +413,8 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub security: SecurityConfig,
     pub tls: Option<TlsConfig>,
-    pub app: AppConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<AppConfig>,
     pub upload: UploadConfig,
     #[serde(default)]
     pub streaming: StreamingConfig,
@@ -214,6 +424,8 @@ pub struct Config {
     pub rendering: RenderingConfig,
     #[serde(default)]
     pub search: SearchConfig,
+    #[serde(default)]
+    pub settings: SettingsConfig,
     pub dev_mode: Option<DevMode>,
 }
 
@@ -233,6 +445,7 @@ pub struct ValidatedConfig {
     pub shortcodes: ShortcodeConfig,
     pub rendering: RenderingConfig,
     pub search: SearchConfig,
+    pub settings: SettingsConfig,
     pub dev_mode: Option<DevMode>,
 }
 
@@ -892,9 +1105,37 @@ impl Config {
         Ok(config)
     }
 
+    pub fn persist_settings(
+        root: &Path,
+        settings: &SettingsConfig,
+    ) -> Result<SettingsConfig, ConfigError> {
+        let mut config = Self::load(root)?;
+        let normalized = settings.normalized_with_legacy_app(config.app.as_ref())?;
+        config.settings = normalized.clone();
+        config.app = None;
+        Self::write(root, &config)?;
+        Ok(normalized)
+    }
+
+    fn write(root: &Path, config: &Config) -> Result<(), ConfigError> {
+        let yaml = serde_yaml::to_string(config).map_err(|err| {
+            ConfigError::LoadError(format!("Failed to serialize config file: {}", err))
+        })?;
+        let config_path = root.join("config.yaml");
+        fs::write(&config_path, yaml).map_err(|err| {
+            ConfigError::LoadError(format!(
+                "Failed to write config file '{}': {}",
+                config_path.display(),
+                err
+            ))
+        })
+    }
+
     /// Loads and validates configuration at startup. If validation fails, the application should not start.
     pub fn load_and_validate(root: &Path) -> Result<ValidatedConfig, ConfigError> {
         let mut config = Self::load(root)?;
+        let legacy_app = config.app.clone();
+        let migrate_legacy_app = legacy_app.is_some();
 
         // Validate users configuration based on auth method
         let validated_users = match config.users.auth_method {
@@ -1012,6 +1253,10 @@ impl Config {
         // Validate shortcode configuration
         Self::validate_shortcodes(&config.shortcodes)?;
         Self::validate_logging(&config.logging)?;
+        config.settings = config
+            .settings
+            .normalized_with_legacy_app(legacy_app.as_ref())?;
+        config.app = None;
 
         let servers = Self::build_servers(&config.server, config.tls.as_ref())?;
 
@@ -1037,6 +1282,15 @@ impl Config {
             config.search.worker_count = SEARCH_MAX_WORKER_COUNT;
         }
 
+        if migrate_legacy_app {
+            Self::write(root, &config)?;
+        }
+
+        let app = AppConfig {
+            name: config.settings.name_or_default(),
+            description: config.settings.description.clone().unwrap_or_default(),
+        };
+
         let validated_config = ValidatedConfig {
             servers,
             server: config.server,
@@ -1046,12 +1300,13 @@ impl Config {
             logging: config.logging,
             security: config.security,
             tls: config.tls,
-            app: config.app,
+            app,
             upload: config.upload,
             streaming: config.streaming,
             shortcodes: config.shortcodes,
             rendering: config.rendering,
             search: config.search,
+            settings: config.settings,
             dev_mode,
         };
 
@@ -1311,6 +1566,17 @@ mod tests {
             .expect("temp root")
     }
 
+    #[test]
+    fn default_allowed_extensions_include_web_font_formats() {
+        let extensions = default_allowed_extensions();
+        for expected in ["woff", "woff2", "ttf", "otf", "eot", "ttc"] {
+            assert!(
+                extensions.iter().any(|extension| extension == expected),
+                "missing default font extension {expected}"
+            );
+        }
+    }
+
     fn base_server_config() -> ServerConfig {
         ServerConfig {
             host: "127.0.0.1".to_string(),
@@ -1424,6 +1690,56 @@ mod tests {
         let mut logging = base_logging_config();
         logging.rotation.max_files = 101;
         assert!(Config::validate_logging(&logging).is_err());
+    }
+
+    #[test]
+    fn normalize_website_title_handles_unset_empty_and_trimmed_values() {
+        assert_eq!(normalize_website_title(None).unwrap(), None);
+        assert_eq!(normalize_website_title(Some("   ")).unwrap(), None);
+        assert_eq!(
+            normalize_website_title(Some("  Example Site  ")).unwrap(),
+            Some("Example Site".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_website_title_rejects_invalid_values() {
+        let too_long = "a".repeat(WEBSITE_TITLE_MAX_CHARS + 1);
+        let err = normalize_website_title(Some(&too_long)).expect_err("too long should fail");
+        assert!(err.to_string().contains("settings.title"));
+
+        let err = normalize_website_title(Some("Example\nSite"))
+            .expect_err("control characters should fail");
+        assert!(err.to_string().contains("ASCII control"));
+    }
+
+    #[test]
+    fn runtime_settings_updates_and_snapshots_website_title() {
+        let runtime_settings = RuntimeSettings::new(&SettingsConfig {
+            name: Some("Initial Name".to_string()),
+            title: Some("Initial".to_string()),
+            description: Some("Initial description".to_string()),
+        });
+        assert_eq!(runtime_settings.name(), "Initial Name");
+        assert_eq!(
+            runtime_settings.website_title(),
+            Some("Initial".to_string())
+        );
+
+        let normalized = runtime_settings
+            .set_website_title(Some("  Updated  "))
+            .expect("set title");
+        assert_eq!(normalized, Some("Updated".to_string()));
+        assert_eq!(
+            runtime_settings.snapshot().title,
+            Some("Updated".to_string())
+        );
+
+        let normalized = runtime_settings
+            .set_website_title(Some(""))
+            .expect("clear title");
+        assert_eq!(normalized, None);
+        assert_eq!(runtime_settings.website_title(), None);
     }
 
     #[test]
@@ -1541,6 +1857,182 @@ search:
         );
         fs::write(root.join("config.yaml"), content)?;
         Ok(())
+    }
+
+    fn write_local_config_with_settings(
+        root: &Path,
+        settings_block: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let settings = if settings_block.is_empty() {
+            String::new()
+        } else {
+            format!("\nsettings:\n{}\n", settings_block)
+        };
+        let content = format!(
+            r#"server:
+  host: "127.0.0.1"
+  port: 8080
+  workers: 1
+
+admin:
+  path: "/admin"
+
+users:
+  auth_method: "local"
+  local:
+    jwt:
+      secret: "test-secret"
+
+navigation:
+  max_dropdown_items: 7
+
+logging:
+  level: "info"
+
+security:
+  max_violations: 2
+  cooldown_seconds: 30
+  use_forwarded_for: false
+  hsts_enabled: false
+  hsts_max_age: 31536000
+  hsts_include_subdomains: true
+  hsts_preload: false
+
+app:
+  name: "Test"
+  description: "Test"
+
+upload:
+  max_file_size_mb: 100
+{}
+"#,
+            settings
+        );
+        fs::write(root.join("config.yaml"), content)?;
+        Ok(())
+    }
+
+    #[test]
+    fn load_and_validate_defaults_missing_settings() {
+        let fixture = temp_root("config-settings-missing");
+        write_local_config_with_settings(fixture.path(), "").expect("write config");
+
+        let validated = Config::load_and_validate(fixture.path()).expect("config should validate");
+        assert_eq!(validated.settings.name.as_deref(), Some("Test"));
+        assert_eq!(validated.settings.title, None);
+        assert_eq!(validated.settings.description.as_deref(), Some("Test"));
+    }
+
+    #[test]
+    fn load_and_validate_normalizes_website_title() {
+        let fixture = temp_root("config-settings-title");
+        write_local_config_with_settings(fixture.path(), "  title: \"  Example Site  \"")
+            .expect("write config");
+
+        let validated = Config::load_and_validate(fixture.path()).expect("config should validate");
+        assert_eq!(validated.settings.title, Some("Example Site".to_string()));
+    }
+
+    #[test]
+    fn load_and_validate_rejects_invalid_website_title() {
+        let fixture = temp_root("config-settings-control");
+        write_local_config_with_settings(fixture.path(), "  website_title: \"Example\\u0007Site\"")
+            .expect("write config");
+
+        let err = Config::load_and_validate(fixture.path()).expect_err("config should fail");
+        assert!(err.to_string().contains("settings.title"));
+    }
+
+    #[test]
+    fn load_and_validate_migrates_legacy_app_to_settings() {
+        let fixture = temp_root("config-settings-migrate-app");
+        write_local_config_with_settings(fixture.path(), "").expect("write config");
+
+        let validated = Config::load_and_validate(fixture.path()).expect("config should validate");
+        assert_eq!(validated.settings.name.as_deref(), Some("Test"));
+        assert_eq!(validated.settings.description.as_deref(), Some("Test"));
+
+        let yaml = fs::read_to_string(fixture.path().join("config.yaml")).expect("read config");
+        assert!(yaml.contains("settings:"));
+        assert!(yaml.contains("name: Test"));
+        assert!(yaml.contains("description: Test"));
+        assert!(!yaml.contains("\napp:"));
+    }
+
+    #[test]
+    fn load_and_validate_prefers_settings_over_legacy_app() {
+        let fixture = temp_root("config-settings-precedence");
+        write_local_config_with_settings(
+            fixture.path(),
+            "  name: \"  Settings Name  \"\n  description: \"  Settings description  \"",
+        )
+        .expect("write config");
+
+        let validated = Config::load_and_validate(fixture.path()).expect("config should validate");
+        assert_eq!(validated.settings.name.as_deref(), Some("Settings Name"));
+        assert_eq!(
+            validated.settings.description.as_deref(),
+            Some("Settings description")
+        );
+    }
+
+    #[test]
+    fn load_and_validate_rejects_empty_settings_name() {
+        let fixture = temp_root("config-settings-empty-name");
+        write_local_config_with_settings(fixture.path(), "  name: \"   \"").expect("write config");
+
+        let err = Config::load_and_validate(fixture.path()).expect_err("config should fail");
+        assert!(err.to_string().contains("settings.name"));
+    }
+
+    #[test]
+    fn load_and_validate_rejects_invalid_description() {
+        let fixture = temp_root("config-settings-invalid-description");
+        let description = "x".repeat(WEBSITE_DESCRIPTION_MAX_CHARS + 1);
+        write_local_config_with_settings(
+            fixture.path(),
+            &format!("  description: \"{}\"", description),
+        )
+        .expect("write config");
+
+        let err = Config::load_and_validate(fixture.path()).expect_err("config should fail");
+        assert!(err.to_string().contains("settings.description"));
+    }
+
+    #[test]
+    fn persist_settings_updates_settings_without_changing_other_values() {
+        let fixture = temp_root("config-settings-persist");
+        write_local_config_with_settings(fixture.path(), "").expect("write config");
+
+        let persisted = Config::persist_settings(
+            fixture.path(),
+            &SettingsConfig {
+                name: Some("  Example Name  ".to_string()),
+                title: Some("  Example Site  ".to_string()),
+                description: Some("  Example description  ".to_string()),
+            },
+        )
+        .expect("persist settings");
+        assert_eq!(persisted.name, Some("Example Name".to_string()));
+        assert_eq!(persisted.title, Some("Example Site".to_string()));
+        assert_eq!(
+            persisted.description,
+            Some("Example description".to_string())
+        );
+
+        let loaded = Config::load_and_validate(fixture.path()).expect("reload config");
+        assert_eq!(loaded.app.name, "Example Name");
+        assert_eq!(loaded.settings.title, Some("Example Site".to_string()));
+        assert_eq!(
+            loaded.settings.description,
+            Some("Example description".to_string())
+        );
+
+        let yaml = fs::read_to_string(fixture.path().join("config.yaml")).expect("read config");
+        assert!(yaml.contains("name: Example Name"));
+        assert!(yaml.contains("title: Example Site"));
+        assert!(yaml.contains("description: Example description"));
+        assert!(!yaml.contains("\napp:"));
     }
 
     #[test]

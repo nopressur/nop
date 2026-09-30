@@ -13,6 +13,5 @@ pub use protocol::{
     encode_frame,
 };
 pub use streaming::{
-    CompressionDecision, PreparedStream, StreamAssembler, StreamError, StreamErrorKind,
-    StreamState, StreamTracker, chunk_payload, prepare_stream_payload, should_compress_for_mime,
+    BlobStreamProducer, StreamError, StreamErrorKind, validate_outbound_chunk_bytes,
 };

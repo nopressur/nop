@@ -4,6 +4,7 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/svelte";
+import { get } from "svelte/store";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ContentEditorView from "./ContentEditorView.svelte";
@@ -16,6 +17,7 @@ import {
   resetContentListState,
   setContentListState,
 } from "../stores/contentListState";
+import { contentEditorViewPagePath } from "../stores/contentEditorLink";
 
 type RouteState = {
   path: string;
@@ -71,6 +73,15 @@ const browserMocks = vi.hoisted(() => ({
 
 const aceMocks = vi.hoisted(() => {
   let value = "";
+  let selectionRange: AceAjax.Range = {
+    start: { row: 0, column: 0 },
+    end: { row: 0, column: 0 },
+    startRow: 0,
+    startColumn: 0,
+    endRow: 0,
+    endColumn: 0,
+    isEmpty: () => true,
+  } as AceAjax.Range;
   const indexToPosition = vi.fn((index: number) => {
     const before = value.slice(0, index);
     const lines = before.split("\n");
@@ -79,16 +90,26 @@ const aceMocks = vi.hoisted(() => {
       column: lines[lines.length - 1]?.length ?? 0,
     };
   });
+  const positionToIndex = vi.fn((position: AceAjax.Position) => {
+    const lines = value.split("\n");
+    let index = 0;
+    for (let row = 0; row < position.row; row += 1) {
+      index += (lines[row]?.length ?? 0) + 1;
+    }
+    return index + position.column;
+  });
   const editor = {
+    clearSelection: vi.fn(),
     destroy: vi.fn(),
     focus: vi.fn(),
     getCursorPosition: vi.fn().mockReturnValue({ row: 0, column: 0 }),
+    getSelectionRange: vi.fn(() => selectionRange),
     getValue: vi.fn(() => value),
     insert: vi.fn(),
     moveCursorToPosition: vi.fn(),
     on: vi.fn(),
     session: {
-      getDocument: vi.fn(() => ({ indexToPosition })),
+      getDocument: vi.fn(() => ({ indexToPosition, positionToIndex })),
       setMode: vi.fn(),
       setUseWorker: vi.fn(),
     },
@@ -106,9 +127,12 @@ const aceMocks = vi.hoisted(() => {
     indexToPosition,
     reset() {
       value = "";
+      selectionRange = buildRangeFromOffsets(0, 0);
+      editor.clearSelection.mockClear();
       editor.destroy.mockClear();
       editor.focus.mockClear();
       editor.getCursorPosition.mockClear();
+      editor.getSelectionRange.mockClear();
       editor.getValue.mockClear();
       editor.insert.mockClear();
       editor.moveCursorToPosition.mockClear();
@@ -121,12 +145,30 @@ const aceMocks = vi.hoisted(() => {
       editor.setTheme.mockClear();
       editor.setValue.mockClear();
       indexToPosition.mockClear();
+      positionToIndex.mockClear();
       edit.mockClear();
+    },
+    setSelectionOffsets(start: number, end: number) {
+      selectionRange = buildRangeFromOffsets(start, end);
     },
     value() {
       return value;
     },
   };
+
+  function buildRangeFromOffsets(start: number, end: number): AceAjax.Range {
+    const startPosition = indexToPosition(start);
+    const endPosition = indexToPosition(end);
+    return {
+      start: startPosition,
+      end: endPosition,
+      startRow: startPosition.row,
+      startColumn: startPosition.column,
+      endRow: endPosition.row,
+      endColumn: endPosition.column,
+      isEmpty: () => start === end,
+    } as AceAjax.Range;
+  }
 });
 
 const searchMocks = vi.hoisted(() => ({
@@ -211,11 +253,13 @@ describe("ContentEditorView", () => {
   afterEach(() => {
     cleanup();
     clearAdminRuntimeConfig();
+    contentEditorViewPagePath.set(null);
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
     resetContentListState();
+    contentEditorViewPagePath.set(null);
     aceMocks.reset();
     Object.defineProperty(window, "ace", {
       configurable: true,
@@ -228,6 +272,7 @@ describe("ContentEditorView", () => {
       adminPath: "/admin",
       appName: "NoPressure",
       csrfTokenPath: "/admin/csrf-token-api",
+      version: "1.2.3",
       wsPath: "/admin/ws",
       wsTicketPath: "/admin/ws-ticket",
       userManagementEnabled: true,
@@ -259,6 +304,9 @@ describe("ContentEditorView", () => {
       originalFilename: "file.pdf",
       content: "",
       tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       sizeBytes: 1536,
     });
     contentMocks.prevalidateBinaryUpload.mockResolvedValue({
@@ -407,6 +455,9 @@ describe("ContentEditorView", () => {
       originalFilename: "file.pdf",
       content: "",
       tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       sizeBytes: 2048,
     });
 
@@ -423,6 +474,111 @@ describe("ContentEditorView", () => {
     await waitFor(() => expect(contentMocks.updateContent).toHaveBeenCalled());
     const updatePayload = contentMocks.updateContent.mock.calls[0]?.[0];
     expect(updatePayload?.theme).toBe("");
+  });
+
+  it("saves navbar toggle changes", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "# Body\n",
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: 7,
+    });
+
+    const { findByLabelText, getByRole, queryByText } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    await userEvent.click(getByRole("button", { name: "Expand details" }));
+    expect(queryByText("Navbar state")).not.toBeInTheDocument();
+    expect(queryByText("Content width")).not.toBeInTheDocument();
+    await userEvent.click(getByRole("button", { name: "Navbar Enabled" }));
+    await userEvent.click(getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(contentMocks.updateMarkdownStream).toHaveBeenCalled());
+    const updatePayload = contentMocks.updateMarkdownStream.mock.calls[0]?.[0];
+    expect(updatePayload?.disableNavbar).toBe(true);
+    expect(updatePayload?.contentWidth).toBe("auto");
+  });
+
+  it("saves floating nav toggle changes", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "# Body\n",
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: 7,
+    });
+
+    const { findByLabelText, getByRole, queryByText } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    await userEvent.click(getByRole("button", { name: "Expand details" }));
+    expect(queryByText("Navbar state")).not.toBeInTheDocument();
+    expect(queryByText("Content width")).not.toBeInTheDocument();
+    await userEvent.click(getByRole("button", { name: "Floating Nav Enabled" }));
+    await userEvent.click(getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(contentMocks.updateMarkdownStream).toHaveBeenCalled());
+    const updatePayload = contentMocks.updateMarkdownStream.mock.calls[0]?.[0];
+    expect(updatePayload?.disableFloatingNav).toBe(true);
+    expect(updatePayload?.disableNavbar).toBe(false);
+  });
+
+  it("saves content width toggle changes", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "# Body\n",
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: 7,
+    });
+
+    const { findByLabelText, getByRole, queryByText } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    await userEvent.click(getByRole("button", { name: "Expand details" }));
+    expect(queryByText("Navbar state")).not.toBeInTheDocument();
+    expect(queryByText("Content width")).not.toBeInTheDocument();
+    await userEvent.click(getByRole("button", { name: "Auto Width" }));
+    await userEvent.click(getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(contentMocks.updateMarkdownStream).toHaveBeenCalled());
+    const updatePayload = contentMocks.updateMarkdownStream.mock.calls[0]?.[0];
+    expect(updatePayload?.contentWidth).toBe("wide");
+    expect(updatePayload?.disableNavbar).toBe(false);
   });
 
   it("saves and collapses details on Enter in a details field", async () => {
@@ -474,6 +630,158 @@ describe("ContentEditorView", () => {
     expect(notificationMocks.pushNotification).not.toHaveBeenCalled();
   });
 
+  it("publishes the saved alias for the Markdown View Page header link", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "docs/intro",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "# Body\n",
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: 7,
+    });
+
+    const { findByLabelText } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    await waitFor(() => {
+      expect(get(contentEditorViewPagePath)).toBe("/docs/intro");
+    });
+  });
+
+  it("publishes the public root for index alias Markdown View Page links", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "index",
+      title: "Home",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "index.md",
+      content: "# Home\n",
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: 7,
+    });
+
+    const { findByLabelText } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText, "Home");
+
+    await waitFor(() => {
+      expect(get(contentEditorViewPagePath)).toBe("/");
+    });
+  });
+
+  it("falls back to the ID path for Markdown View Page links without aliases", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "# Body\n",
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: 7,
+    });
+
+    const { findByLabelText } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    await waitFor(() => {
+      expect(get(contentEditorViewPagePath)).toBe("/id/test-id");
+    });
+  });
+
+  it("updates the Markdown View Page header link after a successful alias save", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "docs/before",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "# Body\n",
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: 7,
+    });
+
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+    await waitFor(() => {
+      expect(get(contentEditorViewPagePath)).toBe("/docs/before");
+    });
+
+    await userEvent.click(getByRole("button", { name: "Expand details" }));
+    const aliasInput = await findByLabelText("Alias");
+    await userEvent.clear(aliasInput);
+    await userEvent.type(aliasInput, "docs/after");
+    await userEvent.click(getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(contentMocks.updateMarkdownStream).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(get(contentEditorViewPagePath)).toBe("/docs/after");
+    });
+  });
+
+  it("uses the ID URL for non-markdown image preview even when an alias exists", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "image-id",
+      alias: "images/photo",
+      title: "Photo",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "image/png",
+      originalFilename: "photo.png",
+      content: "",
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: 42,
+    });
+    routerMocks.route.set({
+      path: "/pages/edit/image-id",
+      query: new URLSearchParams(),
+      fullPath: "/admin/pages/edit/image-id",
+    });
+
+    const { findByAltText } = render(ContentEditorView);
+    const preview = await findByAltText("Photo");
+
+    expect(preview.getAttribute("src")).toBe("/id/image-id");
+  });
+
   it("copies the alias URL from the editor toolbar", async () => {
     contentMocks.readContent.mockResolvedValue({
       id: "test-id",
@@ -487,6 +795,9 @@ describe("ContentEditorView", () => {
       originalFilename: "file.md",
       content: "",
       tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       sizeBytes: 1024,
     });
 
@@ -518,6 +829,9 @@ describe("ContentEditorView", () => {
       originalFilename: "file.md",
       content: "",
       tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       sizeBytes: 1024,
     });
 
@@ -549,6 +863,9 @@ describe("ContentEditorView", () => {
       originalFilename: "index.md",
       content: "",
       tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       sizeBytes: 4096,
     });
 
@@ -590,6 +907,9 @@ describe("ContentEditorView", () => {
       originalFilename: "file.md",
       content: "Existing bird note ([Nest][1]).\n\n[1]: https://example.test/nest\n",
       tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       sizeBytes: 64,
     });
     browserMocks.readClipboardText.mockResolvedValueOnce(
@@ -635,6 +955,9 @@ describe("ContentEditorView", () => {
       originalFilename: "file.md",
       content: "Existing content.\n",
       tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       sizeBytes: 18,
     });
     browserMocks.readClipboardText.mockResolvedValueOnce(null);
@@ -664,6 +987,9 @@ describe("ContentEditorView", () => {
       originalFilename: "file.md",
       content: "Existing content.\n",
       tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
       sizeBytes: 18,
     });
     browserMocks.readClipboardText.mockResolvedValueOnce(" \n\t ");
@@ -686,6 +1012,91 @@ describe("ContentEditorView", () => {
     await getLoadedTitleInput(findByLabelText);
 
     expect(getByRole("button", { name: "Paste-Merge" })).toBeDisabled();
+  });
+
+  it("converts a selected markdown link into a link-card shortcode", async () => {
+    const content = "Before\n[Docs](/docs/home)\nAfter\n";
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content,
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: content.length,
+    });
+
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+    await waitFor(() => expect(aceMocks.edit).toHaveBeenCalled());
+    const start = content.indexOf("[Docs]");
+    const end = content.indexOf("\nAfter");
+    aceMocks.setSelectionOffsets(start, end);
+
+    await userEvent.click(getByRole("button", { name: "Link-Card" }));
+
+    await waitFor(() => {
+      expect(aceMocks.value()).toContain(
+        '((link-card title="Docs" link="/docs/home" noblank))',
+      );
+    });
+    expect(aceMocks.value()).not.toContain("[Docs](/docs/home)");
+    expect(aceMocks.editor.clearSelection).toHaveBeenCalled();
+    expect(notificationMocks.pushNotification).toHaveBeenCalledWith(
+      "Converted link to link card",
+      "success",
+    );
+  });
+
+  it("reports when link-card conversion has no markdown link target", async () => {
+    const content = "![Diagram](/images/diagram.png)\n";
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content,
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      sizeBytes: content.length,
+    });
+
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+    await waitFor(() => expect(aceMocks.edit).toHaveBeenCalled());
+    aceMocks.setSelectionOffsets(0, content.trimEnd().length);
+
+    await userEvent.click(getByRole("button", { name: "Link-Card" }));
+
+    expect(notificationMocks.pushNotification).toHaveBeenCalledWith(
+      "Select a Markdown link or place the cursor on one",
+      "error",
+    );
+  });
+
+  it("disables link-card conversion for non-markdown content", async () => {
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    expect(getByRole("button", { name: "Link-Card" })).toBeDisabled();
   });
 
   it("validates alias on change and clears the error when valid", async () => {

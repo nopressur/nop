@@ -10,6 +10,7 @@ use nop_management_contract::registry::{ActionDescriptor, DomainActionKey, Domai
 use std::sync::Arc;
 
 use nop_management_content::{
+    CONTENT_ACTION_ALIAS_STATUS, CONTENT_ACTION_ALIAS_STATUS_ERR, CONTENT_ACTION_ALIAS_STATUS_OK,
     CONTENT_ACTION_BINARY_PREVALIDATE, CONTENT_ACTION_BINARY_PREVALIDATE_ERR,
     CONTENT_ACTION_BINARY_PREVALIDATE_OK, CONTENT_ACTION_BINARY_UPLOAD_COMMIT,
     CONTENT_ACTION_BINARY_UPLOAD_COMMIT_ERR, CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK,
@@ -221,6 +222,10 @@ pub fn register(registry: &mut ManagementRegistry) -> Result<(), RegistryError> 
                 id: CONTENT_ACTION_UPDATE_STREAM_COMMIT,
             },
             ActionDescriptor {
+                name: "alias_status",
+                id: CONTENT_ACTION_ALIAS_STATUS,
+            },
+            ActionDescriptor {
                 name: "list_ok",
                 id: CONTENT_ACTION_LIST_OK,
             },
@@ -324,6 +329,14 @@ pub fn register(registry: &mut ManagementRegistry) -> Result<(), RegistryError> 
                 name: "update_stream_commit_err",
                 id: CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR,
             },
+            ActionDescriptor {
+                name: "alias_status_ok",
+                id: CONTENT_ACTION_ALIAS_STATUS_OK,
+            },
+            ActionDescriptor {
+                name: "alias_status_err",
+                id: CONTENT_ACTION_ALIAS_STATUS_ERR,
+            },
         ],
     })?;
 
@@ -380,6 +393,10 @@ pub fn register(registry: &mut ManagementRegistry) -> Result<(), RegistryError> 
     )?;
     registry.register_handler(
         DomainActionKey::new(CONTENT_DOMAIN_ID, CONTENT_ACTION_UPDATE_STREAM_COMMIT),
+        handler.clone(),
+    )?;
+    registry.register_handler(
+        DomainActionKey::new(CONTENT_DOMAIN_ID, CONTENT_ACTION_ALIAS_STATUS),
         handler,
     )?;
 
@@ -411,6 +428,9 @@ pub fn register(registry: &mut ManagementRegistry) -> Result<(), RegistryError> 
     ))?;
     registry.register_request_codec(Arc::new(
         nop_management_content::ContentUpdateStreamCommitRequestCodec,
+    ))?;
+    registry.register_request_codec(Arc::new(
+        nop_management_content::ContentAliasStatusRequestCodec,
     ))?;
 
     registry.register_response_codec(Arc::new(
@@ -461,9 +481,15 @@ pub fn register(registry: &mut ManagementRegistry) -> Result<(), RegistryError> 
     registry.register_response_codec(Arc::new(
         nop_management_content::MessageResponseCodec::new(CONTENT_ACTION_UPDATE_STREAM_COMMIT_ERR),
     ))?;
+    registry.register_response_codec(Arc::new(
+        nop_management_content::MessageResponseCodec::new(CONTENT_ACTION_ALIAS_STATUS_ERR),
+    ))?;
     registry.register_response_codec(Arc::new(nop_management_content::ContentListResponseCodec))?;
     registry.register_response_codec(Arc::new(
         nop_management_content::ContentNavIndexResponseCodec,
+    ))?;
+    registry.register_response_codec(Arc::new(
+        nop_management_content::ContentAliasStatusResponseCodec,
     ))?;
     registry.register_response_codec(Arc::new(nop_management_content::ContentReadResponseCodec))?;
     registry.register_response_codec(Arc::new(

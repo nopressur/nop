@@ -14,9 +14,11 @@ use nop_management_bus::ManagementTools;
 use nop_management_bus::UploadRegistry;
 use nop_management_bus::WorkflowTracker;
 use nop_management_bus::ws::{
-    AuthResponseFrame, ErrorFrame, RequestFrame, ResponseFrame, StreamAckFrame, StreamChunkFrame,
-    StreamTracker, WS_MAX_MESSAGE_BYTES, WsFrame, decode_frame, encode_frame,
+    AuthResponseFrame, BlobStreamProducer, ErrorFrame, RequestFrame, ResponseFrame, StreamAckFrame,
+    StreamChunkFrame, StreamError, StreamErrorKind, WS_MAX_MESSAGE_BYTES, WsFrame,
+    WsProtocolErrorKind, decode_frame, encode_frame,
 };
+use nop_management_bus::{assign_content_stream_id, open_content_blob_stream};
 use nop_management_contract::system::{SYSTEM_ACTION_PONG_ERROR, SYSTEM_DOMAIN_ID};
 use nop_management_contract::{
     DomainActionKey, ManagementRequest, ManagementResponse, MessageResponse,
@@ -24,6 +26,7 @@ use nop_management_contract::{
 use nop_rt_csrf::CsrfTokenStore;
 use nop_rt_iam::AuthRequest;
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -31,6 +34,11 @@ use std::time::{Duration, Instant};
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_millis(500);
 #[cfg(not(test))]
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const STREAM_ACK_TIMEOUT: Duration = Duration::from_secs(1);
+#[cfg(not(test))]
+const STREAM_ACK_TIMEOUT: Duration = Duration::from_secs(30);
+const OUTBOUND_STREAM_ID_START: u32 = 0x8000_0000;
 
 pub async fn ws_ticket(
     req: HttpRequest,
@@ -39,7 +47,7 @@ pub async fn ws_ticket(
 ) -> Result<HttpResponse> {
     log::debug!("Admin WS ticket request received");
     if let Err(response) = ws_auth::require_validated_csrf(&req) {
-        return Ok(response);
+        return Ok(*response);
     }
 
     let jwt_id = match ws_auth::resolve_jwt_id(&req, &config) {
@@ -175,7 +183,26 @@ async fn handle_ws_session(
         connection_id,
         actor_email,
     );
-    while let Some(message) = messages.next().await {
+    loop {
+        let next_message = if coordinator.awaiting_outbound_ack() {
+            match tokio::time::timeout(STREAM_ACK_TIMEOUT, messages.next()).await {
+                Ok(message) => message,
+                Err(_) => {
+                    let message = format!(
+                        "Outbound stream ack timed out after {}ms",
+                        STREAM_ACK_TIMEOUT.as_millis()
+                    );
+                    log::warn!("{}", message);
+                    coordinator.send_error(&message).await?;
+                    break;
+                }
+            }
+        } else {
+            messages.next().await
+        };
+        let Some(message) = next_message else {
+            break;
+        };
         let message = message.map_err(|err| format!("WS error: {}", err))?;
         match message {
             AggregatedMessage::Binary(bytes) => {
@@ -263,7 +290,7 @@ struct WsCoordinator {
     upload_registry: Arc<UploadRegistry>,
     connection_id: u32,
     actor_email: Option<String>,
-    outbound_streams: StreamTracker,
+    outbound_streams: OutboundBlobStreams,
     workflow_tracker: WorkflowTracker,
 }
 
@@ -283,7 +310,7 @@ impl WsCoordinator {
             upload_registry,
             connection_id,
             actor_email,
-            outbound_streams: StreamTracker::new(),
+            outbound_streams: OutboundBlobStreams::new(),
             workflow_tracker: WorkflowTracker::new(),
         }
     }
@@ -328,6 +355,10 @@ impl WsCoordinator {
             .map_err(|err| err.to_string())
     }
 
+    fn awaiting_outbound_ack(&self) -> bool {
+        self.outbound_streams.has_pending_ack()
+    }
+
     async fn handle_request(&mut self, frame: RequestFrame) -> Result<(), String> {
         log::trace!(
             "Admin WS request received (domain={}, action={}, connection_id={}, workflow_id={})",
@@ -363,7 +394,7 @@ impl WsCoordinator {
                 return Ok(());
             }
         };
-        let response = match self.bus.send_request(request).await {
+        let mut response = match self.bus.send_request(request).await {
             Ok(response) => response,
             Err(err) => {
                 log::warn!(
@@ -381,16 +412,47 @@ impl WsCoordinator {
             }
         };
 
+        let outbound_stream = self.prepare_outbound_stream(&mut response).await?;
         let response_frame = encode_response(&response, &self.registry)?;
-        self.send(&WsFrame::Response(response_frame)).await
+        if !self.send_response(response_frame).await? {
+            return Ok(());
+        }
+        if let Some((stream_id, producer)) = outbound_stream {
+            self.outbound_streams.insert(stream_id, producer)?;
+            self.send_next_outbound_chunk(stream_id).await?;
+        }
+        Ok(())
     }
 
     async fn handle_ack(&mut self, frame: StreamAckFrame) -> Result<(), String> {
-        if let Err(err) = self.outbound_streams.ack(frame.stream_id, frame.seq) {
-            return Err(format!("Ack error: {}", err));
-        }
-        if let Some(next) = self.outbound_streams.next_chunk(frame.stream_id) {
-            self.send(&WsFrame::StreamChunk(next)).await?;
+        self.outbound_streams
+            .ack(frame.stream_id, frame.seq)
+            .map_err(|err| format!("Ack error: {}", err))?;
+        self.send_next_outbound_chunk(frame.stream_id).await
+    }
+
+    async fn prepare_outbound_stream(
+        &mut self,
+        response: &mut ManagementResponse,
+    ) -> Result<Option<(u32, BlobStreamProducer)>, String> {
+        let stream_id = self.outbound_streams.allocate_stream_id()?;
+        let Some(plan) = assign_content_stream_id(response, stream_id) else {
+            return Ok(None);
+        };
+        let producer = open_content_blob_stream(&self.bus.context(), &plan)
+            .await
+            .map_err(stream_error_to_string)?;
+        Ok(Some((stream_id, producer)))
+    }
+
+    async fn send_next_outbound_chunk(&mut self, stream_id: u32) -> Result<(), String> {
+        let next = self
+            .outbound_streams
+            .next_chunk(stream_id)
+            .await
+            .map_err(stream_error_to_string)?;
+        if let Some(chunk) = next {
+            self.send(&WsFrame::StreamChunk(chunk)).await?;
         }
         Ok(())
     }
@@ -426,6 +488,155 @@ impl WsCoordinator {
     async fn send(&mut self, frame: &WsFrame) -> Result<(), String> {
         send_frame(&mut self.session, frame).await
     }
+
+    async fn send_response(&mut self, frame: ResponseFrame) -> Result<bool, String> {
+        let workflow_id = frame.workflow_id;
+        let response = WsFrame::Response(frame);
+        let bytes = match encode_frame(&response) {
+            Ok(bytes) => bytes,
+            Err(err) if err.kind() == WsProtocolErrorKind::FrameTooLarge => {
+                let error = error_response(workflow_id, &err.to_string(), &self.registry)?;
+                self.send(&WsFrame::Response(error)).await?;
+                return Ok(false);
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+        self.session
+            .binary(bytes)
+            .await
+            .map_err(|err| err.to_string())?;
+        Ok(true)
+    }
+}
+
+struct OutboundBlobStream {
+    producer: BlobStreamProducer,
+    pending_seq: Option<u32>,
+    final_sent: bool,
+}
+
+impl OutboundBlobStream {
+    fn new(producer: BlobStreamProducer) -> Self {
+        Self {
+            producer,
+            pending_seq: None,
+            final_sent: false,
+        }
+    }
+
+    fn ack(&mut self, stream_id: u32, seq: u32) -> Result<(), StreamError> {
+        match self.pending_seq {
+            Some(expected) if expected == seq => {
+                self.pending_seq = None;
+                Ok(())
+            }
+            Some(expected) => Err(StreamError::new(
+                StreamErrorKind::AckMismatch,
+                format!(
+                    "Stream {} expected ack {}, got {}",
+                    stream_id, expected, seq
+                ),
+            )),
+            None => Err(StreamError::new(
+                StreamErrorKind::AckMismatch,
+                format!("Stream {} has no pending ack", stream_id),
+            )),
+        }
+    }
+
+    async fn next_chunk(&mut self) -> Result<Option<StreamChunkFrame>, StreamError> {
+        if self.pending_seq.is_some() || self.final_sent {
+            return Ok(None);
+        }
+        let chunk = self.producer.next_chunk().await?;
+        if let Some(ref chunk) = chunk {
+            self.pending_seq = Some(chunk.seq);
+            if chunk.is_final() {
+                self.final_sent = true;
+            }
+        }
+        Ok(chunk)
+    }
+
+    fn is_done(&self) -> bool {
+        self.pending_seq.is_none() && self.final_sent
+    }
+}
+
+struct OutboundBlobStreams {
+    next_stream_id: u32,
+    streams: HashMap<u32, OutboundBlobStream>,
+}
+
+impl OutboundBlobStreams {
+    fn new() -> Self {
+        Self {
+            next_stream_id: OUTBOUND_STREAM_ID_START,
+            streams: HashMap::new(),
+        }
+    }
+
+    fn allocate_stream_id(&mut self) -> Result<u32, String> {
+        for _ in OUTBOUND_STREAM_ID_START..=u32::MAX {
+            let stream_id = self.next_stream_id;
+            self.next_stream_id = if self.next_stream_id == u32::MAX {
+                OUTBOUND_STREAM_ID_START
+            } else {
+                self.next_stream_id + 1
+            };
+            if !self.streams.contains_key(&stream_id) {
+                return Ok(stream_id);
+            }
+        }
+        Err("Outbound stream id space exhausted".to_string())
+    }
+
+    fn insert(&mut self, stream_id: u32, producer: BlobStreamProducer) -> Result<(), String> {
+        if stream_id < OUTBOUND_STREAM_ID_START {
+            return Err("Outbound stream id is outside the outbound range".to_string());
+        }
+        if self
+            .streams
+            .insert(stream_id, OutboundBlobStream::new(producer))
+            .is_some()
+        {
+            return Err(format!("Outbound stream {} already exists", stream_id));
+        }
+        Ok(())
+    }
+
+    fn ack(&mut self, stream_id: u32, seq: u32) -> Result<(), StreamError> {
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| StreamError::new(StreamErrorKind::UnknownStream, "Stream not found"))?;
+        stream.ack(stream_id, seq)
+    }
+
+    fn has_pending_ack(&self) -> bool {
+        self.streams
+            .values()
+            .any(|stream| stream.pending_seq.is_some())
+    }
+
+    async fn next_chunk(
+        &mut self,
+        stream_id: u32,
+    ) -> Result<Option<StreamChunkFrame>, StreamError> {
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| StreamError::new(StreamErrorKind::UnknownStream, "Stream not found"))?;
+        let chunk = stream.next_chunk().await?;
+        if stream.is_done() {
+            self.streams.remove(&stream_id);
+        }
+        Ok(chunk)
+    }
+}
+
+fn stream_error_to_string(err: StreamError) -> String {
+    format!("Outbound stream error: {}", err)
 }
 
 fn decode_request(
@@ -522,14 +733,20 @@ mod tests {
     use awc::ws::{Frame as ClientFrame, Message as ClientMessage};
     use futures_util::SinkExt;
     use nop_config::{DevMode, ValidatedConfig};
-    use nop_management_bus::ws::AuthFrame;
+    use nop_content_store::flat_storage::{
+        ContentId, ContentSidecar, ContentVersion, blob_path, content_id_hex, sidecar_path,
+        write_sidecar_atomic,
+    };
     use nop_management_bus::ws::STREAM_FLAG_FINAL;
+    use nop_management_bus::ws::{AuthFrame, WS_MAX_STREAM_CHUNK_BYTES};
     use nop_management_bus::{VersionInfo, build_default_registry};
     use nop_management_contract::content::{
         BinaryUploadCommitRequest, BinaryUploadInitRequest, CONTENT_ACTION_BINARY_UPLOAD_COMMIT,
         CONTENT_ACTION_BINARY_UPLOAD_COMMIT_ERR, CONTENT_ACTION_BINARY_UPLOAD_COMMIT_OK,
         CONTENT_ACTION_BINARY_UPLOAD_INIT, CONTENT_ACTION_BINARY_UPLOAD_INIT_ERR,
-        CONTENT_ACTION_BINARY_UPLOAD_INIT_OK, CONTENT_DOMAIN_ID, UploadStreamInitResponse,
+        CONTENT_ACTION_BINARY_UPLOAD_INIT_OK, CONTENT_ACTION_READ, CONTENT_ACTION_READ_ERR,
+        CONTENT_ACTION_READ_OK, CONTENT_DOMAIN_ID, ContentReadRequest, ContentReadResponse,
+        UploadStreamInitResponse,
     };
     use nop_management_contract::system::{
         GetLoggingConfigRequest, LoggingConfigResponse, PingRequest, SYSTEM_ACTION_LOGGING_GET,
@@ -575,12 +792,111 @@ mod tests {
         config
     }
 
+    fn expected_binary_content() -> Vec<u8> {
+        (0..(WS_MAX_STREAM_CHUNK_BYTES + 37))
+            .map(|index| (index % 251) as u8)
+            .collect()
+    }
+
+    fn expected_small_markdown_content() -> &'static str {
+        "# Small\r\n\nInline editor source.\r\n"
+    }
+
+    fn expected_large_markdown_content() -> Vec<u8> {
+        let mut body = b"# Large\r\n".to_vec();
+        body.extend(std::iter::repeat_n(
+            b'a',
+            WS_MAX_STREAM_CHUNK_BYTES - body.len() - 1,
+        ));
+        body.extend_from_slice("€".as_bytes());
+        body.extend_from_slice(b"\r\nTrailing CRLF line.\r\n");
+        body
+    }
+
+    fn seed_ws_content(runtime_paths: &nop_rt_paths::RuntimePaths) {
+        let content_id = ContentId(4);
+        let version = ContentVersion(1);
+        let blob = blob_path(&runtime_paths.content_dir, content_id, version);
+        if let Some(parent) = blob.parent() {
+            std::fs::create_dir_all(parent).expect("create content shard");
+        }
+        std::fs::write(&blob, expected_binary_content()).expect("write binary content");
+
+        let sidecar = ContentSidecar {
+            alias: "assets/large.bin".to_string(),
+            title: Some("Large Binary".to_string()),
+            mime: "application/octet-stream".to_string(),
+            tags: Vec::new(),
+            nav_title: None,
+            nav_parent_id: None,
+            nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
+            original_filename: Some("large.bin".to_string()),
+            theme: None,
+        };
+        let sidecar_file = sidecar_path(&runtime_paths.content_dir, content_id, version);
+        write_sidecar_atomic(&sidecar_file, &sidecar).expect("write content sidecar");
+
+        let content_id = ContentId(5);
+        let version = ContentVersion(1);
+        let blob = blob_path(&runtime_paths.content_dir, content_id, version);
+        if let Some(parent) = blob.parent() {
+            std::fs::create_dir_all(parent).expect("create markdown shard");
+        }
+        std::fs::write(&blob, expected_small_markdown_content()).expect("write small markdown");
+
+        let sidecar = ContentSidecar {
+            alias: "docs/small".to_string(),
+            title: Some("Small Markdown".to_string()),
+            mime: "text/markdown".to_string(),
+            tags: Vec::new(),
+            nav_title: None,
+            nav_parent_id: None,
+            nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
+            original_filename: Some("small.md".to_string()),
+            theme: None,
+        };
+        let sidecar_file = sidecar_path(&runtime_paths.content_dir, content_id, version);
+        write_sidecar_atomic(&sidecar_file, &sidecar).expect("write small markdown sidecar");
+
+        let content_id = ContentId(6);
+        let version = ContentVersion(1);
+        let blob = blob_path(&runtime_paths.content_dir, content_id, version);
+        if let Some(parent) = blob.parent() {
+            std::fs::create_dir_all(parent).expect("create markdown shard");
+        }
+        std::fs::write(&blob, expected_large_markdown_content()).expect("write large markdown");
+
+        let sidecar = ContentSidecar {
+            alias: "docs/large".to_string(),
+            title: Some("Large Markdown".to_string()),
+            mime: "text/markdown".to_string(),
+            tags: Vec::new(),
+            nav_title: None,
+            nav_parent_id: None,
+            nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
+            original_filename: Some("large.md".to_string()),
+            theme: None,
+        };
+        let sidecar_file = sidecar_path(&runtime_paths.content_dir, content_id, version);
+        write_sidecar_atomic(&sidecar_file, &sidecar).expect("write large markdown sidecar");
+    }
+
     async fn start_test_server() -> (String, Arc<WsTicketStore>, Arc<CsrfTokenStore>, TempDir) {
         let config = build_test_config(Some(DevMode::Localhost));
         let csrf_store = Arc::new(CsrfTokenStore::new(&config));
         let ticket_store = Arc::new(WsTicketStore::new_with_expiry(Duration::from_secs(2)));
 
         let (temp_dir, runtime_paths) = short_runtime_paths("ws-test");
+        seed_ws_content(&runtime_paths);
         let registry = build_default_registry().expect("registry");
         let upload_registry = Arc::new(nop_management_bus::UploadRegistry::new());
         let context = nop_management_bus::ManagementContext::from_components(
@@ -926,6 +1242,552 @@ mod tests {
                 }
             }
             _ => panic!("expected binary commit response"),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[actix_web::test]
+    async fn ws_streams_content_read_chunks_with_ack_gating() {
+        let (base_url, ticket_store, csrf_store, _temp_dir) = start_test_server().await;
+        let ticket = ticket_store.issue("localhost");
+        let csrf = csrf_store.get_or_refresh_token("localhost");
+
+        let client = Client::new();
+        let (_resp, mut framed) = client
+            .ws(format!("{}/admin/ws", base_url))
+            .connect()
+            .await
+            .expect("connect");
+
+        let auth = WsFrame::Auth(AuthFrame {
+            ticket,
+            csrf_token: csrf,
+        });
+        framed
+            .send(ClientMessage::Binary(encode_frame(&auth).unwrap().into()))
+            .await
+            .unwrap();
+        let response = framed.next().await.unwrap().unwrap();
+        assert!(matches!(
+            response,
+            ClientFrame::Binary(bytes) if matches!(decode_frame(&bytes).unwrap(), WsFrame::AuthOk(_))
+        ));
+
+        let read_request = ContentReadRequest {
+            id: content_id_hex(ContentId(4)),
+            stream_content: Some(true),
+        };
+        let request = WsFrame::Request(RequestFrame {
+            domain_id: CONTENT_DOMAIN_ID,
+            action_id: CONTENT_ACTION_READ,
+            workflow_id: 1,
+            payload: encode_payload(&read_request),
+        });
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&request).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+
+        let response = framed.next().await.unwrap().unwrap();
+        let read_response = match response {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::Response(response) => {
+                    assert_eq!(response.domain_id, CONTENT_DOMAIN_ID);
+                    assert_eq!(response.action_id, CONTENT_ACTION_READ_OK);
+                    decode_payload::<ContentReadResponse>(&response.payload)
+                }
+                other => panic!("expected content read response, got {:?}", other),
+            },
+            _ => panic!("expected binary content read response"),
+        };
+        assert!(read_response.content.is_none());
+        let stream_id = read_response.stream_id.expect("stream id");
+        let chunk_bytes = read_response.chunk_bytes.expect("chunk bytes") as usize;
+        assert!(stream_id >= OUTBOUND_STREAM_ID_START);
+        assert_eq!(
+            read_response.size_bytes.expect("size bytes") as usize,
+            expected_binary_content().len()
+        );
+
+        let first = framed.next().await.unwrap().unwrap();
+        let first = match first {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::StreamChunk(chunk) => chunk,
+                other => panic!("expected first stream chunk, got {:?}", other),
+            },
+            _ => panic!("expected binary stream chunk"),
+        };
+        assert_eq!(first.stream_id, stream_id);
+        assert_eq!(first.seq, 0);
+        assert_eq!(first.payload.len(), chunk_bytes);
+        assert!(!first.is_final());
+
+        framed
+            .send(ClientMessage::Ping(Bytes::from_static(b"gate")))
+            .await
+            .unwrap();
+        let pong = framed.next().await.unwrap().unwrap();
+        assert!(matches!(pong, ClientFrame::Pong(_)));
+
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&WsFrame::Ack(StreamAckFrame { stream_id, seq: 0 }))
+                    .unwrap()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        let second = framed.next().await.unwrap().unwrap();
+        let second = match second {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::StreamChunk(chunk) => chunk,
+                other => panic!("expected second stream chunk, got {:?}", other),
+            },
+            _ => panic!("expected binary stream chunk"),
+        };
+        assert_eq!(second.stream_id, stream_id);
+        assert_eq!(second.seq, 1);
+        assert!(second.is_final());
+
+        let mut received = first.payload;
+        received.extend_from_slice(&second.payload);
+        assert_eq!(received, expected_binary_content());
+
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&WsFrame::Ack(StreamAckFrame { stream_id, seq: 1 }))
+                    .unwrap()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+
+        let payload = encode_payload(&GetLoggingConfigRequest {});
+        let request = WsFrame::Request(RequestFrame {
+            domain_id: SYSTEM_DOMAIN_ID,
+            action_id: SYSTEM_ACTION_LOGGING_GET,
+            workflow_id: 2,
+            payload,
+        });
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&request).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+        let response = framed.next().await.unwrap().unwrap();
+        match response {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::Response(response) => {
+                    assert_eq!(response.domain_id, SYSTEM_DOMAIN_ID);
+                    assert_eq!(response.action_id, SYSTEM_ACTION_LOGGING_GET_OK);
+                }
+                other => panic!("expected logging response, got {:?}", other),
+            },
+            _ => panic!("expected binary logging response"),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[actix_web::test]
+    async fn ws_returns_small_markdown_inline_with_stream_flag() {
+        let (base_url, ticket_store, csrf_store, _temp_dir) = start_test_server().await;
+        let ticket = ticket_store.issue("localhost");
+        let csrf = csrf_store.get_or_refresh_token("localhost");
+
+        let client = Client::new();
+        let (_resp, mut framed) = client
+            .ws(format!("{}/admin/ws", base_url))
+            .connect()
+            .await
+            .expect("connect");
+
+        let auth = WsFrame::Auth(AuthFrame {
+            ticket,
+            csrf_token: csrf,
+        });
+        framed
+            .send(ClientMessage::Binary(encode_frame(&auth).unwrap().into()))
+            .await
+            .unwrap();
+        let response = framed.next().await.unwrap().unwrap();
+        assert!(matches!(
+            response,
+            ClientFrame::Binary(bytes) if matches!(decode_frame(&bytes).unwrap(), WsFrame::AuthOk(_))
+        ));
+
+        let read_request = ContentReadRequest {
+            id: content_id_hex(ContentId(5)),
+            stream_content: Some(true),
+        };
+        let request = WsFrame::Request(RequestFrame {
+            domain_id: CONTENT_DOMAIN_ID,
+            action_id: CONTENT_ACTION_READ,
+            workflow_id: 1,
+            payload: encode_payload(&read_request),
+        });
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&request).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+
+        let response = framed.next().await.unwrap().unwrap();
+        match response {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::Response(response) => {
+                    assert_eq!(response.domain_id, CONTENT_DOMAIN_ID);
+                    assert_eq!(response.action_id, CONTENT_ACTION_READ_OK);
+                    let payload = decode_payload::<ContentReadResponse>(&response.payload);
+                    assert_eq!(
+                        payload.content.as_deref(),
+                        Some(expected_small_markdown_content())
+                    );
+                    assert!(payload.stream_id.is_none());
+                    assert!(payload.chunk_bytes.is_none());
+                    assert!(payload.size_bytes.is_none());
+                }
+                other => panic!("expected content read response, got {:?}", other),
+            },
+            _ => panic!("expected binary content read response"),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[actix_web::test]
+    async fn ws_streams_large_markdown_read_as_raw_bytes() {
+        let (base_url, ticket_store, csrf_store, _temp_dir) = start_test_server().await;
+        let expected = expected_large_markdown_content();
+        let ticket = ticket_store.issue("localhost");
+        let csrf = csrf_store.get_or_refresh_token("localhost");
+
+        let client = Client::new();
+        let (_resp, mut framed) = client
+            .ws(format!("{}/admin/ws", base_url))
+            .connect()
+            .await
+            .expect("connect");
+
+        let auth = WsFrame::Auth(AuthFrame {
+            ticket,
+            csrf_token: csrf,
+        });
+        framed
+            .send(ClientMessage::Binary(encode_frame(&auth).unwrap().into()))
+            .await
+            .unwrap();
+        let response = framed.next().await.unwrap().unwrap();
+        assert!(matches!(
+            response,
+            ClientFrame::Binary(bytes) if matches!(decode_frame(&bytes).unwrap(), WsFrame::AuthOk(_))
+        ));
+
+        let read_request = ContentReadRequest {
+            id: content_id_hex(ContentId(6)),
+            stream_content: Some(true),
+        };
+        let request = WsFrame::Request(RequestFrame {
+            domain_id: CONTENT_DOMAIN_ID,
+            action_id: CONTENT_ACTION_READ,
+            workflow_id: 1,
+            payload: encode_payload(&read_request),
+        });
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&request).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+
+        let response = framed.next().await.unwrap().unwrap();
+        let stream_id = match response {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::Response(response) => {
+                    assert_eq!(response.domain_id, CONTENT_DOMAIN_ID);
+                    assert_eq!(response.action_id, CONTENT_ACTION_READ_OK);
+                    let payload = decode_payload::<ContentReadResponse>(&response.payload);
+                    assert!(payload.content.is_none());
+                    assert_eq!(payload.size_bytes, Some(expected.len() as u64));
+                    assert_eq!(payload.chunk_bytes, Some(WS_MAX_STREAM_CHUNK_BYTES as u32));
+                    payload.stream_id.expect("stream id")
+                }
+                other => panic!("expected content read response, got {:?}", other),
+            },
+            _ => panic!("expected binary content read response"),
+        };
+
+        let mut received = Vec::new();
+        let mut seq = 0;
+        loop {
+            let frame = framed.next().await.unwrap().unwrap();
+            let chunk = match frame {
+                ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                    WsFrame::StreamChunk(chunk) => chunk,
+                    other => panic!("expected stream chunk, got {:?}", other),
+                },
+                other => panic!("expected binary stream chunk, got {:?}", other),
+            };
+            assert_eq!(chunk.stream_id, stream_id);
+            assert_eq!(chunk.seq, seq);
+            assert!(chunk.payload.len() <= WS_MAX_STREAM_CHUNK_BYTES);
+            let final_chunk = chunk.is_final();
+            received.extend_from_slice(&chunk.payload);
+            framed
+                .send(ClientMessage::Binary(
+                    encode_frame(&WsFrame::Ack(StreamAckFrame { stream_id, seq }))
+                        .unwrap()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            if final_chunk {
+                break;
+            }
+            seq += 1;
+        }
+
+        assert_eq!(received.len(), expected.len());
+        assert_eq!(received, expected);
+        assert!(
+            String::from_utf8(received)
+                .unwrap()
+                .contains("€\r\nTrailing")
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[actix_web::test]
+    async fn ws_rejects_large_markdown_without_stream_flag() {
+        let (base_url, ticket_store, csrf_store, _temp_dir) = start_test_server().await;
+        let ticket = ticket_store.issue("localhost");
+        let csrf = csrf_store.get_or_refresh_token("localhost");
+
+        let client = Client::new();
+        let (_resp, mut framed) = client
+            .ws(format!("{}/admin/ws", base_url))
+            .connect()
+            .await
+            .expect("connect");
+
+        let auth = WsFrame::Auth(AuthFrame {
+            ticket,
+            csrf_token: csrf,
+        });
+        framed
+            .send(ClientMessage::Binary(encode_frame(&auth).unwrap().into()))
+            .await
+            .unwrap();
+        let response = framed.next().await.unwrap().unwrap();
+        assert!(matches!(
+            response,
+            ClientFrame::Binary(bytes) if matches!(decode_frame(&bytes).unwrap(), WsFrame::AuthOk(_))
+        ));
+
+        let read_request = ContentReadRequest {
+            id: content_id_hex(ContentId(6)),
+            stream_content: None,
+        };
+        let request = WsFrame::Request(RequestFrame {
+            domain_id: CONTENT_DOMAIN_ID,
+            action_id: CONTENT_ACTION_READ,
+            workflow_id: 1,
+            payload: encode_payload(&read_request),
+        });
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&request).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+
+        let response = framed.next().await.unwrap().unwrap();
+        match response {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::Response(response) => {
+                    assert_eq!(response.domain_id, CONTENT_DOMAIN_ID);
+                    assert_eq!(response.action_id, CONTENT_ACTION_READ_ERR);
+                    let payload = decode_payload::<MessageResponse>(&response.payload);
+                    assert!(payload.message.contains("request streaming content"));
+                }
+                other => panic!("expected content read error response, got {:?}", other),
+            },
+            _ => panic!("expected binary content read response"),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[actix_web::test]
+    async fn ws_rejects_malformed_content_stream_ack() {
+        let (base_url, ticket_store, csrf_store, _temp_dir) = start_test_server().await;
+        let ticket = ticket_store.issue("localhost");
+        let csrf = csrf_store.get_or_refresh_token("localhost");
+
+        let client = Client::new();
+        let (_resp, mut framed) = client
+            .ws(format!("{}/admin/ws", base_url))
+            .connect()
+            .await
+            .expect("connect");
+
+        let auth = WsFrame::Auth(AuthFrame {
+            ticket,
+            csrf_token: csrf,
+        });
+        framed
+            .send(ClientMessage::Binary(encode_frame(&auth).unwrap().into()))
+            .await
+            .unwrap();
+        let response = framed.next().await.unwrap().unwrap();
+        assert!(matches!(
+            response,
+            ClientFrame::Binary(bytes) if matches!(decode_frame(&bytes).unwrap(), WsFrame::AuthOk(_))
+        ));
+
+        let read_request = ContentReadRequest {
+            id: content_id_hex(ContentId(4)),
+            stream_content: Some(true),
+        };
+        let request = WsFrame::Request(RequestFrame {
+            domain_id: CONTENT_DOMAIN_ID,
+            action_id: CONTENT_ACTION_READ,
+            workflow_id: 1,
+            payload: encode_payload(&read_request),
+        });
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&request).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+
+        let response = framed.next().await.unwrap().unwrap();
+        let stream_id = match response {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::Response(response) => {
+                    let payload = decode_payload::<ContentReadResponse>(&response.payload);
+                    payload.stream_id.expect("stream id")
+                }
+                other => panic!("expected content read response, got {:?}", other),
+            },
+            _ => panic!("expected binary content read response"),
+        };
+        let first = framed.next().await.unwrap().unwrap();
+        match first {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::StreamChunk(chunk) => {
+                    assert_eq!(chunk.stream_id, stream_id);
+                    assert_eq!(chunk.seq, 0);
+                }
+                other => panic!("expected first stream chunk, got {:?}", other),
+            },
+            _ => panic!("expected binary stream chunk"),
+        }
+
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&WsFrame::Ack(StreamAckFrame { stream_id, seq: 1 }))
+                    .unwrap()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        let response = timeout(Duration::from_secs(2), framed.next())
+            .await
+            .expect("error timeout")
+            .expect("error frame")
+            .expect("error payload");
+        match response {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::Error(error) => assert!(error.message.contains("Ack error")),
+                other => panic!("expected error frame, got {:?}", other),
+            },
+            other => panic!("expected binary error frame, got {:?}", other),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[actix_web::test]
+    async fn ws_times_out_unacked_content_stream() {
+        let (base_url, ticket_store, csrf_store, _temp_dir) = start_test_server().await;
+        let ticket = ticket_store.issue("localhost");
+        let csrf = csrf_store.get_or_refresh_token("localhost");
+
+        let client = Client::new();
+        let (_resp, mut framed) = client
+            .ws(format!("{}/admin/ws", base_url))
+            .connect()
+            .await
+            .expect("connect");
+
+        let auth = WsFrame::Auth(AuthFrame {
+            ticket,
+            csrf_token: csrf,
+        });
+        framed
+            .send(ClientMessage::Binary(encode_frame(&auth).unwrap().into()))
+            .await
+            .unwrap();
+        let response = framed.next().await.unwrap().unwrap();
+        assert!(matches!(
+            response,
+            ClientFrame::Binary(bytes) if matches!(decode_frame(&bytes).unwrap(), WsFrame::AuthOk(_))
+        ));
+
+        let read_request = ContentReadRequest {
+            id: content_id_hex(ContentId(4)),
+            stream_content: Some(true),
+        };
+        let request = WsFrame::Request(RequestFrame {
+            domain_id: CONTENT_DOMAIN_ID,
+            action_id: CONTENT_ACTION_READ,
+            workflow_id: 1,
+            payload: encode_payload(&read_request),
+        });
+        framed
+            .send(ClientMessage::Binary(
+                encode_frame(&request).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+
+        let response = framed.next().await.unwrap().unwrap();
+        match response {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::Response(response) => {
+                    let payload = decode_payload::<ContentReadResponse>(&response.payload);
+                    assert!(payload.stream_id.is_some());
+                }
+                other => panic!("expected content read response, got {:?}", other),
+            },
+            _ => panic!("expected binary content read response"),
+        }
+
+        let first = framed.next().await.unwrap().unwrap();
+        match first {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::StreamChunk(chunk) => {
+                    assert_eq!(chunk.seq, 0);
+                    assert!(!chunk.is_final());
+                }
+                other => panic!("expected first stream chunk, got {:?}", other),
+            },
+            _ => panic!("expected binary stream chunk"),
+        }
+
+        let response = timeout(Duration::from_secs(2), framed.next())
+            .await
+            .expect("timeout error frame")
+            .expect("error frame")
+            .expect("error payload");
+        match response {
+            ClientFrame::Binary(bytes) => match decode_frame(&bytes).unwrap() {
+                WsFrame::Error(error) => assert!(error.message.contains("ack timed out")),
+                other => panic!("expected error frame, got {:?}", other),
+            },
+            other => panic!("expected binary error frame, got {:?}", other),
         }
     }
 

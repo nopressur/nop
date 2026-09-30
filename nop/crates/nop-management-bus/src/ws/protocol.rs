@@ -3,13 +3,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
+pub use nop_management_contract::ws_limits::{
+    WS_MAX_MESSAGE_BYTES, WS_MAX_RESPONSE_PAYLOAD_BYTES, WS_MAX_STREAM_CHUNK_BYTES,
+    WS_RESPONSE_FRAME_OVERHEAD_BYTES, WS_STREAM_CHUNK_OVERHEAD_BYTES,
+};
 use nop_management_contract::{WireReader, WireWriter};
 use serde::{Deserialize, Serialize};
 
-pub const WS_MAX_MESSAGE_BYTES: usize = 63 * 1024;
-// StreamChunk frame overhead: frame_type + stream_id + seq + flags + payload_len.
-pub const WS_STREAM_CHUNK_OVERHEAD_BYTES: usize = 17;
-pub const WS_MAX_STREAM_CHUNK_BYTES: usize = WS_MAX_MESSAGE_BYTES - WS_STREAM_CHUNK_OVERHEAD_BYTES;
 pub const STREAM_FLAG_FINAL: u8 = 0b0000_0001;
 pub const STREAM_FLAG_COMPRESSED: u8 = 0b0000_0010;
 
@@ -331,6 +331,58 @@ mod tests {
             payload,
         });
         let err = encode_frame(&frame).expect_err("oversized");
+        assert_eq!(err.kind(), WsProtocolErrorKind::FrameTooLarge);
+    }
+
+    #[test]
+    fn stream_chunk_limit_matches_encoded_frame_size() {
+        assert_eq!(
+            WS_MAX_STREAM_CHUNK_BYTES + WS_STREAM_CHUNK_OVERHEAD_BYTES,
+            WS_MAX_MESSAGE_BYTES
+        );
+
+        let max_frame = WsFrame::StreamChunk(StreamChunkFrame {
+            stream_id: 1,
+            seq: 0,
+            flags: STREAM_FLAG_FINAL,
+            payload: vec![0u8; WS_MAX_STREAM_CHUNK_BYTES],
+        });
+        let encoded = encode_frame(&max_frame).expect("max stream chunk encodes");
+        assert_eq!(encoded.len(), WS_MAX_MESSAGE_BYTES);
+
+        let oversized = WsFrame::StreamChunk(StreamChunkFrame {
+            stream_id: 1,
+            seq: 0,
+            flags: STREAM_FLAG_FINAL,
+            payload: vec![0u8; WS_MAX_STREAM_CHUNK_BYTES + 1],
+        });
+        let err = encode_frame(&oversized).expect_err("oversized stream chunk");
+        assert_eq!(err.kind(), WsProtocolErrorKind::FrameTooLarge);
+    }
+
+    #[test]
+    fn response_payload_limit_matches_encoded_frame_size() {
+        assert_eq!(
+            WS_MAX_RESPONSE_PAYLOAD_BYTES + WS_RESPONSE_FRAME_OVERHEAD_BYTES,
+            WS_MAX_MESSAGE_BYTES
+        );
+
+        let max_frame = WsFrame::Response(ResponseFrame {
+            domain_id: 1,
+            action_id: 2,
+            workflow_id: 3,
+            payload: vec![0u8; WS_MAX_RESPONSE_PAYLOAD_BYTES],
+        });
+        let encoded = encode_frame(&max_frame).expect("max response encodes");
+        assert_eq!(encoded.len(), WS_MAX_MESSAGE_BYTES);
+
+        let oversized = WsFrame::Response(ResponseFrame {
+            domain_id: 1,
+            action_id: 2,
+            workflow_id: 3,
+            payload: vec![0u8; WS_MAX_RESPONSE_PAYLOAD_BYTES + 1],
+        });
+        let err = encode_frame(&oversized).expect_err("oversized response");
         assert_eq!(err.kind(), WsProtocolErrorKind::FrameTooLarge);
     }
 

@@ -9,6 +9,8 @@ Status: Developed
 - Restrict socket access to the daemon user; restrict WebSocket access to authenticated admins.
 - Define a versioned binary protocol for management requests and responses.
 - Reuse management bus domain codecs across both connectors.
+- Add generic backend-to-frontend blob streaming for admin WebSocket responses without adding
+  content-type-specific frame variants.
 
 ## Technical Details
 
@@ -16,8 +18,8 @@ Status: Developed
 
 - Management requests and responses use the wire serialization defined in
   `docs/management/wire-serialization.md`.
-- Socket protocol streaming extensions for content downloads are specified by the action plan in
-  `docs/content/content-management.md`.
+- Connector stream extensions for content and blob transfers are specified in this document; domain
+  payload semantics remain in `docs/management/wire-serialization.md`.
 - Domain/action IDs are encoded as `u32` values; `workflow_id` is a required `u32` for
   request correlation and multi-stage flows.
 - Each connector allocates a sequential `connection_id` (`u32`) per accepted connection and
@@ -160,6 +162,8 @@ Status: Developed
   - `frame_type` (`Auth`, `Request`, `Response`, `StreamChunk`, `Ack`, `Error`).
   - `workflow_id`, `domain_id`, `action_id` for request/response frames.
   - `stream_id`, `seq`, `flags` for streaming frames.
+- `StreamChunk` and `Ack` frames are bidirectional. The same frame types carry UI-to-backend upload
+  bytes and backend-to-frontend response blob bytes.
 - No length prefix is needed; the WebSocket frame boundary is the message boundary.
 
 #### Backend WebSocket Coordinator
@@ -168,11 +172,106 @@ Status: Developed
   - Auth frames are handled locally.
   - Request frames are decoded via the management registry and dispatched to the bus.
   - Response frames are routed back to the requesting client and/or frontend connector.
-  - Stream frames are processed by the shared streaming helper.
+  - Incoming stream frames are appended to upload streams through the upload registry.
+  - Outgoing stream frames are produced from a response stream plan after the response frame is sent.
 - The coordinator enforces:
   - Protocol message size limits (63 KiB) and payload limits via `nop_management_contract::codec` field limits.
   - Admin-only access and CSRF ticket validation on connection setup.
   - Backpressure by gating outbound stream chunks on per-frame acknowledgements.
+
+#### Backend-to-Frontend Blob Streaming
+
+The WebSocket connector must support generic streamed response blobs from the backend to the admin
+frontend. This is a transport capability, not a Markdown-specific or content-type-specific protocol.
+
+Response selection:
+
+- The WebSocket connector must never send an encoded `Response` frame larger than
+  `WS_MAX_MESSAGE_BYTES`.
+- If the connector's final encoded-frame guard encounters an oversized response, it must send a
+  workflow-scoped system error response when that error response fits and keep the session open. If
+  even the error response cannot be sent, it closes the WebSocket session. Large Markdown reads must
+  be handled by the streamed path before this emergency guard is reached. When the guard sends this
+  fallback error for a response that had prepared stream metadata, the coordinator must not register
+  or emit the prepared stream because the client was not given a valid stream contract.
+- Content-domain read handlers own the inline-versus-streamed decision for `content.read` when
+  `stream_content = true`, because the oversized inline payload must be omitted before connector
+  encoding. They use the shared `WS_MAX_RESPONSE_PAYLOAD_BYTES` budget and encode the candidate
+  content-read payload before choosing the inline path; the WebSocket connector remains the final
+  enforcement guard.
+- Domain handlers and connector helpers may use the normal response payload inline when the shared
+  budget indicates the encoded WebSocket `Response` frame will fit within `WS_MAX_MESSAGE_BYTES`.
+- When a response would exceed `WS_MAX_MESSAGE_BYTES`, the response payload must omit the large data
+  field and include stream metadata using the domain's existing optional stream fields.
+- For content reads, this means `ContentReadResponse.content = None` with `stream_id`,
+  `chunk_bytes`, and `size_bytes` set.
+- The connector must send the `Response` frame first. The client uses that frame to discover the
+  stream and then receives raw bytes as `StreamChunk` frames over the same connection.
+
+Stream production:
+
+- Shared Rust transport limits live in `nop_management_contract::ws_limits`:
+  `WS_MAX_MESSAGE_BYTES`, `WS_RESPONSE_FRAME_OVERHEAD_BYTES`,
+  `WS_MAX_RESPONSE_PAYLOAD_BYTES`, `WS_STREAM_CHUNK_OVERHEAD_BYTES`, and
+  `WS_MAX_STREAM_CHUNK_BYTES`.
+- Shared outbound content stream planning lives in
+  `nop_management_bus::content_stream`. `ContentStreamPlan` carries `content_id`,
+  `stream_id`, `chunk_bytes`, and `size_bytes`; `assign_content_stream_id(response, stream_id)`
+  detects streamed `content.read` responses and writes the connector-owned stream ID before the
+  response is encoded; `open_content_blob_stream(context, plan)` resolves the latest content blob
+  and returns an incremental producer.
+- Shared outbound blob production lives in `nop_management_bus::ws::BlobStreamProducer`. It opens
+  the source path after validating the advertised byte length, reads with one bounded
+  `chunk_bytes` buffer at a time, emits one final empty chunk for empty blobs, and has no total
+  stream-size cap. `validate_outbound_chunk_bytes` enforces the per-frame chunk limit before a
+  producer is created.
+- If a content blob changes between the read response and stream opening, the producer rejects the
+  stream with a source-size mismatch and the connector terminates the stream/session instead of
+  sending bytes that no longer match the response metadata.
+- `stream_id` is unique within the connector connection for the lifetime of the stream.
+  Content-domain handlers do not own this ID; connectors assign it before the response is encoded.
+  Upload stream IDs are allocated from the low positive range (`1..=0x7fffffff`). Outbound
+  backend-to-frontend WebSocket response stream IDs are allocated by `OutboundBlobStreams` from
+  `0x80000000..=0xffffffff`, making the two WebSocket directions collision-free. The socket
+  connector assigns the request workflow ID as its local stream ID because socket connections have
+  no upload stream ID namespace.
+- In the admin WebSocket connector, `OutboundBlobStreams` owns the outbound stream ID allocator and
+  per-stream state. Each active stream stores a `BlobStreamProducer`, the one pending ack sequence,
+  and whether the final chunk has been sent; it removes the stream after the final ack.
+- `chunk_bytes` must be positive and small enough that the encoded `StreamChunk` frame fits within
+  `WS_MAX_MESSAGE_BYTES`.
+- The connector reads the source blob as bytes and emits `StreamChunk { stream_id, seq, flags,
+  payload }` in ascending `seq` order.
+- The final chunk sets `STREAM_FLAG_FINAL`. Empty blobs are represented by one final chunk with an
+  empty payload; shared helpers must support this case explicitly.
+- Backend-to-frontend blob streams are uncompressed. `STREAM_FLAG_COMPRESSED` is never set for this
+  path, and `size_bytes` is the exact uncompressed/raw source byte length.
+- Every outbound `StreamChunk` requires a matching `Ack { stream_id, seq }` before the next chunk is
+  sent.
+- A stale ack, wrong stream ID, source read error, disconnect, or timeout terminates the stream by
+  closing the WebSocket connection. The frontend streamed-response helper rejects the active
+  streamed operation and the normal reconnect path handles later work on a fresh connection.
+- The admin WebSocket connector enforces an outbound ack timeout while a response stream has a
+  pending unacknowledged chunk. In production the timeout is 30 seconds; tests use a short timeout.
+
+Frontend consumption:
+
+- The admin SPA transport layer exposes a simple streamed-response helper instead of making domain
+  services manage raw frame state. `AdminWsClient.requestWithStream(...)` returns the decoded
+  `ResponseFrame` plus assembled `Uint8Array` bytes when stream metadata is present.
+- The transport registers the expected stream immediately when it decodes a response with stream
+  metadata. The request promise is not resolved to the domain service until the final chunk has been
+  received, acknowledged, and validated against `size_bytes`.
+- WebSocket close/error handling rejects registered streamed-response promises as well as ordinary
+  pending requests and pending acks.
+- The frontend streamed-response timeout is an idle timeout. It is armed when stream metadata is
+  registered and re-armed after each accepted non-final chunk, so it does not impose a total
+  duration or size cap on large transfers.
+- Incoming `StreamChunk` frames without a registered stream are protocol errors; the client logs or
+  rejects them instead of acknowledging and discarding them.
+- Domain services decide how to interpret bytes. Markdown source bytes are UTF-8 decoded by the
+  content service; binary bytes can remain a `Uint8Array`.
+- Existing inline response handling remains valid for responses without stream metadata.
 
 #### Content Identification (Management Bus)
 
@@ -196,6 +295,8 @@ Status: Developed
   - Response: `content_upload_ok` (`501`) or `_err` (`502`)
 - `content_nav_index` (request id `6`)
   - Response: `content_nav_index_ok` (`601`) or `_err` (`602`)
+- `content_alias_status` (request id `14`)
+  - Response: `content_alias_status_ok` (`1401`) or `_err` (`1402`)
 
 Read request payload:
 
@@ -218,6 +319,9 @@ ContentUpdateRequest {
   nav_parent_id: Option<String>,
   nav_order: Option<i32>,
   theme: Option<String>,
+  disable_navbar: Option<bool>,
+  disable_floating_nav: Option<bool>,
+  content_width: Option<ContentWidthMode>,
   content: Option<String>,
 }
 ```
@@ -243,6 +347,9 @@ ContentUploadRequest {
   nav_order: Option<i32>,
   original_filename: Option<String>,
   theme: Option<String>,
+  disable_navbar: bool,
+  disable_floating_nav: bool,
+  content_width: ContentWidthMode,
   content: Vec<u8>,
 }
 ```
@@ -261,6 +368,9 @@ ContentReadResponse {
   nav_order: Option<i32>,
   original_filename: Option<String>,
   theme: Option<String>,
+  disable_navbar: bool,
+  disable_floating_nav: bool,
+  content_width: ContentWidthMode,
   content: Option<String>,
   stream_id: Option<u32>,
   chunk_bytes: Option<u32>,
@@ -269,9 +379,17 @@ ContentReadResponse {
 ```
 Notes:
 - `stream_content` defaults to `false` when omitted.
-- Markdown content always returns `content` regardless of `stream_content`.
-- When `stream_content` is true for non-markdown content, the response includes `stream_id`,
+- When `stream_content` is false or omitted, content reads keep their inline behavior for content
+  types with inline response fields only while the response can fit the shared inline budget. A
+  large Markdown source read without `stream_content = true` returns a content-read error instructing
+  the caller to request streaming content.
+- When `stream_content` is true, content reads may still return inline content when the encoded
+  response fits the connector frame limit.
+- When `stream_content` is true and inline content would exceed the WebSocket message limit, or no
+  inline representation is available for the content type, the response includes `stream_id`,
   `chunk_bytes`, and `size_bytes`, followed by `StreamChunk` frames over the same connection.
+- This streamed response path is generic: Markdown source, binary content, and future large blob
+  payloads use the same `StreamChunk`/`Ack` frames.
 
 #### Binary Upload Protocol
 
@@ -419,6 +537,9 @@ ContentUploadStreamInitRequest {
   nav_parent_id: Option<String>,
   nav_order: Option<i32>,
   theme: Option<String>,
+  disable_navbar: bool,
+  disable_floating_nav: bool,
+  content_width: ContentWidthMode,
   size_bytes: u64,
 }
 ```
@@ -435,6 +556,9 @@ ContentUpdateStreamInitRequest {
   nav_parent_id: Option<String>,
   nav_order: Option<i32>,
   theme: Option<String>,
+  disable_navbar: Option<bool>,
+  disable_floating_nav: Option<bool>,
+  content_width: Option<ContentWidthMode>,
   size_bytes: u64,
 }
 ```
@@ -468,19 +592,24 @@ Commit rules:
   - Invalid payloads return `Response` frames with error actions and messages.
 - The connector never performs business logic; it only validates and dispatches.
 
-#### Shared Streaming Helper (Chunking + Compression)
+#### Shared Streaming Helpers
 
-- A shared helper is available to any framed connector (WebSocket, socket) to:
-  - Compress large payloads when the content is not already compressed.
-  - Split the payload into fixed-size chunks that fit within the max protocol message size.
-  - Attach per-chunk metadata: `stream_id`, `seq`, `is_final`, `is_compressed`.
-- Compression rules:
-  - Skip compression for already-compressed media (video/audio/image formats).
-  - Apply compression for text or structured payloads when it reduces size.
+- File and blob transfers must use incremental streaming. Connectors must not materialize complete
+  file-sized payloads or complete stream chunk lists in memory.
+- Backend-to-frontend blob streaming uses `BlobStreamProducer`, which reads the source file one
+  bounded `chunk_bytes` buffer at a time and returns a single `StreamChunkFrame` per call.
+- UI-to-backend upload streaming uses `UploadRegistry`, which writes incoming chunks directly to a
+  temp file and validates size, chunk limit, UTF-8 requirements for Markdown streams, and final-byte
+  count.
+- Compression is not part of the active WebSocket blob-stream protocol. `STREAM_FLAG_COMPRESSED`
+  is rejected for uploads and is never set for backend-to-frontend blob streams. Any future
+  compressed streaming must first define frontend decompression behavior and raw-versus-compressed
+  `size_bytes` semantics.
 - Backpressure:
   - Every `StreamChunk` requires an `Ack { stream_id, seq }` before the next chunk for that stream.
   - Non-stream frames may be interleaved between chunks to allow mixed traffic.
-  - Missing or stale acknowledgements terminate the stream with an error frame.
+  - Missing or stale acknowledgements terminate the stream through the connector-specific failure
+    channel; backend-to-frontend WebSocket blob streams close the WebSocket connection.
 
 #### Frontend Coordinator (Svelte SPA)
 
@@ -492,7 +621,6 @@ Commit rules:
 - Domain services (users, tags, pages, themes, uploads) rely on shared transport helpers in:
   - `nop/ts/admin/src/transport/wsClient.ts`
   - `nop/ts/admin/src/transport/ws-coordinator.ts`
-  - `nop/ts/admin/src/transport/ws-streaming.ts`
 - These modules bundle into `nop/builtin/admin/admin-spa.js`.
 
 #### TypeScript Protocol Structures
@@ -506,13 +634,17 @@ Commit rules:
 - The frontend uses these structures to construct frames without ad-hoc JSON conversions.
 - Protocol codecs live under `nop/ts/admin/src/protocol/` and are bundled into the SPA build.
 - System logging settings use the System domain codecs in `nop/ts/admin/src/protocol/system.ts`.
+- Website Title settings use the Settings domain codecs in `nop/ts/admin/src/protocol/settings.ts`;
+  the domain/action IDs and payloads are defined in `docs/admin/settings.md`.
 
 #### Testing Scope
 
 - Unit tests for ticket issuance and expiration behavior.
 - Integration tests for WebSocket auth handshake success/failure.
 - Protocol tests for request/response encoding and codec validation failures.
-- Streaming tests covering compression skip logic, chunk ordering, acks, and interleaving.
+- Streaming tests covering compression skip logic, chunk ordering, acks, interleaving, inbound
+  uploads, outbound backend-to-frontend blob streams, and large Markdown reads that cross the
+  WebSocket frame-size boundary.
 
 ### Related Documents
 

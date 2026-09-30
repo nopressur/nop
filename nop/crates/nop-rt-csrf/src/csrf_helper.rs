@@ -382,6 +382,7 @@ mod tests {
                     shortcodes: ShortcodeConfig::default(),
                     rendering: RenderingConfig::default(),
                     search: SearchConfig::default(),
+                    settings: Default::default(),
                     dev_mode: None,
                 },
             }

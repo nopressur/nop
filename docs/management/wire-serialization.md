@@ -11,8 +11,21 @@ Status: Developed
 - Keep Rust and TypeScript encoders/decoders aligned with shared fixtures and tests.
 - Require per-action fixtures and cross-language vector tests for every management domain.
 - Maintain the canonical registry of all management domain/action IDs in this document.
+- Clarify that content-read stream metadata can carry any large raw content blob, including
+  Markdown source, without changing frame variants or payload shapes.
 
 ## Technical Details
+
+### Content Domain Metadata Protocol
+
+- Content-domain payloads that already carry page metadata include the width mode alongside existing
+  title, tags, theme, nav, `disable_navbar`, and `disable_floating_nav` fields.
+- Width mode is encoded as a string enum. Valid protocol values are `auto`, `wide`, and `narrow`.
+- Create payloads encode width mode as a required field with caller-side default `auto`.
+- Update payloads encode width mode as an optional field; omitted means unchanged.
+- Read and list responses encode the resolved width mode value.
+- Rust and TypeScript content codecs, management wire vectors, and vector tests must stay aligned
+  for this field.
 
 ### Fixture Registry and Cross-Language Vectors
 
@@ -101,7 +114,7 @@ Rules:
 - Requests: `List` (1), `Read` (2), `Update` (3), `Delete` (4), `Upload` (5), `NavIndex` (6),
   `BinaryPrevalidate` (7), `BinaryUploadInit` (8), `BinaryUploadCommit` (9),
   `UploadStreamInit` (10), `UploadStreamCommit` (11), `UpdateStreamInit` (12),
-  `UpdateStreamCommit` (13)
+  `UpdateStreamCommit` (13), `AliasStatus` (14)
 - Responses: `ListOk` (101), `ListErr` (102), `ReadOk` (201), `ReadErr` (202), `UpdateOk` (301),
   `UpdateErr` (302), `DeleteOk` (401), `DeleteErr` (402), `UploadOk` (501), `UploadErr` (502),
   `NavIndexOk` (601), `NavIndexErr` (602), `BinaryPrevalidateOk` (701),
@@ -109,7 +122,7 @@ Rules:
   `BinaryUploadCommitOk` (901), `BinaryUploadCommitErr` (902), `UploadStreamInitOk` (1001),
   `UploadStreamInitErr` (1002), `UploadStreamCommitOk` (1101), `UploadStreamCommitErr` (1102),
   `UpdateStreamInitOk` (1201), `UpdateStreamInitErr` (1202), `UpdateStreamCommitOk` (1301),
-  `UpdateStreamCommitErr` (1302)
+  `UpdateStreamCommitErr` (1302), `AliasStatusOk` (1401), `AliasStatusErr` (1402)
 
 #### Content Domain ID-First Addressing
 
@@ -118,10 +131,43 @@ Rules:
 - Alias fields become optional metadata fields; absence of an alias must be valid.
 - Action IDs and payload shapes should be extended as needed to support ID-first requests while
   keeping legacy alias-based flows in a documented deprecation path.
-- `content.read` includes an optional `stream_content` flag. When true for non-markdown content,
-  the response includes stream metadata and binary bytes are streamed via connector
-  `StreamChunk`/`Ack` frames. Markdown content remains available via `content.read` and always
-  returns the markdown body.
+- `content.read` includes an optional `stream_content` flag. When true and the content-read flow
+  chooses a streamed response, `content` is omitted and the response includes `stream_id`,
+  `chunk_bytes`, and `size_bytes`; raw content bytes are then streamed via connector
+  `StreamChunk`/`Ack` frames.
+- Streamed content-read bytes are generic raw object/source bytes. Non-Markdown content remains raw
+  object bytes; Markdown content is raw UTF-8 Markdown source bytes.
+- Inline content remains valid when the encoded response fits `WS_MAX_RESPONSE_PAYLOAD_BYTES` and
+  the active connector frame limit.
+- Oversized Markdown source reads that do not set `stream_content = true` return a content-read
+  error instead of attempting to encode an oversized inline response.
+- `content.alias_status` accepts an alias and returns the canonical alias plus whether it resolves
+  to an existing object. Existing-object responses include the object's current content ID, latest
+  version, MIME type, Markdown flag, and optional title. Clients use this before binary upload init
+  to show whether an upload creates a new object or a new non-Markdown version.
+
+##### Content Alias Status Payloads (Wire)
+
+`ContentAliasStatusRequest` encodes:
+
+1. `alias` (string)
+
+`ContentAliasStatusResponse` uses an option bitset for existing-object fields and encodes:
+
+1. `canonical_alias` (string)
+2. `exists` (bool)
+3. `id` (string, optional; present when `exists = true`)
+4. `version` (u32, optional; present when `exists = true`)
+5. `mime` (string, optional; present when `exists = true`)
+6. `is_markdown` (bool, optional; present when `exists = true`)
+7. `title` (string, optional; present when the existing object has a title)
+
+Validation:
+
+- Alias status uses the same alias canonicalization, length limit, and reserved-path rules as
+  content uploads.
+- Missing aliases, empty aliases, and invalid aliases return `AliasStatusErr`.
+- A valid alias that does not resolve to an object returns `exists = false` with no object fields.
 
 #### Roles (domain 13)
 
@@ -136,12 +182,21 @@ Rules:
   `ResetOk` (301), `ResetErr` (302)
 - Payloads: search management request/response payloads are defined in `docs/management/search.md`.
 
+#### Settings (domain 22)
+
+- Requests: `Get` (1), `SetWebsiteTitle` (2)
+- Responses: `GetOk` (101), `GetErr` (102), `SetWebsiteTitleOk` (201),
+  `SetWebsiteTitleErr` (202)
+- Payloads: Settings request/response payloads are defined in `docs/admin/settings.md`.
+
 ### Scope
 
 - Applies to management socket envelopes and WebSocket frames.
 - Payload serialization is manual; `serde` is only used for struct definitions.
 - CLI bypass remains in-process and does not use the wire codec.
 - Frame field ordering matches `docs/management/connector-socket.md`.
+- WebSocket frame-size constants are owned by `nop_management_contract::ws_limits` so Rust domain
+  handlers and connector implementations use one shared inline/chunk budget.
 
 ### Endianness and Primitives
 
@@ -246,6 +301,9 @@ impl WireEncode for ContentUpdateStreamInitRequest {
             self.nav_parent_id.is_some(),
             self.nav_order.is_some(),
             self.theme.is_some(),
+            self.disable_navbar.is_some(),
+            self.disable_floating_nav.is_some(),
+            self.content_width.is_some(),
         ];
         OptionMap::from_flags(&option_flags)?.write(writer)?;
 
@@ -269,6 +327,15 @@ impl WireEncode for ContentUpdateStreamInitRequest {
             writer.write_i32(value);
         }
         if let Some(value) = &self.theme {
+            writer.write_string(value)?;
+        }
+        if let Some(value) = self.disable_navbar {
+            writer.write_bool(value);
+        }
+        if let Some(value) = self.disable_floating_nav {
+            writer.write_bool(value);
+        }
+        if let Some(value) = &self.content_width {
             writer.write_string(value)?;
         }
         writer.write_u64(self.size_bytes);
@@ -297,6 +364,8 @@ export function encodeContentUpdateStreamInitRequest(
     payload.navParentId !== undefined,
     payload.navOrder !== undefined,
     payload.theme !== undefined,
+    payload.disableNavbar !== undefined,
+    payload.contentWidth !== undefined,
   ];
   OptionMap.write(writer, optionFlags);
 
@@ -321,6 +390,12 @@ export function encodeContentUpdateStreamInitRequest(
   }
   if (payload.theme !== undefined) {
     writer.writeString(payload.theme);
+  }
+  if (payload.disableNavbar !== undefined) {
+    writer.writeBool(payload.disableNavbar);
+  }
+  if (payload.contentWidth !== undefined) {
+    writer.writeString(payload.contentWidth);
   }
   writer.writeU64(payload.sizeBytes);
   return writer.toUint8Array();
@@ -355,15 +430,25 @@ ContentUpdateStreamInitRequest {
   nav_parent_id: Option<String>,
   nav_order: Option<i32>,
   theme: Option<String>,
+  disable_navbar: Option<bool>,
+  disable_floating_nav: Option<bool>,
+  content_width: Option<String>,
   size_bytes: u64,
 }
 ```
 
 Field order:
 
-1. Option bitset (7 optional fields -> `u8`).
+1. Option bitset (10 optional fields -> `u16`).
 2. Declared field order, encoding optionals only when present:
-   `id`, `new_alias`, `title`, `tags`, `nav_title`, `nav_parent_id`, `nav_order`, `theme`, `size_bytes`.
+   `id`, `new_alias`, `title`, `tags`, `nav_title`, `nav_parent_id`, `nav_order`, `theme`,
+   `disable_navbar`, `disable_floating_nav`, `content_width`, `size_bytes`.
+
+Content payloads that create, update, read, or list page metadata carry `disable_navbar` and
+`disable_floating_nav` as boolean fields and `content_width` as a string enum field. Create payloads
+encode concrete values with caller-side defaults of `false`, `false`, and `auto`; update payloads
+encode optional values so omitted means unchanged and present means set/clear. Read and list
+responses encode resolved values.
 
 ### Frame Codec Structure
 

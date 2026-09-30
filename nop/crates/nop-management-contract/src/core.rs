@@ -4,12 +4,13 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use crate::content::{
-    BinaryPrevalidateResponse, ContentListResponse, ContentNavIndexResponse, ContentReadResponse,
-    ContentUploadResponse, UploadStreamInitResponse,
+    BinaryPrevalidateResponse, ContentAliasStatusResponse, ContentListResponse,
+    ContentNavIndexResponse, ContentReadResponse, ContentUploadResponse, UploadStreamInitResponse,
 };
 use crate::errors::{ManagementError, ManagementErrorKind};
 use crate::roles::{RoleCommand, RoleListResponse, RoleShowResponse};
 use crate::search::{SearchCommand, SearchFindResponse};
+use crate::settings::{SettingsCommand, SettingsResponse};
 use crate::system::{ClearLogsResponse, LoggingConfigResponse, SystemCommand};
 use crate::tags::{TagCommand, TagListResponse, TagShowResponse};
 use crate::users::{
@@ -29,6 +30,7 @@ pub enum ManagementCommand {
     Roles(RoleCommand),
     Content(crate::content::ContentCommand),
     Search(SearchCommand),
+    Settings(SettingsCommand),
 }
 
 impl ManagementCommand {
@@ -40,6 +42,7 @@ impl ManagementCommand {
             ManagementCommand::Roles(_) => crate::roles::ROLES_DOMAIN_ID,
             ManagementCommand::Content(_) => crate::content::CONTENT_DOMAIN_ID,
             ManagementCommand::Search(_) => crate::search::SEARCH_DOMAIN_ID,
+            ManagementCommand::Settings(_) => crate::settings::SETTINGS_DOMAIN_ID,
         }
     }
 
@@ -51,6 +54,7 @@ impl ManagementCommand {
             ManagementCommand::Roles(command) => command.action_id(),
             ManagementCommand::Content(command) => command.action_id(),
             ManagementCommand::Search(command) => command.action_id(),
+            ManagementCommand::Settings(command) => command.action_id(),
         }
     }
 }
@@ -114,11 +118,13 @@ pub enum ResponsePayload {
     TagShow(TagShowResponse),
     ContentList(ContentListResponse),
     ContentNavIndex(ContentNavIndexResponse),
-    ContentRead(ContentReadResponse),
+    ContentRead(Box<ContentReadResponse>),
     ContentUpload(ContentUploadResponse),
     ContentBinaryPrevalidate(BinaryPrevalidateResponse),
     ContentUploadStreamInit(UploadStreamInitResponse),
+    ContentAliasStatus(ContentAliasStatusResponse),
     SearchFind(SearchFindResponse),
+    Settings(SettingsResponse),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
