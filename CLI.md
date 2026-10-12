@@ -120,8 +120,8 @@ Notes:
 
 #### content (alias: `c`)
 
-- `content store [--alias <alias>] [--title <title>] [--tag <tag> ...] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar] <file|->`
-- `content change <id> [--alias <alias>] [--title <title>] [--tag <tag> ...] [--clear-tags] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar|--enable-navbar] [<file|->]`
+- `content store [--alias <alias>] [--title <title>] [--tag <tag> ...] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar] [--disable-floating-nav] [--manual-links] <file|->`
+- `content change <id> [--alias <alias>] [--title <title>] [--tag <tag> ...] [--clear-tags] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar|--enable-navbar] [--disable-floating-nav|--enable-floating-nav] [--manual-links|--auto-links] [<file|->]`
 - `content stream <id> <file|->`
 - `content delete <id>`
 
@@ -136,10 +136,13 @@ Notes:
 - When `content store` reads from standard input, it uses `cli-store-YYYY-MM-DD-HH-MM-SS.<ext>` as the generated filename (extension derived from the detected MIME type; `application/octet-stream` uses `.bin`).
 - `--tag` may be repeated to apply multiple tags.
 - `--clear-tags` cannot be combined with `--tag`.
-- `--theme`, `--nav-title`, `--nav-parent`, `--nav-order`, `--disable-navbar`, and
-  `--enable-navbar` apply to markdown content only.
+- `--theme`, `--nav-title`, `--nav-parent`, `--nav-order`, `--disable-navbar`,
+  `--enable-navbar`, `--disable-floating-nav`, `--enable-floating-nav`, `--manual-links`, and
+  `--auto-links` apply to markdown content only.
 - `--disable-navbar` omits the public navbar on that page. `content change --enable-navbar` clears
   the flag.
+- `--manual-links` stores Manual Links (`disable_auto_links = true`). `content change --auto-links`
+  restores Auto Links. Missing values default to Auto Links.
 - `content change` only updates metadata for non-markdown files; markdown body updates use the optional file/stdin input. Omit the file argument for metadata-only changes.
 - `content change` file input must be a markdown file (`.md`/`.markdown`) and cannot be empty.
 - `content stream` returns markdown content inline and streams binary content bytes via `content.read` with `stream_content` enabled.

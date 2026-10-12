@@ -307,6 +307,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 1536,
     });
     contentMocks.prevalidateBinaryUpload.mockResolvedValue({
@@ -341,6 +342,18 @@ describe("ContentEditorView", () => {
     await getLoadedTitleInput(findByLabelText);
 
     expect(getByText("1.5 KB")).toBeInTheDocument();
+  });
+
+  it("wraps the editor action toolbar at any width", async () => {
+    const { findByLabelText, getByRole, getByText } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    const insert = getByRole("button", { name: "Insert" });
+    expect(insert.parentElement?.className).toContain("flex-wrap");
+    expect(insert.parentElement?.className).toContain("min-w-0");
+    expect(getByText("or drop file(s) on the editor").className).toContain("hidden");
+    expect(getByText("or drop file(s) on the editor").className).toContain("md:inline");
   });
 
   it("keeps the editor open when modal cancel is selected", async () => {
@@ -458,6 +471,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 2048,
     });
 
@@ -492,6 +506,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 7,
     });
 
@@ -527,6 +542,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 7,
     });
 
@@ -562,6 +578,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 7,
     });
 
@@ -578,6 +595,42 @@ describe("ContentEditorView", () => {
     await waitFor(() => expect(contentMocks.updateMarkdownStream).toHaveBeenCalled());
     const updatePayload = contentMocks.updateMarkdownStream.mock.calls[0]?.[0];
     expect(updatePayload?.contentWidth).toBe("wide");
+    expect(updatePayload?.disableNavbar).toBe(false);
+  });
+
+  it("saves auto links toggle changes", async () => {
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Original title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content: "# Body\n",
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      disableAutoLinks: false,
+      sizeBytes: 7,
+    });
+
+    const { findByLabelText, getByRole, queryByText } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText);
+
+    await userEvent.click(getByRole("button", { name: "Expand details" }));
+    expect(queryByText("Navbar state")).not.toBeInTheDocument();
+    expect(queryByText("Content width")).not.toBeInTheDocument();
+    await userEvent.click(getByRole("button", { name: "Auto Links" }));
+    await userEvent.click(getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(contentMocks.updateMarkdownStream).toHaveBeenCalled());
+    const updatePayload = contentMocks.updateMarkdownStream.mock.calls[0]?.[0];
+    expect(updatePayload?.disableAutoLinks).toBe(true);
     expect(updatePayload?.disableNavbar).toBe(false);
   });
 
@@ -646,6 +699,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 7,
     });
 
@@ -674,6 +728,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 7,
     });
 
@@ -702,6 +757,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 7,
     });
 
@@ -730,6 +786,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 7,
     });
 
@@ -768,6 +825,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 42,
     });
     routerMocks.route.set({
@@ -798,6 +856,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 1024,
     });
 
@@ -832,6 +891,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 1024,
     });
 
@@ -866,6 +926,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 4096,
     });
 
@@ -910,6 +971,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 64,
     });
     browserMocks.readClipboardText.mockResolvedValueOnce(
@@ -958,6 +1020,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 18,
     });
     browserMocks.readClipboardText.mockResolvedValueOnce(null);
@@ -990,6 +1053,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: 18,
     });
     browserMocks.readClipboardText.mockResolvedValueOnce(" \n\t ");
@@ -1031,6 +1095,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: content.length,
     });
 
@@ -1074,6 +1139,7 @@ describe("ContentEditorView", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       sizeBytes: content.length,
     });
 
@@ -1092,11 +1158,103 @@ describe("ContentEditorView", () => {
   });
 
   it("disables link-card conversion for non-markdown content", async () => {
-    const { findByLabelText, getByRole } = render(ContentEditorView);
+    const { findByLabelText, getByRole, queryByRole } = render(ContentEditorView);
     await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
     await getLoadedTitleInput(findByLabelText);
 
     expect(getByRole("button", { name: "Link-Card" })).toBeDisabled();
+    expect(queryByRole("button", { name: "Insert title to page" })).not.toBeInTheDocument();
+  });
+
+  it("disables insert-title until the markdown title field has text", async () => {
+    routerMocks.route.set({
+      path: "/pages/new",
+      query: new URLSearchParams(),
+      fullPath: "/admin/pages/new",
+    });
+
+    const { getByLabelText, getByRole } = render(ContentEditorView);
+    const insertTitle = getByRole("button", { name: "Insert title to page" });
+    expect(insertTitle).toBeDisabled();
+
+    await userEvent.type(getByLabelText("Title"), "Getting Started");
+    expect(insertTitle).toBeEnabled();
+  });
+
+  it("replaces an existing markdown H1 with the title field and focuses the first body line", async () => {
+    const content = "# New Page\n\nKeep this body.\n";
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Getting Started",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content,
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      disableAutoLinks: false,
+      sizeBytes: content.length,
+    });
+
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText, "Getting Started");
+    await waitFor(() => expect(aceMocks.edit).toHaveBeenCalled());
+
+    await userEvent.click(getByRole("button", { name: "Insert title to page" }));
+
+    await waitFor(() => {
+      expect(aceMocks.value()).toBe("# Getting Started\n\nKeep this body.\n");
+    });
+    expect(aceMocks.editor.moveCursorToPosition).toHaveBeenCalledWith({
+      row: 2,
+      column: 0,
+    });
+    expect(aceMocks.editor.clearSelection).toHaveBeenCalled();
+    expect(aceMocks.editor.focus).toHaveBeenCalled();
+  });
+
+  it("inserts a markdown H1 and blank line when the first contentful line is not an H1", async () => {
+    const content = "\n\nBody only.\n";
+    contentMocks.readContent.mockResolvedValue({
+      id: "test-id",
+      alias: "",
+      title: "Page Title",
+      navTitle: "",
+      navParentId: "",
+      navOrder: null,
+      theme: "",
+      mime: "text/markdown",
+      originalFilename: "file.md",
+      content,
+      tags: [],
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      disableAutoLinks: false,
+      sizeBytes: content.length,
+    });
+
+    const { findByLabelText, getByRole } = render(ContentEditorView);
+    await waitFor(() => expect(contentMocks.readContent).toHaveBeenCalled());
+    await getLoadedTitleInput(findByLabelText, "Page Title");
+    await waitFor(() => expect(aceMocks.edit).toHaveBeenCalled());
+
+    await userEvent.click(getByRole("button", { name: "Insert title to page" }));
+
+    await waitFor(() => {
+      expect(aceMocks.value()).toBe("# Page Title\n\nBody only.\n");
+    });
+    expect(aceMocks.editor.moveCursorToPosition).toHaveBeenCalledWith({
+      row: 2,
+      column: 0,
+    });
   });
 
   it("validates alias on change and clears the error when valid", async () => {

@@ -125,6 +125,7 @@ fn ensure_default_content(runtime_paths: &RuntimePaths) -> Result<(), BootstrapE
         disable_navbar: false,
         disable_floating_nav: false,
         content_width: Default::default(),
+        disable_auto_links: false,
         original_filename: Some("index.md".to_string()),
         theme: None,
     };

@@ -62,7 +62,8 @@ content/aa/<id>.<version>.ron
 ### Versioned Blobs
 
 - File versions are encoded in the blob filename: `<id>.<version>` where version is `0`, `1`, `2`, and so on.
-- Metadata is mutable; updating alias, title, tags, navbar metadata, theme, `disable_navbar`, or `content_width` does not create a new blob version.
+- Metadata is mutable; updating alias, title, tags, navbar metadata, theme, `disable_navbar`,
+  `disable_floating_nav`, `content_width`, or `disable_auto_links` does not create a new blob version.
 - Content updates create a new blob version and a new sidecar for that version.
 - Binary uploads with an alias that resolves to an existing non-Markdown object create a new blob
   version under that object's existing content ID. Alias and `/id/<hex>` routing resolve to the
@@ -92,6 +93,8 @@ Fields:
   `true`)
 - `content_width` (optional enum string for Markdown pages; `auto`, `wide`, or `narrow`; defaults
   to `auto` when missing)
+- `disable_auto_links` (boolean; optional on disk, defaults to `false` when missing; Auto Links
+  when `false`, Manual Links when `true`)
 - `original_filename` (optional string; preserved from upload)
 - `theme` (optional string; selects `<runtime-root>/themes/<theme>.theme`, see
   `docs/content/themes.md`)
@@ -115,6 +118,7 @@ Example:
     disable_navbar: false,
     disable_floating_nav: false,
     content_width: "auto",
+    disable_auto_links: false,
     original_filename: "getting-started.md",
     theme: Some("minimal"),
 )

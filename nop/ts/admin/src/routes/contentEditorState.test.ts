@@ -19,6 +19,7 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -41,6 +42,7 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -55,6 +57,7 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -74,6 +77,7 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -88,6 +92,7 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -107,6 +112,7 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -121,6 +127,7 @@ describe("contentEditorState", () => {
       disableNavbar: true,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -140,6 +147,7 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -154,6 +162,7 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: true,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -173,6 +182,7 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "auto",
+      disableAutoLinks: false,
       contentValue: "Body",
       isMarkdown: true,
     });
@@ -187,6 +197,42 @@ describe("contentEditorState", () => {
       disableNavbar: false,
       disableFloatingNav: false,
       contentWidth: "wide",
+      disableAutoLinks: false,
+      contentValue: "Body",
+      isMarkdown: true,
+    });
+
+    expect(isEditorDirty(initial, current)).toBe(true);
+  });
+
+  it("flags disable auto links changes as dirty", () => {
+    const initial = buildEditorSnapshot({
+      alias: "docs",
+      title: "Title",
+      selectedTags: [],
+      navTitle: "",
+      navParentId: "",
+      navOrder: "",
+      theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      disableAutoLinks: false,
+      contentValue: "Body",
+      isMarkdown: true,
+    });
+    const current = buildEditorSnapshot({
+      alias: "docs",
+      title: "Title",
+      selectedTags: [],
+      navTitle: "",
+      navParentId: "",
+      navOrder: "",
+      theme: "",
+      disableNavbar: false,
+      disableFloatingNav: false,
+      contentWidth: "auto",
+      disableAutoLinks: true,
       contentValue: "Body",
       isMarkdown: true,
     });

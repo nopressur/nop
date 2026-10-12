@@ -153,7 +153,7 @@ impl TestHarness {
         );
         let request_tools = Arc::new(RequestTools::new_with_version(
             &config.app.name,
-            "Release 1",
+            "Release 2",
         ));
         let render_tools = Arc::new(RenderTools::new());
         let security_tools = Arc::new(SecurityTools::new());
@@ -595,6 +595,7 @@ fn seed_content(runtime_paths: &RuntimePaths) {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
             original_filename: None,
             theme: None,
         };

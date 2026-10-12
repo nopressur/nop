@@ -126,6 +126,16 @@ fn run() -> i32 {
         }
     }
 
+    let _runtime_lock =
+        match nop_management_bus::runtime_lock::try_acquire_runtime_lock(&parsed_args.runtime_root)
+        {
+            Ok(lock) => lock,
+            Err(error) => {
+                eprintln!("❌ Cannot start: {}", error);
+                return 1;
+            }
+        };
+
     let result = System::new().block_on(run_server(bootstrap, daemon_requested));
     let exit_code = match result {
         Ok(()) => 0,
@@ -161,7 +171,7 @@ async fn run_server(
         _ => LevelFilter::Info,
     };
 
-    let log_identity = LogIdentity::for_current_process("Release 1");
+    let log_identity = LogIdentity::for_current_process("Release 2");
     let (log_controller, log_target) = if matches!(log_run_mode, LogRunMode::Daemon) {
         match RotatingLogWriter::new(
             runtime_paths.logs_dir.clone(),
@@ -334,7 +344,7 @@ async fn run_server(
 
     let request_tools = Arc::new(RequestTools::new_with_version(
         &validated_config.app.name,
-        "Release 1",
+        "Release 2",
     ));
     let render_tools = Arc::new(RenderTools::new());
     let security_tools = Arc::new(SecurityTools::new());

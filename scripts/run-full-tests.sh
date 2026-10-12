@@ -9,17 +9,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/rust-crates.sh"
 
-# Shared compilation cache on shared storage (never root fs or home).
-# An explicitly set SCCACHE_DIR or RUSTC_WRAPPER always wins.
-if [[ -z "${SCCACHE_DIR:-}" ]]; then
-  SCCACHE_DIR="/mnt/shared/cache"
-  export SCCACHE_DIR
-fi
-mkdir -p "${SCCACHE_DIR}" 2>/dev/null || SCCACHE_DIR=""
-if [[ -z "${RUSTC_WRAPPER:-}" && -n "${SCCACHE_DIR}" && -x /usr/bin/sccache ]]; then
-  export RUSTC_WRAPPER=/usr/bin/sccache
-fi
-
 ADMIN_DIR="$NOP_DIR/ts/admin"
 LOGIN_DIR="$NOP_DIR/ts/login"
 SITE_DIR="$NOP_DIR/ts/site"
@@ -144,7 +133,3 @@ echo "Running public site tests..."
 (cd "$SITE_DIR" && npm run test)
 echo "Building public site bundle..."
 (cd "$SITE_DIR" && npm run build)
-
-if [[ -n "${SCCACHE_DIR:-}" && -d "${SCCACHE_DIR}" ]]; then
-  echo "sccache cache: $(du -sh "${SCCACHE_DIR}" 2>/dev/null | cut -f1) in ${SCCACHE_DIR}"
-fi

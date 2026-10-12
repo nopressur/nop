@@ -6,7 +6,7 @@ Status: Developed
 
 - Management connectors emit log messages for accept failures, socket cleanup, and codec errors.
 - Adjust logging with `RUST_LOG` (for example, `RUST_LOG=info` or `RUST_LOG=debug`).
-- Use `nop -C <root> system ping` to confirm the daemon is responding.
+- Use `nop -C <root> system ping` to confirm the daemon is responding; it fails when the daemon is stopped.
 - Verify socket presence at `<runtime-root>/state/sys/management.sock`.
 
 ## Capacity Notes

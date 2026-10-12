@@ -13,7 +13,7 @@ Status: Developed
 
 ### UI Contract
 
-- The Markdown editor toolbar includes a `Paste-Merge` `CompactButton` next to the existing editor actions.
+- The Markdown editor toolbar includes a `Paste-Merge` `CompactButton` next to the existing editor actions. The toolbar wraps at every viewport width.
 - The button is disabled when the opened content is not Markdown.
 - Clicking the button reads clipboard text through a browser service helper.
 - Clipboard content is accepted when it is text and has non-whitespace content. No full Markdown validation is required.

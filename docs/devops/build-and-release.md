@@ -68,7 +68,9 @@ Required flow:
 4. Run `scripts/check-caravaggio-status.sh` from the `_master` checkout and resolve every
    flagged document per the Caravaggio Merge Gate below. The gate scans the post-squash
    working tree, so it covers both the incoming diff and the current `master` content.
-5. Run `private/scripts/bump-version.sh patch "<descriptive release commit message>"` from the
+5. Rewrite `private/scripts/release-notes.md` from the pending squash diff, per Release Notes
+   below, so the bump script can commit it with the rest of the squash.
+6. Run `private/scripts/bump-version.sh patch "<descriptive release commit message>"` from the
    `_master` checkout.
 
 `private/scripts/bump-version.sh` intentionally consumes the pending squash diff. The script updates
@@ -84,6 +86,35 @@ in the release commit.
 When a release manager explicitly decides that master has not changed since the feature branch was
 cut, final master-side regression validation may be skipped after the squash merge. The feature
 worktree must still have completed the applicable targeted and broader validation for the change.
+
+### Release Notes
+
+After the squash merge and before `private/scripts/bump-version.sh`, replace
+`private/scripts/release-notes.md` with the GitHub release body for this squash.
+
+- Review the staged squash diff on `_master` and write user-facing bullets from that diff.
+  Omit internal tooling, private operational detail, and the internal package version.
+- Do not put a release number in the file. GitHub already titles the published release
+  `Release <n>`, so an H1 such as `# Release 2` duplicates it.
+- Start at H2. Keep these sections:
+
+  ```markdown
+  ## Improvements
+  - ...
+
+  ## Fixes
+  - ...
+
+  ## Notes
+  - Download and review the source and build it for your environment.
+  - If you trust my builds, you can download executables here.
+  - Artefacts are built on macOS using Cargo for macOS and `cross` for Linux.
+  ```
+
+- `## Notes` keeps that trust/build guidance. Rewrite `## Improvements` and `## Fixes` for
+  this squash only.
+- Leave the file unstaged if needed: the bump script stages the whole working tree, so the
+  notes land in the same release commit.
 
 ### Caravaggio Merge Gate
 

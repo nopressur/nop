@@ -341,17 +341,22 @@ async fn handle_list<C>(
     context: &C,
 ) -> ManagementResponse
 where
-    C: TagStoreProvider,
+    C: TagStoreProvider + PageCacheAccess,
 {
     let tags = match context.tags_snapshot() {
         Ok(tags) => tags,
         Err(err) => return response_err(TAG_ACTION_LIST_ERR, workflow_id, &err),
     };
+    let counts = context
+        .page_cache()
+        .map(|cache| cache.tag_usage_counts())
+        .unwrap_or_default();
     let summaries = tags
         .iter()
         .map(|(id, record)| TagSummary {
             id: id.clone(),
             name: record.name.clone(),
+            usage_count: counts.get(id).copied().unwrap_or(0),
         })
         .collect();
     response_tag_list(workflow_id, summaries)

@@ -28,7 +28,7 @@ pub fn domain() -> DomainSpec {
                 name: "store",
                 aliases: &[],
                 usage: &[
-                    "content store [--alias <alias>] [--title <title>] [--tag <tag> ...] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar] [--disable-floating-nav] <file|->",
+                    "content store [--alias <alias>] [--title <title>] [--tag <tag> ...] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar] [--disable-floating-nav] [--manual-links] <file|->",
                 ],
                 parser: parse_store,
             },
@@ -36,7 +36,7 @@ pub fn domain() -> DomainSpec {
                 name: "change",
                 aliases: &[],
                 usage: &[
-                    "content change <id> [--alias <alias>] [--title <title>] [--tag <tag> ...] [--clear-tags] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar|--enable-navbar] [--disable-floating-nav|--enable-floating-nav] [<file|->]",
+                    "content change <id> [--alias <alias>] [--title <title>] [--tag <tag> ...] [--clear-tags] [--theme <theme>] [--nav-title <title>] [--nav-parent <id>] [--nav-order <order>] [--disable-navbar|--enable-navbar] [--disable-floating-nav|--enable-floating-nav] [--manual-links|--auto-links] [<file|->]",
                 ],
                 parser: parse_change,
             },
@@ -66,6 +66,7 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
     let mut nav_order: Option<i32> = None;
     let mut disable_navbar = false;
     let mut disable_floating_nav = false;
+    let mut disable_auto_links = false;
     let mut file_arg: Option<String> = None;
 
     let mut idx = 0;
@@ -134,6 +135,13 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
                     disable_floating_nav = true;
                     idx += 1;
                 }
+                "--manual-links" => {
+                    if disable_auto_links {
+                        return Err(CliError::usage("Duplicate --manual-links"));
+                    }
+                    disable_auto_links = true;
+                    idx += 1;
+                }
                 flag => {
                     return Err(CliError::usage(format!(
                         "Unknown flag for content store: {}",
@@ -162,7 +170,8 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
         || nav_parent_id.is_some()
         || nav_order.is_some()
         || disable_navbar
-        || disable_floating_nav;
+        || disable_floating_nav
+        || disable_auto_links;
     let (content, original_filename, mime) = read_store_payload(&file_arg, markdown_hint)?;
     let is_markdown = mime.eq_ignore_ascii_case("text/markdown");
 
@@ -172,10 +181,11 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
             || nav_parent_id.is_some()
             || nav_order.is_some()
             || disable_navbar
-            || disable_floating_nav)
+            || disable_floating_nav
+            || disable_auto_links)
     {
         return Err(CliError::usage(
-            "content store nav/theme/disable-navbar/disable-floating-nav flags require markdown content",
+            "content store nav/theme/disable-navbar/disable-floating-nav/manual-links flags require markdown content",
         ));
     }
     if nav_title.is_none() && (nav_parent_id.is_some() || nav_order.is_some()) {
@@ -206,6 +216,7 @@ fn parse_store(args: &[String]) -> Result<CliCommand, CliError> {
             disable_navbar,
             disable_floating_nav,
             content_width: ContentWidthMode::Auto,
+            disable_auto_links,
             content,
         })),
         success_actions: vec![DomainActionKey::new(
@@ -229,6 +240,7 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
     let mut nav_order: Option<i32> = None;
     let mut disable_navbar: Option<bool> = None;
     let mut disable_floating_nav: Option<bool> = None;
+    let mut disable_auto_links: Option<bool> = None;
     let mut file_arg: Option<String> = None;
 
     let mut idx = 0;
@@ -333,6 +345,24 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
                     disable_floating_nav = Some(false);
                     idx += 1;
                 }
+                "--manual-links" => {
+                    if disable_auto_links.is_some() {
+                        return Err(CliError::usage(
+                            "--manual-links cannot be combined with --auto-links",
+                        ));
+                    }
+                    disable_auto_links = Some(true);
+                    idx += 1;
+                }
+                "--auto-links" => {
+                    if disable_auto_links.is_some() {
+                        return Err(CliError::usage(
+                            "--auto-links cannot be combined with --manual-links",
+                        ));
+                    }
+                    disable_auto_links = Some(false);
+                    idx += 1;
+                }
                 flag => {
                     return Err(CliError::usage(format!(
                         "Unknown flag for content change: {}",
@@ -377,6 +407,7 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
         && nav_order.is_none()
         && disable_navbar.is_none()
         && disable_floating_nav.is_none()
+        && disable_auto_links.is_none()
         && content.is_none()
     {
         return Err(CliError::usage(
@@ -397,6 +428,7 @@ fn parse_change(args: &[String]) -> Result<CliCommand, CliError> {
             disable_navbar,
             disable_floating_nav,
             content_width: None,
+            disable_auto_links,
             content,
         })),
         success_actions: vec![DomainActionKey::new(
@@ -621,6 +653,26 @@ mod tests {
             ManagementCommand::Content(ContentCommand::Upload(request)) => {
                 assert!(request.disable_floating_nav);
                 assert!(!request.disable_navbar);
+                assert!(!request.disable_auto_links);
+            }
+            other => panic!("unexpected command: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_store_accepts_manual_links_for_markdown() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let path = write_temp_file(&temp, "note.md", b"Hello\n");
+        let args = vec!["--title", "Note", "--manual-links", path.to_str().unwrap()]
+            .into_iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+
+        let command = parse_store(&args).expect("parse store");
+        match command.command {
+            ManagementCommand::Content(ContentCommand::Upload(request)) => {
+                assert!(request.disable_auto_links);
+                assert!(!request.disable_navbar);
             }
             other => panic!("unexpected command: {:?}", other),
         }
@@ -638,9 +690,38 @@ mod tests {
             ManagementCommand::Content(ContentCommand::Update(request)) => {
                 assert_eq!(request.disable_floating_nav, Some(false));
                 assert_eq!(request.disable_navbar, None);
+                assert_eq!(request.disable_auto_links, None);
             }
             other => panic!("unexpected command: {:?}", other),
         }
+    }
+
+    #[test]
+    fn parse_change_accepts_auto_links() {
+        let args = vec!["0000000000000001", "--auto-links"]
+            .into_iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+
+        let command = parse_change(&args).expect("parse change");
+        match command.command {
+            ManagementCommand::Content(ContentCommand::Update(request)) => {
+                assert_eq!(request.disable_auto_links, Some(false));
+                assert_eq!(request.disable_navbar, None);
+            }
+            other => panic!("unexpected command: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_change_rejects_conflicting_link_flags() {
+        let args = vec!["0000000000000001", "--manual-links", "--auto-links"]
+            .into_iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+
+        let err = parse_change(&args).expect_err("expected error");
+        assert!(err.to_string().contains("--auto-links cannot be combined"));
     }
 
     #[test]

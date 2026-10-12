@@ -54,6 +54,7 @@ export interface TagShowRequest {
 export interface TagSummary {
   id: string;
   name: string;
+  usage_count: number;
 }
 
 export interface TagListResponse {
@@ -166,6 +167,7 @@ export function decodeTagListResponse(bytes: Uint8Array): TagListResponse {
   const tags = reader.readVec((itemReader) => ({
     id: itemReader.readString(),
     name: itemReader.readString(),
+    usage_count: itemReader.readU32(),
   }));
   reader.ensureFullyConsumed();
   return { tags };

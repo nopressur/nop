@@ -21,6 +21,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     buildModalInsertSnippet,
   } from "../services/insertSnippet";
   import { convertMarkdownLinkToLinkCard } from "../services/markdownLinkCard";
+  import { insertTitleAsPageHeading } from "../services/markdownTitleHeading";
   import UnsavedChangesModal from "../components/UnsavedChangesModal.svelte";
   import Select from "../components/Select.svelte";
   import UploadOverlay from "../components/UploadOverlay.svelte";
@@ -69,6 +70,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let title = "";
   let selectedTags: string[] = [];
   let availableTags: string[] = [];
+  let tagCounts: Record<string, number> = {};
   let navTitle = "";
   let navParentId = "";
   let navOrder = "";
@@ -76,6 +78,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
   let disableNavbar = false;
   let disableFloatingNav = false;
   let contentWidth: "auto" | "wide" | "narrow" = "auto";
+  let disableAutoLinks = false;
   let availableThemes: string[] = [];
   let mime = "text/markdown";
   let originalFilename = "";
@@ -107,6 +110,10 @@ The code and documentation in this repository is licensed under the GNU Affero G
     { value: "wide", label: "Wide", tone: "warning" },
     { value: "narrow", label: "Narrow", tone: "danger" },
   ];
+  const autoLinksToggleOptions: StateToggleOption[] = [
+    { value: "auto", label: "Auto Links", tone: "success" },
+    { value: "manual", label: "Manual Links", tone: "danger" },
+  ];
 
   let initialState: ContentEditorSnapshot = buildEditorSnapshot({
     alias: "",
@@ -119,6 +126,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     disableNavbar: false,
     disableFloatingNav: false,
     contentWidth: "auto",
+    disableAutoLinks: false,
     contentValue: "",
     isMarkdown: true,
   });
@@ -203,6 +211,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     disableNavbar,
     disableFloatingNav,
     contentWidth,
+    disableAutoLinks,
     contentValue,
     isMarkdown,
   });
@@ -221,6 +230,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
       disableNavbar,
       disableFloatingNav,
       contentWidth,
+      disableAutoLinks,
       contentValue,
       isMarkdown,
     });
@@ -316,6 +326,24 @@ The code and documentation in this repository is licensed under the GNU Affero G
     pushNotification("Pasted and merged references", "success");
   }
 
+  async function insertTitleToPage(): Promise<void> {
+    if (!isMarkdown || !title.trim()) {
+      return;
+    }
+    const result = insertTitleAsPageHeading(contentValue || "", title);
+    contentValue = result.content;
+    sizeBytes = getContentSizeBytes(contentValue || "");
+    await tick();
+    if (editorRef) {
+      const position = editorRef.session
+        .getDocument()
+        .indexToPosition(result.cursorOffset, 0);
+      editorRef.moveCursorToPosition(position);
+      editorRef.clearSelection();
+      editorRef.focus();
+    }
+  }
+
   async function convertLinkToLinkCard(): Promise<void> {
     if (!isMarkdown || !editorRef) {
       return;
@@ -381,6 +409,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     try {
       const tags = await listTags();
       availableTags = tags.map((tag) => tag.id).sort((a, b) => a.localeCompare(b));
+      tagCounts = Object.fromEntries(tags.map((tag) => [tag.id, tag.usage_count]));
       syncTagsWithAvailable();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load tags";
@@ -541,6 +570,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     disableNavbar = false;
     disableFloatingNav = false;
     contentWidth = "auto";
+    disableAutoLinks = false;
     mime = "text/markdown";
     originalFilename = "";
     sizeBytes = null;
@@ -585,6 +615,10 @@ The code and documentation in this repository is licensed under the GNU Affero G
     }
   }
 
+  function handleAutoLinksToggle(event: CustomEvent<string>): void {
+    disableAutoLinks = event.detail === "manual";
+  }
+
   async function loadContent(requestedId: string): Promise<void> {
     loading = true;
     detailsOpen = false;
@@ -602,6 +636,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
       disableNavbar = payload.disableNavbar;
       disableFloatingNav = payload.disableFloatingNav;
       contentWidth = payload.contentWidth;
+      disableAutoLinks = payload.disableAutoLinks;
       mime = payload.mime;
       originalFilename = payload.originalFilename || "";
       sizeBytes =
@@ -690,6 +725,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           disableNavbar,
           disableFloatingNav,
           contentWidth,
+          disableAutoLinks,
           content: contentValue || ""
         });
         pushNotification("Content created", "success");
@@ -725,6 +761,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           disableNavbar,
           disableFloatingNav,
           contentWidth,
+          disableAutoLinks,
           content: contentValue || ""
         });
         sizeBytes = getContentSizeBytes(contentValue || "");
@@ -741,6 +778,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
           disableNavbar,
           disableFloatingNav,
           contentWidth,
+          disableAutoLinks,
           content: null
         });
       }
@@ -985,7 +1023,36 @@ The code and documentation in this repository is licensed under the GNU Affero G
       <div class="flex items-end gap-3">
         <div class="flex-1">
           <label for="content-title" class="text-[11px] uppercase tracking-[0.3em] text-muted">Title</label>
-          <Input id="content-title" bind:value={title} className="mt-2" />
+          <div class="mt-2">
+            {#if isMarkdown}
+              <Input id="content-title" bind:value={title}>
+                <svelte:fragment slot="suffix">
+                  <button
+                    type="button"
+                    class="grid h-6 w-6 place-items-center rounded-sm text-muted transition hover:bg-surface-2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted"
+                    aria-label="Insert title to page"
+                    disabled={!title.trim()}
+                    on:click={insertTitleToPage}
+                  >
+                    <svg
+                      viewBox="0 0 16 16"
+                      width="12"
+                      height="12"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <path
+                        fill="currentColor"
+                        d="M3.2 5.4a.75.75 0 0 1 1.06-.06L8 8.86l3.74-3.52a.75.75 0 0 1 1.06 1.06l-4.25 4a.75.75 0 0 1-1.06 0l-4.25-4a.75.75 0 0 1-.06-1.06z"
+                      />
+                    </svg>
+                  </button>
+                </svelte:fragment>
+              </Input>
+            {:else}
+              <Input id="content-title" bind:value={title} />
+            {/if}
+          </div>
         </div>
         <button
           type="button"
@@ -998,7 +1065,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
       </div>
 
       {#if detailsOpen}
-        <div class="mt-4 grid gap-4 md:grid-cols-2" bind:this={detailsRef}>
+        <div class="mt-4 grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2" bind:this={detailsRef}>
           <div>
             <label for="content-alias" class="text-[11px] uppercase tracking-[0.3em] text-muted">Alias</label>
             {#if aliasLocked}
@@ -1044,15 +1111,22 @@ The code and documentation in this repository is licensed under the GNU Affero G
               disabled={!isMarkdown}
               on:change={handleWidthToggle}
             />
+            <StateToggle
+              value={disableAutoLinks ? "manual" : "auto"}
+              options={autoLinksToggleOptions}
+              disabled={!isMarkdown}
+              on:change={handleAutoLinksToggle}
+            />
           </div>
-          <div class="md:col-span-2">
+          <div class="min-w-0 md:col-span-2">
             <label for="content-tags" class="text-[11px] uppercase tracking-[0.3em] text-muted">Tags</label>
-            <div class="mt-2">
+            <div class="mt-2 min-w-0 w-full">
               <ChipSelect
                 id="content-tags"
                 options={availableTags}
                 bind:selected={selectedTags}
-                placeholder={tagsLoading ? "Loading tags..." : "Select tag"}
+                counts={tagCounts}
+                placeholder={tagsLoading ? "Loading tags..." : "Filter tags"}
                 emptyLabel="No tags"
                 disabled={tagsLoading}
               />
@@ -1105,7 +1179,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
         </div>
       {/if}
 
-      <div class="mt-4 flex items-center gap-2">
+      <div class="mt-4 flex min-w-0 flex-wrap items-center gap-2">
         <CompactButton variant="outline" disabled={!isMarkdown} on:click={openInsertModal}>
           Insert
         </CompactButton>
@@ -1118,7 +1192,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
         <CompactButton variant="outline" on:click={openUploadOverlay}>
           Upload
         </CompactButton>
-        <span class="text-[9px] uppercase tracking-[0.28em] text-muted">
+        <span class="hidden text-[9px] uppercase tracking-[0.28em] text-muted md:inline">
           or drop file(s) on the editor
         </span>
         <CompactButton

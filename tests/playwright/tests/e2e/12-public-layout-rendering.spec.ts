@@ -142,6 +142,31 @@ test("hero image height uses viewport-height values selected by viewport-width b
   }
 });
 
+test("public layout auto-links bare HTTP URLs unless Manual Links is set", async ({
+  page,
+  harness,
+}) => {
+  await page.goto(`${harness.baseUrl}${harness.publicRenderFixtures.autoLinksPath}`);
+  await expect(page.getByRole("heading", { name: "Render Auto Links" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "https://example.com/docs" })).toHaveAttribute(
+    "href",
+    "https://example.com/docs"
+  );
+  await expect(page.getByRole("link", { name: "Docs", exact: true })).toHaveAttribute(
+    "href",
+    "https://example.com/docs"
+  );
+
+  await page.goto(`${harness.baseUrl}${harness.publicRenderFixtures.manualLinksPath}`);
+  await expect(page.getByRole("heading", { name: "Render Manual Links" })).toBeVisible();
+  await expect(page.getByText("See https://example.com/plain")).toBeVisible();
+  await expect(page.getByRole("link", { name: "https://example.com/plain" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Docs", exact: true })).toHaveAttribute(
+    "href",
+    "https://example.com/docs"
+  );
+});
+
 test("public layout applies forced content width metadata", async ({ page, harness }) => {
   const cases = [
     {

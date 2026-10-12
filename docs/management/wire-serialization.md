@@ -18,14 +18,18 @@ Status: Developed
 
 ### Content Domain Metadata Protocol
 
-- Content-domain payloads that already carry page metadata include the width mode alongside existing
-  title, tags, theme, nav, `disable_navbar`, and `disable_floating_nav` fields.
+- Content-domain payloads that already carry page metadata include the width mode and auto-link
+  flag alongside existing title, tags, theme, nav, `disable_navbar`, and `disable_floating_nav`
+  fields.
 - Width mode is encoded as a string enum. Valid protocol values are `auto`, `wide`, and `narrow`.
 - Create payloads encode width mode as a required field with caller-side default `auto`.
 - Update payloads encode width mode as an optional field; omitted means unchanged.
 - Read and list responses encode the resolved width mode value.
+- `disable_auto_links` is a boolean. Create payloads encode it as a required field with caller-side
+  default `false`. Update payloads encode it as an optional field; omitted means unchanged. Read
+  and list responses encode the resolved value.
 - Rust and TypeScript content codecs, management wire vectors, and vector tests must stay aligned
-  for this field.
+  for these fields.
 
 ### Fixture Registry and Cross-Language Vectors
 
@@ -108,6 +112,7 @@ Rules:
 - Requests: `Add` (1), `Change` (2), `Delete` (3), `List` (4), `Show` (5)
 - Responses: `AddOk` (101), `AddErr` (102), `ChangeOk` (201), `ChangeErr` (202), `DeleteOk` (301),
   `DeleteErr` (302), `ListOk` (401), `ListErr` (402), `ShowOk` (501), `ShowErr` (502)
+- `TagSummary` encodes `id` (string), `name` (string), `usage_count` (u32) in that order.
 
 #### Content (domain 12)
 
@@ -304,6 +309,7 @@ impl WireEncode for ContentUpdateStreamInitRequest {
             self.disable_navbar.is_some(),
             self.disable_floating_nav.is_some(),
             self.content_width.is_some(),
+            self.disable_auto_links.is_some(),
         ];
         OptionMap::from_flags(&option_flags)?.write(writer)?;
 
@@ -338,6 +344,9 @@ impl WireEncode for ContentUpdateStreamInitRequest {
         if let Some(value) = &self.content_width {
             writer.write_string(value)?;
         }
+        if let Some(value) = self.disable_auto_links {
+            writer.write_bool(value);
+        }
         writer.write_u64(self.size_bytes);
         Ok(())
     }
@@ -366,6 +375,7 @@ export function encodeContentUpdateStreamInitRequest(
     payload.theme !== undefined,
     payload.disableNavbar !== undefined,
     payload.contentWidth !== undefined,
+    payload.disableAutoLinks !== undefined,
   ];
   OptionMap.write(writer, optionFlags);
 
@@ -396,6 +406,9 @@ export function encodeContentUpdateStreamInitRequest(
   }
   if (payload.contentWidth !== undefined) {
     writer.writeString(payload.contentWidth);
+  }
+  if (payload.disableAutoLinks !== undefined) {
+    writer.writeBool(payload.disableAutoLinks);
   }
   writer.writeU64(payload.sizeBytes);
   return writer.toUint8Array();
@@ -433,22 +446,23 @@ ContentUpdateStreamInitRequest {
   disable_navbar: Option<bool>,
   disable_floating_nav: Option<bool>,
   content_width: Option<String>,
+  disable_auto_links: Option<bool>,
   size_bytes: u64,
 }
 ```
 
 Field order:
 
-1. Option bitset (10 optional fields -> `u16`).
+1. Option bitset (11 optional fields -> `u16`).
 2. Declared field order, encoding optionals only when present:
    `id`, `new_alias`, `title`, `tags`, `nav_title`, `nav_parent_id`, `nav_order`, `theme`,
-   `disable_navbar`, `disable_floating_nav`, `content_width`, `size_bytes`.
+   `disable_navbar`, `disable_floating_nav`, `content_width`, `disable_auto_links`, `size_bytes`.
 
-Content payloads that create, update, read, or list page metadata carry `disable_navbar` and
-`disable_floating_nav` as boolean fields and `content_width` as a string enum field. Create payloads
-encode concrete values with caller-side defaults of `false`, `false`, and `auto`; update payloads
-encode optional values so omitted means unchanged and present means set/clear. Read and list
-responses encode resolved values.
+Content payloads that create, update, read, or list page metadata carry `disable_navbar`,
+`disable_floating_nav`, and `disable_auto_links` as boolean fields and `content_width` as a string
+enum field. Create payloads encode concrete values with caller-side defaults of `false`, `false`,
+`auto`, and `false`; update payloads encode optional values so omitted means unchanged and present
+means set/clear. Read and list responses encode resolved values.
 
 ### Frame Codec Structure
 

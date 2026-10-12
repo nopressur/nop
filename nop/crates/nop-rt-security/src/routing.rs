@@ -545,6 +545,7 @@ mod tests {
                 disable_navbar: false,
                 disable_floating_nav: false,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 original_filename: None,
                 theme: None,
             };

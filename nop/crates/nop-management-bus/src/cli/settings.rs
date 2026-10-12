@@ -54,18 +54,22 @@ pub fn domain() -> DomainSpec {
     }
 }
 
-fn parse_show(args: &[String]) -> Result<CliCommand, CliError> {
-    if !args.is_empty() {
-        return Err(CliError::usage("settings show takes no arguments"));
-    }
-    Ok(CliCommand {
+pub fn show_command() -> CliCommand {
+    CliCommand {
         command: ManagementCommand::Settings(SettingsCommand::Get(SettingsGetRequest {})),
         success_actions: vec![DomainActionKey::new(
             SETTINGS_DOMAIN_ID,
             SETTINGS_ACTION_GET_OK,
         )],
         stream_target: None,
-    })
+    }
+}
+
+fn parse_show(args: &[String]) -> Result<CliCommand, CliError> {
+    if !args.is_empty() {
+        return Err(CliError::usage("settings show takes no arguments"));
+    }
+    Ok(show_command())
 }
 
 fn parse_name(args: &[String]) -> Result<CliCommand, CliError> {

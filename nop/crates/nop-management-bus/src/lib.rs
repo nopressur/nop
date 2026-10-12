@@ -31,6 +31,7 @@ mod core;
 mod mime;
 mod registry;
 mod roles;
+pub mod runtime_lock;
 mod search;
 mod settings;
 pub mod socket;

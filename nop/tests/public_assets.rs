@@ -46,6 +46,7 @@ fn write_asset_object(
         disable_navbar: false,
         disable_floating_nav: false,
         content_width: Default::default(),
+        disable_auto_links: false,
         original_filename: Some(alias.to_string()),
         theme: None,
     };
@@ -300,6 +301,7 @@ async fn binary_image_alias_reassignment_updates_live_public_routes_without_rest
                             disable_navbar: false,
                             disable_floating_nav: false,
                             content_width: Default::default(),
+                            disable_auto_links: false,
                             content: body,
                         })),
                     )
@@ -365,6 +367,7 @@ async fn binary_image_alias_reassignment_updates_live_public_routes_without_rest
                         disable_navbar: None,
                         disable_floating_nav: None,
                         content_width: Default::default(),
+                        disable_auto_links: false,
                         content: None,
                     })),
                 )

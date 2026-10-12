@@ -25,6 +25,7 @@ function makeItem(overrides: Partial<ContentListItem> = {}): ContentListItem {
     disableNavbar: false,
     disableFloatingNav: false,
     contentWidth: "auto",
+    disableAutoLinks: false,
     isMarkdown: false,
     ...overrides,
   };

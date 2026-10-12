@@ -32,6 +32,7 @@ async fn content_upload_list_update_delete() {
         disable_navbar: false,
         disable_floating_nav: false,
         content_width: Default::default(),
+        disable_auto_links: false,
         content: b"# Getting Started\n\nHello.".to_vec(),
     };
 
@@ -117,6 +118,7 @@ async fn content_upload_list_update_delete() {
                 disable_navbar: None,
                 disable_floating_nav: None,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 content: Some("# Intro\n\nUpdated".to_string()),
             })),
         )
@@ -168,6 +170,7 @@ async fn nav_alias_change_bumps_release_tracker() {
         disable_navbar: false,
         disable_floating_nav: false,
         content_width: Default::default(),
+        disable_auto_links: false,
         content: b"# Docs\n\nParent.".to_vec(),
     };
 
@@ -199,6 +202,7 @@ async fn nav_alias_change_bumps_release_tracker() {
         disable_navbar: false,
         disable_floating_nav: false,
         content_width: Default::default(),
+        disable_auto_links: false,
         content: b"# Child\n\nChild page.".to_vec(),
     };
 
@@ -234,6 +238,7 @@ async fn nav_alias_change_bumps_release_tracker() {
                 disable_navbar: None,
                 disable_floating_nav: None,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 content: None,
             })),
         )
@@ -267,6 +272,7 @@ async fn non_markdown_upload_exposes_id_alias() {
         disable_navbar: false,
         disable_floating_nav: false,
         content_width: Default::default(),
+        disable_auto_links: false,
         content: pdf_bytes,
     };
 
@@ -319,6 +325,7 @@ async fn index_alias_cannot_be_renamed() {
                 disable_navbar: None,
                 disable_floating_nav: None,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 content: None,
             })),
         )
@@ -346,6 +353,7 @@ async fn content_read_update_delete_by_id() {
         disable_navbar: false,
         disable_floating_nav: false,
         content_width: Default::default(),
+        disable_auto_links: false,
         content: b"# ID Only\n\nHello.".to_vec(),
     };
 
@@ -392,6 +400,7 @@ async fn content_read_update_delete_by_id() {
                 disable_navbar: None,
                 disable_floating_nav: None,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 content: Some("# ID Only\n\nUpdated.".to_string()),
             })),
         )

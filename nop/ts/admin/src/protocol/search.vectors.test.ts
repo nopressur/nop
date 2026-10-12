@@ -108,6 +108,7 @@ function normalizeSearchFindResponse(response: {
     disableNavbar: boolean;
     disableFloatingNav: boolean;
     contentWidth: "auto" | "wide" | "narrow";
+    disableAutoLinks: boolean;
     isMarkdown: boolean;
   }[];
 }): unknown {
@@ -125,6 +126,7 @@ function normalizeSearchFindResponse(response: {
       disable_navbar: item.disableNavbar,
       disable_floating_nav: item.disableFloatingNav,
       content_width: item.contentWidth,
+      disable_auto_links: item.disableAutoLinks,
       is_markdown: item.isMarkdown,
     })),
   };

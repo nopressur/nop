@@ -48,6 +48,8 @@ export type SeededData = {
     autoWidthPath: string;
     wideWidthPath: string;
     narrowWidthPath: string;
+    autoLinksPath: string;
+    manualLinksPath: string;
     documentStructurePath: string;
     shortcodeDocumentStructurePath: string;
     multipleH1DocumentStructurePath: string;
@@ -353,6 +355,30 @@ export async function seedFixtureData(
 
   await writeFlatMarkdown({
     contentDir,
+    alias: "render/auto-links",
+    title: "Render Auto Links",
+    navTitle: null,
+    navParentId: null,
+    navOrder: null,
+    originalFilename: "render-auto-links.md",
+    disableAutoLinks: false,
+    body: "# Render Auto Links\n\nSee https://example.com/docs and [Docs](https://example.com/docs).\n",
+  });
+
+  await writeFlatMarkdown({
+    contentDir,
+    alias: "render/manual-links",
+    title: "Render Manual Links",
+    navTitle: null,
+    navParentId: null,
+    navOrder: null,
+    originalFilename: "render-manual-links.md",
+    disableAutoLinks: true,
+    body: "# Render Manual Links\n\nSee https://example.com/plain and [Docs](https://example.com/docs).\n",
+  });
+
+  await writeFlatMarkdown({
+    contentDir,
     alias: "render/document-structure",
     title: "Render Document Structure",
     navTitle: null,
@@ -505,6 +531,8 @@ ${longParagraph("Beta")}
       autoWidthPath: "/render/width-auto",
       wideWidthPath: "/render/width-wide",
       narrowWidthPath: "/render/width-narrow",
+      autoLinksPath: "/render/auto-links",
+      manualLinksPath: "/render/manual-links",
       documentStructurePath: "/render/document-structure",
       shortcodeDocumentStructurePath: "/render/document-structure-shortcode",
       multipleH1DocumentStructurePath: "/render/document-structure-multiple-h1",
@@ -673,6 +701,7 @@ async function writeFlatMarkdown(options: {
   disableNavbar?: boolean;
   disableFloatingNav?: boolean;
   contentWidth?: "auto" | "wide" | "narrow";
+  disableAutoLinks?: boolean;
   idHex?: string;
 }): Promise<void> {
   const generated = generateContentId();
@@ -699,6 +728,7 @@ async function writeFlatMarkdown(options: {
     disableNavbar: options.disableNavbar ?? false,
     disableFloatingNav: options.disableFloatingNav ?? false,
     contentWidth: options.contentWidth ?? "auto",
+    disableAutoLinks: options.disableAutoLinks ?? false,
   });
 
   await Promise.all([
@@ -737,6 +767,7 @@ async function writeFlatBinary(options: {
     disableNavbar: false,
     disableFloatingNav: false,
     contentWidth: "auto",
+    disableAutoLinks: false,
   });
 
   await Promise.all([
@@ -764,6 +795,7 @@ function buildSidecarRon(options: {
   disableNavbar: boolean;
   disableFloatingNav: boolean;
   contentWidth: "auto" | "wide" | "narrow";
+  disableAutoLinks: boolean;
 }): string {
   const tags = options.tags.map((tag) => `"${tag}"`).join(", ");
   const theme = options.theme ? `Some("${options.theme}")` : "None";
@@ -778,5 +810,5 @@ function buildSidecarRon(options: {
       ? `Some(${options.navOrder})`
       : "None";
 
-  return `(\n    alias: "${options.alias}",\n    title: ${title},\n    mime: "${options.mime}",\n    tags: [${tags}],\n    nav_title: ${navTitle},\n    nav_parent_id: ${navParentId},\n    nav_order: ${navOrder},\n    disable_navbar: ${options.disableNavbar},\n    disable_floating_nav: ${options.disableFloatingNav},\n    content_width: "${options.contentWidth}",\n    original_filename: ${originalFilename},\n    theme: ${theme},\n)\n`;
+  return `(\n    alias: "${options.alias}",\n    title: ${title},\n    mime: "${options.mime}",\n    tags: [${tags}],\n    nav_title: ${navTitle},\n    nav_parent_id: ${navParentId},\n    nav_order: ${navOrder},\n    disable_navbar: ${options.disableNavbar},\n    disable_floating_nav: ${options.disableFloatingNav},\n    content_width: "${options.contentWidth}",\n    disable_auto_links: ${options.disableAutoLinks},\n    original_filename: ${originalFilename},\n    theme: ${theme},\n)\n`;
 }

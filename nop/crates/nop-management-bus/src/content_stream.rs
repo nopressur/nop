@@ -117,6 +117,7 @@ mod tests {
                 disable_navbar: false,
                 disable_floating_nav: false,
                 content_width: ContentWidthMode::Auto,
+                disable_auto_links: false,
                 content: Some("# Small".to_string()),
                 stream_id: None,
                 chunk_bytes: None,
@@ -147,6 +148,7 @@ mod tests {
                 disable_navbar: false,
                 disable_floating_nav: false,
                 content_width: ContentWidthMode::Auto,
+                disable_auto_links: false,
                 content: None,
                 stream_id: None,
                 chunk_bytes: Some(64),
@@ -207,6 +209,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
         };
         write_sidecar_atomic(
             &sidecar_path(&runtime_paths.content_dir, content_id, version),

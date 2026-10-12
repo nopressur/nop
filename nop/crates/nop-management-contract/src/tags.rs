@@ -86,6 +86,7 @@ pub struct TagShowRequest {
 pub struct TagSummary {
     pub id: String,
     pub name: String,
+    pub usage_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -272,6 +273,7 @@ impl WireEncode for TagSummary {
     fn encode(&self, writer: &mut WireWriter) -> WireResult<()> {
         writer.write_string(&self.id)?;
         writer.write_string(&self.name)?;
+        writer.write_u32(self.usage_count);
         Ok(())
     }
 }
@@ -281,6 +283,7 @@ impl WireDecode for TagSummary {
         Ok(Self {
             id: reader.read_string()?,
             name: reader.read_string()?,
+            usage_count: reader.read_u32()?,
         })
     }
 }

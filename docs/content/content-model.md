@@ -11,6 +11,8 @@ Status: Developed
   and scroll-reveal navbar behavior.
 - Provide icon-led page top and bottom jumps in the document structure surfaces,
   showing the page title next to the top icon when one exists.
+- Auto-link bare `http://` and `https://` URLs in ordinary Markdown text, with a
+  per-page Auto Links / Manual Links control.
 
 ## Technical Details
 
@@ -84,7 +86,7 @@ This document is the single source of truth for public content resolution and re
 ### Page Metadata Cache
 
 - `PageMetaCache::rebuild_cache` scans sidecar metadata files at startup.
-- Cached metadata includes content ID, `alias`, `title`, `tags`, `mime`, `nav_title`, `nav_parent_id`, `nav_order`, `disable_navbar`, `disable_floating_nav`, `content_width`, `original_filename`, and theme when provided.
+- Cached metadata includes content ID, `alias`, `title`, `tags`, `mime`, `nav_title`, `nav_parent_id`, `nav_order`, `disable_navbar`, `disable_floating_nav`, `content_width`, `disable_auto_links`, `original_filename`, and theme when provided.
 - Cached metadata includes `last_modified`, derived from the latest modification time between the
   content blob and its sidecar.
 - The cache supplies canonical content IDs and navbar parent candidates to management APIs.
@@ -108,6 +110,10 @@ The public pipeline reads metadata from RON sidecar files.
   heading links. The flag does not affect the top navbar or scroll-reveal navbar behavior.
 - `content_width` is a Markdown page width mode. Missing values default to `auto`; valid values are
   `auto`, `wide`, and `narrow`.
+- `disable_auto_links` is a page-level boolean. Missing values default to `false`. When `false`
+  (Auto Links), bare `http://` and `https://` URLs in ordinary Markdown text render as HTML
+  anchors. When `true` (Manual Links), only author-written Markdown links and CommonMark
+  autolinks (`<https://...>`) render as anchors; bare URLs stay plain text.
 - `tags` drive access control and tag-list shortcodes.
 
 ### HTML Page Title
@@ -170,6 +176,27 @@ The public pipeline reads metadata from RON sidecar files.
   - Inline `style` attributes are preserved on `img`, `figure`, `figcaption`, `p`, and `h1`-`h6` tags.
     Style properties are not filtered.
 
+### Auto Links
+
+- Auto Links is the default Markdown render mode. The renderer scans ordinary text nodes for
+  `http://` and `https://` URLs and emits `<a href="...">` elements whose link text is the URL.
+- Auto-linking runs on `pulldown_cmark` `Event::Text` nodes after existing link processing.
+- Auto-linking does not rewrite:
+  - already-authored Markdown links (`[text](url)`)
+  - CommonMark autolinks (`<https://...>`)
+  - image destinations or alt text
+  - fenced or indented code blocks
+  - inline code spans
+  - shortcode output
+- Only `http://` and `https://` schemes are auto-linked. `mailto:`, `javascript:`, `data:`,
+  scheme-less `www.` hosts, and other schemes stay plain text.
+- Trailing sentence punctuation (`.`, `,`, `;`, `:`, `!`, `?`) is not part of the matched URL.
+  Unbalanced trailing `)` / `]` / `}` are stripped from the match.
+- Auto-linked external URLs receive the same sanitizer `rel="noopener noreferrer"` and
+  post-process `target="_blank"` treatment as explicit external Markdown links.
+- Manual Links (`disable_auto_links = true`) skips the text-node scan. Explicit Markdown links
+  continue to render as anchors.
+
 ### Page Render State
 
 Markdown page rendering must use an extensible render-state bucket rather than adding isolated
@@ -182,9 +209,10 @@ pub struct PageRenderState {
     pub disable_navbar: bool,
     pub disable_floating_nav: bool,
     pub content_width: ContentWidthMode,
+    pub disable_auto_links: bool,
+    pub document_structure: DocumentStructure,
     pub use_compact_width: bool,
-    pub suppress_initial_content_container: bool,
-    pub suppress_final_content_container: bool,
+    pub has_hero: bool,
 }
 ```
 
@@ -192,7 +220,8 @@ Implementation details:
 
 - `serve_markdown_alias` initializes `PageRenderState` from cached page metadata before Markdown
   conversion. `disable_navbar` starts as `object.disable_navbar`, `disable_floating_nav` starts as
-  `object.disable_floating_nav`, and `content_width` starts as the cached sidecar width mode.
+  `object.disable_floating_nav`, `content_width` starts as the cached sidecar width mode, and
+  `disable_auto_links` starts as `object.disable_auto_links`.
 - Markdown rendering updates the same state with layout facts it discovers, including compact-width
   selection and whether content-container boundaries should be suppressed. `auto` and `narrow`
   set `use_compact_width = true`; only `wide` sets `use_compact_width = false`.

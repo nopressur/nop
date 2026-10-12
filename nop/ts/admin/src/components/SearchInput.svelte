@@ -17,6 +17,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
   export let error = "";
   export let invalid = false;
   export let autofocus = false;
+  export let selectOnFocus = false;
+  export let compact = false;
 
   let hasError = false;
   let isInvalid = false;
@@ -28,6 +30,9 @@ The code and documentation in this repository is licensed under the GNU Affero G
   $: hasError = Boolean(error);
   $: isInvalid = invalid || hasError;
   $: errorId = id ? `${id}-error` : "";
+  $: sizeClass = compact
+    ? "px-2 py-1 text-xs"
+    : "h-[var(--control-height)] px-[var(--control-padding-x)] text-sm";
 
   function clearValue(): void {
     if (disabled || !value) {
@@ -37,6 +42,12 @@ The code and documentation in this repository is licensed under the GNU Affero G
     dispatch("input", value);
     dispatch("change", value);
     inputRef?.focus();
+  }
+
+  function handleFocus(): void {
+    if (selectOnFocus) {
+      inputRef?.select();
+    }
   }
 
   onMount(() => {
@@ -60,7 +71,8 @@ The code and documentation in this repository is licensed under the GNU Affero G
       bind:value
       on:input={(event) => dispatch("input", (event.target as HTMLInputElement).value)}
       on:change={(event) => dispatch("change", (event.target as HTMLInputElement).value)}
-      class={`h-[var(--control-height)] w-full rounded-sm border bg-surface px-[var(--control-padding-x)] pr-9 text-sm text-text placeholder:text-muted focus:outline-none ${isInvalid ? "border-danger focus:border-danger" : "border-border focus:border-accent"} ${className}`}
+      on:focus={handleFocus}
+      class={`w-full rounded-sm border bg-surface pr-9 text-text placeholder:text-muted focus:outline-none ${sizeClass} ${isInvalid ? "border-danger focus:border-danger" : "border-border focus:border-accent"} ${className}`}
     />
     {#if value && !disabled}
       <button

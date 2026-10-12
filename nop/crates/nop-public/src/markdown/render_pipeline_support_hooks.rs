@@ -21,6 +21,7 @@ pub struct PageRenderState {
     pub disable_navbar: bool,
     pub disable_floating_nav: bool,
     pub content_width: ContentWidthMode,
+    pub disable_auto_links: bool,
     pub document_structure: DocumentStructure,
     pub use_compact_width: bool,
     pub has_hero: bool,
@@ -31,11 +32,13 @@ impl PageRenderState {
         disable_navbar: bool,
         disable_floating_nav: bool,
         content_width: ContentWidthMode,
+        disable_auto_links: bool,
     ) -> Self {
         Self {
             disable_navbar,
             disable_floating_nav,
             content_width,
+            disable_auto_links,
             document_structure: DocumentStructure::default(),
             use_compact_width: false,
             has_hero: false,
@@ -212,7 +215,10 @@ mod tests {
         let opens = hooks.open_content_segment(&ctx);
         let closes = hooks.close_content_segment();
         assert_eq!(opens.matches("<div").count(), 3);
-        assert_eq!(opens.matches("<div").count(), closes.matches("</div>").count());
+        assert_eq!(
+            opens.matches("<div").count(),
+            closes.matches("</div>").count()
+        );
         assert!(opens.contains(r#"class="content-wrapper""#));
         assert!(opens.contains(r#"data-compact="true""#));
         assert!(opens.contains("data-site-close-dropdowns"));

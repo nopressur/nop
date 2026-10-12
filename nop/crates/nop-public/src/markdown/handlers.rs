@@ -97,6 +97,7 @@ pub async fn serve_markdown_alias(
             object.disable_navbar,
             object.disable_floating_nav,
             object.content_width,
+            object.disable_auto_links,
         ),
     }) {
         Ok(rendered) => rendered,

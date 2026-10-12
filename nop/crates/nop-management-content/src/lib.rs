@@ -242,6 +242,7 @@ pub fn content_summary_from_object(object: &CachedObject) -> ContentSummary {
         disable_navbar: object.disable_navbar,
         disable_floating_nav: object.disable_floating_nav,
         content_width: contract_width_mode(object.content_width),
+        disable_auto_links: object.disable_auto_links,
         original_filename: object.original_filename.clone(),
         is_markdown: object.is_markdown,
     }
@@ -530,6 +531,7 @@ where
         disable_navbar: sidecar.disable_navbar,
         disable_floating_nav: sidecar.disable_floating_nav,
         content_width: contract_width_mode(sidecar.content_width),
+        disable_auto_links: sidecar.disable_auto_links,
         content: None,
         stream_id: None,
         chunk_bytes: None,
@@ -765,6 +767,9 @@ where
     }
     if let Some(content_width) = payload.content_width {
         sidecar.content_width = store_width_mode(content_width);
+    }
+    if let Some(disable_auto_links) = payload.disable_auto_links {
+        sidecar.disable_auto_links = disable_auto_links;
     }
 
     if let Err(err) = validate_sidecar(&sidecar) {
@@ -1045,6 +1050,7 @@ where
         disable_navbar: payload.disable_navbar,
         disable_floating_nav: payload.disable_floating_nav,
         content_width: store_width_mode(payload.content_width),
+        disable_auto_links: payload.disable_auto_links,
         original_filename: payload.original_filename.clone(),
         theme: payload.theme.clone(),
     };
@@ -1484,6 +1490,7 @@ where
         disable_navbar: false,
         disable_floating_nav: false,
         content_width: Default::default(),
+        disable_auto_links: false,
         original_filename: Some(meta.filename.clone()),
         theme: None,
     };
@@ -1615,6 +1622,7 @@ where
         disable_navbar: payload.disable_navbar,
         disable_floating_nav: payload.disable_floating_nav,
         content_width: store_width_mode(payload.content_width),
+        disable_auto_links: payload.disable_auto_links,
         original_filename: None,
         theme: payload.theme.clone(),
     };
@@ -1959,6 +1967,9 @@ where
     }
     if let Some(content_width) = payload.content_width {
         sidecar.content_width = store_width_mode(content_width);
+    }
+    if let Some(disable_auto_links) = payload.disable_auto_links {
+        sidecar.disable_auto_links = disable_auto_links;
     }
 
     if let Err(err) = validate_sidecar(&sidecar) {
@@ -4047,6 +4058,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
             original_filename: None,
             last_modified: std::time::SystemTime::UNIX_EPOCH,
             is_markdown: mime == "text/markdown",
@@ -4069,6 +4081,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: ContentWidthMode::Auto,
+            disable_auto_links: false,
             content,
             stream_id: None,
             chunk_bytes: None,

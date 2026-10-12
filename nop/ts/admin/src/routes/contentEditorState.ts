@@ -14,6 +14,7 @@ export type ContentEditorSnapshot = {
   disableNavbar: boolean;
   disableFloatingNav: boolean;
   contentWidth: string;
+  disableAutoLinks: boolean;
   content: string;
 };
 
@@ -28,6 +29,7 @@ type ContentEditorInput = {
   disableNavbar: boolean;
   disableFloatingNav: boolean;
   contentWidth: string;
+  disableAutoLinks: boolean;
   contentValue: string;
   isMarkdown: boolean;
 };
@@ -64,6 +66,7 @@ export function buildEditorSnapshot(input: ContentEditorInput): ContentEditorSna
     disableNavbar: input.disableNavbar,
     disableFloatingNav: input.disableFloatingNav,
     contentWidth: input.contentWidth,
+    disableAutoLinks: input.disableAutoLinks,
     content: input.isMarkdown ? input.contentValue : "",
   };
 }
@@ -97,6 +100,9 @@ export function isEditorDirty(
     return true;
   }
   if (initial.contentWidth !== current.contentWidth) {
+    return true;
+  }
+  if (initial.disableAutoLinks !== current.disableAutoLinks) {
     return true;
   }
   if (initial.tags.length !== current.tags.length) {

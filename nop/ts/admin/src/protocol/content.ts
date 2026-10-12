@@ -169,6 +169,7 @@ export function encodeContentUpdateRequest(payload: {
   disableNavbar?: boolean | null;
   disableFloatingNav?: boolean | null;
   contentWidth?: ContentWidthMode | null;
+  disableAutoLinks?: boolean | null;
   content?: string | null;
 }): Uint8Array {
   const writer = new WireWriter();
@@ -183,6 +184,7 @@ export function encodeContentUpdateRequest(payload: {
     payload.disableNavbar !== null && payload.disableNavbar !== undefined,
     payload.disableFloatingNav !== null && payload.disableFloatingNav !== undefined,
     payload.contentWidth !== null && payload.contentWidth !== undefined,
+    payload.disableAutoLinks !== null && payload.disableAutoLinks !== undefined,
     payload.content !== null && payload.content !== undefined,
   ];
   OptionMap.write(writer, optionFlags);
@@ -219,6 +221,9 @@ export function encodeContentUpdateRequest(payload: {
     writeContentWidthMode(writer, payload.contentWidth as ContentWidthMode);
   }
   if (optionFlags[10]) {
+    writer.writeBool(payload.disableAutoLinks as boolean);
+  }
+  if (optionFlags[11]) {
     writer.writeString(payload.content as string);
   }
   return writer.toUint8Array();
@@ -255,6 +260,7 @@ export function encodeContentUploadRequest(payload: {
   disableNavbar?: boolean | null;
   disableFloatingNav?: boolean | null;
   contentWidth?: ContentWidthMode | null;
+  disableAutoLinks?: boolean | null;
   content: Uint8Array;
 }): Uint8Array {
   const writer = new WireWriter();
@@ -295,6 +301,7 @@ export function encodeContentUploadRequest(payload: {
   writer.writeBool(payload.disableNavbar ?? false);
   writer.writeBool(payload.disableFloatingNav ?? false);
   writeContentWidthMode(writer, payload.contentWidth ?? "auto");
+  writer.writeBool(payload.disableAutoLinks ?? false);
   writer.writeBytes(payload.content);
   return writer.toUint8Array();
 }
@@ -358,6 +365,7 @@ export function encodeContentUploadStreamInitRequest(payload: {
   disableNavbar?: boolean | null;
   disableFloatingNav?: boolean | null;
   contentWidth?: ContentWidthMode | null;
+  disableAutoLinks?: boolean | null;
   sizeBytes: number;
 }): Uint8Array {
   const writer = new WireWriter();
@@ -393,6 +401,7 @@ export function encodeContentUploadStreamInitRequest(payload: {
   writer.writeBool(payload.disableNavbar ?? false);
   writer.writeBool(payload.disableFloatingNav ?? false);
   writeContentWidthMode(writer, payload.contentWidth ?? "auto");
+  writer.writeBool(payload.disableAutoLinks ?? false);
   writer.writeU64(payload.sizeBytes);
   return writer.toUint8Array();
 }
@@ -417,6 +426,7 @@ export function encodeContentUpdateStreamInitRequest(payload: {
   disableNavbar?: boolean | null;
   disableFloatingNav?: boolean | null;
   contentWidth?: ContentWidthMode | null;
+  disableAutoLinks?: boolean | null;
   sizeBytes: number;
 }): Uint8Array {
   const writer = new WireWriter();
@@ -431,6 +441,7 @@ export function encodeContentUpdateStreamInitRequest(payload: {
     payload.disableNavbar !== null && payload.disableNavbar !== undefined,
     payload.disableFloatingNav !== null && payload.disableFloatingNav !== undefined,
     payload.contentWidth !== null && payload.contentWidth !== undefined,
+    payload.disableAutoLinks !== null && payload.disableAutoLinks !== undefined,
   ];
   OptionMap.write(writer, optionFlags);
 
@@ -464,6 +475,9 @@ export function encodeContentUpdateStreamInitRequest(payload: {
   }
   if (optionFlags[9]) {
     writeContentWidthMode(writer, payload.contentWidth as ContentWidthMode);
+  }
+  if (optionFlags[10]) {
+    writer.writeBool(payload.disableAutoLinks as boolean);
   }
   writer.writeU64(payload.sizeBytes);
   return writer.toUint8Array();
@@ -527,6 +541,7 @@ export function decodeContentListResponse(bytes: Uint8Array): {
     disableNavbar: boolean;
     disableFloatingNav: boolean;
     contentWidth: ContentWidthMode;
+    disableAutoLinks: boolean;
     isMarkdown: boolean;
   }[];
 } {
@@ -548,6 +563,7 @@ export function decodeContentListResponse(bytes: Uint8Array): {
     const disableNavbar = itemReader.readBool();
     const disableFloatingNav = itemReader.readBool();
     const contentWidth = readContentWidthMode(itemReader);
+    const disableAutoLinks = itemReader.readBool();
     const isMarkdown = itemReader.readBool();
     return {
       id,
@@ -562,6 +578,7 @@ export function decodeContentListResponse(bytes: Uint8Array): {
       disableNavbar,
       disableFloatingNav,
       contentWidth,
+      disableAutoLinks,
       isMarkdown,
     };
   });
@@ -583,6 +600,7 @@ export function decodeContentReadResponse(bytes: Uint8Array): {
   disableNavbar: boolean;
   disableFloatingNav: boolean;
   contentWidth: ContentWidthMode;
+  disableAutoLinks: boolean;
   content: string | null;
   streamId: number | null;
   chunkBytes: number | null;
@@ -603,6 +621,7 @@ export function decodeContentReadResponse(bytes: Uint8Array): {
   const disableNavbar = reader.readBool();
   const disableFloatingNav = reader.readBool();
   const contentWidth = readContentWidthMode(reader);
+  const disableAutoLinks = reader.readBool();
   const content = flags[6] ? reader.readString() : null;
   const streamId = flags[7] ? reader.readU32() : null;
   const chunkBytes = flags[8] ? reader.readU32() : null;
@@ -622,6 +641,7 @@ export function decodeContentReadResponse(bytes: Uint8Array): {
     disableNavbar,
     disableFloatingNav,
     contentWidth,
+    disableAutoLinks,
     content,
     streamId,
     chunkBytes,

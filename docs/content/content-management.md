@@ -26,9 +26,14 @@ This document is the single source of truth for admin content management. On-dis
   persists `disable_navbar = true`.
 - The admin page editor adds a Markdown page width mode using the same reusable toggle pattern:
   `Auto Width`, `Wide`, and `Narrow`.
+- The admin page editor adds a Markdown auto-link mode using the same reusable toggle pattern:
+  `Auto Links` persists `disable_auto_links = false`, and `Manual Links` persists
+  `disable_auto_links = true`.
 - Width mode is Markdown metadata and follows the same management-bus sidecar update path as title,
   tags, theme, navbar fields, and `disable_navbar`.
-- The public rendering behavior for each width mode is owned by `docs/content/content-model.md`.
+- Auto-link mode is Markdown metadata on that same sidecar update path.
+- The public rendering behavior for each width mode and auto-link mode is owned by
+  `docs/content/content-model.md`.
 
 ### Search, Image Identity, and Hero Width
 
@@ -205,6 +210,8 @@ Validation:
 - Clicking a non-Markdown entry opens metadata-only details with a download link; images also render
   an inline preview.
 - Copy URL actions are available next to the editor toolbar buttons (see **Copy URL actions** above).
+- The editor action toolbar (Insert, Paste-Merge, Link-Card, Upload, copy URL, and size) wraps at
+  every viewport width. The "or drop file(s) on the editor" hint is hidden below the `md` breakpoint.
 - The editor header shows sidecar metadata:
 - Alias (editable).
 - Alias must be URL-safe and cannot start with reserved prefixes (`id/`, `login`, `builtin`, or
@@ -212,6 +219,13 @@ Validation:
 - Alias validation runs on change in the editor and shows inline errors; save still re-validates.
 - When the details panel is open, pressing Enter in a details field saves and collapses the panel.
 - Title.
+- Markdown editors include an in-field down-arrow button in the title input named
+  `Insert title to page`. It is disabled while the title is empty. Clicking it applies the title
+  field as a single-hash Markdown heading at the first contentful line of the body: replace an
+  existing H1 on that line, or insert `# {title}` and exactly one blank line before the remaining
+  body when no H1 is there. Leading blank lines are ignored for detection and are not doubled on
+  insert. Replacing an existing H1 changes only the heading text. Focus then moves to the Ace
+  editor on the first body line after the heading.
 - Tags.
 - Navbar title, parent, and order.
 - Theme (if enabled per object; see `docs/content/themes.md` for file format and selection).
@@ -241,6 +255,11 @@ Validation:
   link, or the inline Markdown link containing the cursor, into
   `((link-card title="..." link="..." noblank))`. The conversion uses the link label as the
   shortcode title and the link destination as the shortcode link.
+- Markdown editors include an in-field `Insert title to page` control on the title input. The
+  control writes the current title as `# {title}` at the first contentful Markdown line, replacing
+  an existing single-hash heading or inserting the heading plus one following blank line. Empty
+  titles disable the control. After a successful write, the Ace cursor is placed on the first body
+  line.
 
 #### Editor Insert Modal
 
@@ -280,6 +299,9 @@ Validation:
 - The page editor exposes floating document navigation render state as a separate reusable
   `Floating Nav Enabled`/`Floating Nav Disabled` toggle. It maps to `disable_floating_nav` and
   suppresses only the page-local document navigation panel and mobile heading links.
+- The page editor exposes Markdown auto-link render state as a separate reusable
+  `Auto Links`/`Manual Links` toggle. It maps to `disable_auto_links`. `Auto Links` is the default
+  and auto-detects bare HTTP(S) URLs; `Manual Links` leaves those URLs as plain text.
 - Removing a navbar title from a page that has children must show a warning dialog:
   - "Removing the navbar title from this page will also remove the navbar titles of its children."
   - Actions: Remove / Cancel.
@@ -344,12 +366,17 @@ Insertion behavior on drop:
 - `content store --disable-navbar` sets the page-level navbar render flag for markdown content.
 - `content store --disable-floating-nav` sets the page-level floating document navigation render
   flag for markdown content.
+- `content store --manual-links` sets the page-level auto-link render flag (`disable_auto_links =
+  true`) for markdown content. Omitting the flag stores Auto Links (`disable_auto_links = false`).
 - `content store` sets `original_filename` from the provided file name. When reading from standard input, it generates `cli-store-YYYY-MM-DD-HH-MM-SS.<ext>` where `<ext>` is derived from the detected MIME type (fallback `application/octet-stream` uses `.bin`).
 - `content change` targets content by ID only.
 - `content change` allows metadata-only updates
-  (alias/title/tags/theme/nav/disable-navbar/disable-floating-nav fields as applicable).
+  (alias/title/tags/theme/nav/disable-navbar/disable-floating-nav/disable-auto-links fields as
+  applicable).
 - `content change --disable-navbar` sets the flag, and `content change --enable-navbar` clears it.
 - `content change --disable-floating-nav` sets the flag, and `content change --enable-floating-nav`
+  clears it.
+- `content change --manual-links` sets `disable_auto_links = true`, and `content change --auto-links`
   clears it.
 - `content change` accepts an optional positional file argument (last argument) for markdown body updates only; when omitted, it performs a metadata-only change. Use `-` to read markdown content from standard input.
 - `content change` rejects content body updates for non-markdown objects (the management bus already enforces this rule).
@@ -377,6 +404,7 @@ Field applicability:
 | Navbar order | Markdown | Only valid when navbar title is set. |
 | Disable navbar | Markdown | Stores page-level navbar render state; defaults to false. |
 | Width mode | Markdown | Stores selected width mode: `auto`, `wide`, or `narrow`. |
+| Auto links | Markdown | Stores page-level auto-link render state; `disable_auto_links` defaults to false (Auto Links). |
 
 ### Markdown Create/Update vs Binary Uploads
 

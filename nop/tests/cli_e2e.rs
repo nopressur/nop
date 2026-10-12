@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Notify;
@@ -115,10 +116,14 @@ impl UserStore for BlockingUserStore {
 }
 
 fn write_local_config(root: &Path) {
+    write_local_config_with_port(root, 8080);
+}
+
+fn write_local_config_with_port(root: &Path, port: u16) {
     let config = Config {
         server: ServerConfig {
             host: "127.0.0.1".to_string(),
-            port: 8080,
+            port,
             http_port: None,
             workers: 1,
         },
@@ -322,15 +327,26 @@ fn assert_cli_success(output: &std::process::Output) {
 }
 
 #[test]
-fn cli_system_ping() {
+fn cli_system_ping_requires_running_server() {
     let fixture = TestFixtureRoot::new_unique("cli-ping").unwrap();
     fixture.init_runtime_layout().unwrap();
     write_local_config(fixture.path());
 
     let output = run_cli(fixture.path(), &["system", "ping"]);
-    assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Release "));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "ping without a server must fail (stdout='{}' stderr='{}')",
+        stdout,
+        stderr
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr.contains("requires a running server"),
+        "unexpected stderr: '{}'",
+        stderr
+    );
 }
 
 #[test]
@@ -548,6 +564,135 @@ fn cli_tag_crud_roundtrip() {
     assert!(output.status.success());
     let tags = read_tags(fixture.path());
     assert!(!tags.contains_key("news/alerts"));
+}
+
+#[test]
+fn cli_tag_add_concurrent_offline() {
+    let fixture = TestFixtureRoot::new_unique("cli-tag-concurrent").unwrap();
+    fixture.init_runtime_layout().unwrap();
+    write_local_config(fixture.path());
+
+    let root = fixture.path().to_path_buf();
+    let mut handles = Vec::new();
+    for index in 0..4 {
+        let root = root.clone();
+        handles.push(std::thread::spawn(move || {
+            let id = format!("concurrent-tag-{index}");
+            let name = format!("Concurrent Tag {index}");
+            run_cli_owned(
+                &root,
+                &[
+                    "tag".to_string(),
+                    "add".to_string(),
+                    id,
+                    "--name".to_string(),
+                    name,
+                ],
+            )
+        }));
+    }
+
+    for handle in handles {
+        let output = handle.join().expect("join");
+        assert_cli_success(&output);
+    }
+
+    let tags = read_tags(fixture.path());
+    for index in 0..4 {
+        let id = format!("concurrent-tag-{index}");
+        assert!(
+            tags.contains_key(&id),
+            "missing tag {id} after concurrent offline add (present: {:?})",
+            tags.keys().collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn cli_daemon_refuses_to_start_while_runtime_locked() {
+    // /tmp keeps the socket path under SUN_LEN so the daemon could start.
+    let temp = tempfile::Builder::new()
+        .prefix("cli-lock-daemon")
+        .tempdir_in("/tmp")
+        .expect("tempdir");
+    let root = temp.path();
+    for dir in [
+        "content",
+        "themes",
+        "state/sys",
+        "state/sc",
+        "state/sys/search/index",
+    ] {
+        std::fs::create_dir_all(root.join(dir)).expect("layout dir");
+    }
+    write_local_config_with_port(root, 18080);
+
+    let _lock = nop_management_bus::runtime_lock::try_acquire_runtime_lock(root)
+        .expect("hold runtime lock");
+
+    let binary = env!("CARGO_BIN_EXE_nop");
+    let mut child = Command::new(binary)
+        .arg("-F")
+        .arg("-C")
+        .arg(root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn daemon");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match child.try_wait().expect("poll daemon") {
+            Some(_) => break,
+            None if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("daemon started despite held runtime lock (killed)");
+            }
+        }
+    }
+    let output = child.wait_with_output().expect("collect output");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("locked"), "unexpected stderr: '{}'", stderr);
+}
+
+#[test]
+fn cli_bypass_waits_for_runtime_lock() {
+    let fixture = TestFixtureRoot::new_unique("cli-lock-wait").unwrap();
+    fixture.init_runtime_layout().unwrap();
+    write_local_config(fixture.path());
+
+    let lock = nop_management_bus::runtime_lock::try_acquire_runtime_lock(fixture.path())
+        .expect("hold runtime lock");
+
+    let binary = env!("CARGO_BIN_EXE_nop");
+    let mut child = Command::new(binary)
+        .arg("-C")
+        .arg(fixture.path())
+        .args(["tag", "add", "locked-tag", "--name", "Locked Tag"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn cli");
+
+    std::thread::sleep(std::time::Duration::from_secs(5));
+    assert!(
+        child.try_wait().expect("poll cli").is_none(),
+        "CLI bypass must block while the runtime lock is held"
+    );
+    assert!(
+        !read_tags(fixture.path()).contains_key("locked-tag"),
+        "CLI bypass must not write while the runtime lock is held"
+    );
+
+    drop(lock);
+    let output = child.wait_with_output().expect("collect output");
+    assert_cli_success(&output);
+    assert!(read_tags(fixture.path()).contains_key("locked-tag"));
 }
 
 #[test]
@@ -1120,11 +1265,31 @@ fn cli_user_allows_special_characters() {
 
 #[test]
 fn cli_system_ping_concurrent() {
-    let fixture = TestFixtureRoot::new_unique("cli-ping-concurrent").unwrap();
-    fixture.init_runtime_layout().unwrap();
-    write_local_config(fixture.path());
+    let temp = tempfile::Builder::new()
+        .prefix("cli-ping-concurrent")
+        .tempdir_in("/tmp")
+        .expect("tempdir");
+    let root = temp.path();
+    write_local_config(root);
 
-    let root = fixture.path().to_path_buf();
+    let validated_config = Config::load_and_validate(root).expect("validate config");
+    let runtime_paths = RuntimePaths::from_root(root, &validated_config).expect("runtime paths");
+    let registry = build_default_registry().expect("registry");
+    let context = ManagementContext::from_components(
+        runtime_paths.root.clone(),
+        Arc::new(validated_config),
+        runtime_paths.clone(),
+    )
+    .expect("context");
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = runtime.enter();
+    let bus = ManagementBus::start(registry, context);
+    let _socket = runtime
+        .block_on(async { ManagementSocket::start(&runtime_paths, bus.clone()).await })
+        .expect("socket");
+
+    let root = root.to_path_buf();
     let mut handles = Vec::new();
     for _ in 0..4 {
         let root = root.clone();
@@ -1135,9 +1300,19 @@ fn cli_system_ping_concurrent() {
 
     for handle in handles {
         let output = handle.join().expect("join");
-        assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("Version"));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "concurrent ping must succeed (stdout='{}' stderr='{}')",
+            stdout,
+            stderr
+        );
+        assert!(
+            stdout.contains("Release "),
+            "unexpected stdout: '{}'",
+            stdout
+        );
     }
 }
 

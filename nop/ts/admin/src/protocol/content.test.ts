@@ -31,6 +31,7 @@ describe("content protocol decode", () => {
       itemWriter.writeBool(true);
       itemWriter.writeBool(false);
       itemWriter.writeString("wide");
+      itemWriter.writeBool(false);
       itemWriter.writeBool(true);
     });
 
@@ -44,6 +45,7 @@ describe("content protocol decode", () => {
     expect(decoded.items[0].disableNavbar).toBe(true);
     expect(decoded.items[0].disableFloatingNav).toBe(false);
     expect(decoded.items[0].contentWidth).toBe("wide");
+    expect(decoded.items[0].disableAutoLinks).toBe(false);
     expect(decoded.items[0].isMarkdown).toBe(true);
   });
 
@@ -74,6 +76,7 @@ describe("content protocol decode", () => {
     writer.writeBool(true);
     writer.writeBool(false);
     writer.writeString("narrow");
+    writer.writeBool(true);
     writer.writeString("# Setup\n");
 
     const decoded = decodeContentReadResponse(writer.toUint8Array());
@@ -85,6 +88,7 @@ describe("content protocol decode", () => {
     expect(decoded.disableNavbar).toBe(true);
     expect(decoded.disableFloatingNav).toBe(false);
     expect(decoded.contentWidth).toBe("narrow");
+    expect(decoded.disableAutoLinks).toBe(true);
     expect(decoded.content).toBe("# Setup\n");
     expect(decoded.streamId).toBeNull();
     expect(decoded.chunkBytes).toBeNull();

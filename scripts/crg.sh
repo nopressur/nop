@@ -23,17 +23,6 @@ fi
 
 source "${SCRIPT_DIR}/lib/rust-crates.sh"
 
-# Shared compilation cache on shared storage (never root fs or home).
-# An explicitly set SCCACHE_DIR or RUSTC_WRAPPER always wins.
-if [[ -z "${SCCACHE_DIR:-}" ]]; then
-  SCCACHE_DIR="/mnt/shared/cache"
-  export SCCACHE_DIR
-fi
-mkdir -p "${SCCACHE_DIR}" 2>/dev/null || SCCACHE_DIR=""
-if [[ -z "${RUSTC_WRAPPER:-}" && -n "${SCCACHE_DIR}" && -x /usr/bin/sccache ]]; then
-  export RUSTC_WRAPPER=/usr/bin/sccache
-fi
-
 usage() {
   cat >&2 <<'USAGE'
 Usage:
@@ -64,12 +53,4 @@ shift
 
 crate_dir="$(resolve_crate_dir "$selector")"
 cd "$crate_dir"
-if cargo "$@"; then
-  status=0
-else
-  status=$?
-fi
-if [[ -n "${SCCACHE_DIR:-}" && -d "${SCCACHE_DIR}" ]]; then
-  echo "sccache cache: $(du -sh "${SCCACHE_DIR}" 2>/dev/null | cut -f1) in ${SCCACHE_DIR}"
-fi
-exit "$status"
+exec cargo "$@"

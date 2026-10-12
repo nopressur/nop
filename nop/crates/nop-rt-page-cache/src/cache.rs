@@ -41,6 +41,7 @@ pub struct CachedObject {
     pub disable_navbar: bool,
     pub disable_floating_nav: bool,
     pub content_width: ContentWidthMode,
+    pub disable_auto_links: bool,
     pub original_filename: Option<String>,
     pub last_modified: SystemTime,
     pub is_markdown: bool,
@@ -208,6 +209,21 @@ impl PageMetaCache {
         });
 
         results
+    }
+
+    pub fn tag_usage_counts(&self) -> HashMap<String, u32> {
+        let data = match self.data.read() {
+            Ok(data) => data,
+            Err(_) => {
+                error!("🚨 CRITICAL: PageMetaCache read lock poisoned in tag_usage_counts");
+                return HashMap::new();
+            }
+        };
+
+        data.tag_index
+            .iter()
+            .map(|(tag, keys)| (tag.clone(), keys.len() as u32))
+            .collect()
     }
 
     pub fn list_objects(&self) -> Vec<CachedObject> {

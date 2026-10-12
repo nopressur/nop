@@ -53,6 +53,7 @@ The `nop-roles` crate owns role rules and shared role types used by IAM, search,
 - `docs/admin/ui.md` - Admin SPA architecture, UX requirements, and UI integration details.
 - `docs/admin/auto-bootstrap.md` - Runtime root validation rules and default bootstrap behavior.
 - `docs/admin/list-control-guideline.md` - Admin list interaction pattern and keyboard navigation guidelines.
+- `docs/admin/chip-select.md` - Filterable chip selector with top-used ranking for tags and roles.
 - `docs/admin/settings.md` - Admin Settings requirements spanning UI, management protocol, CLI, config, and public title rendering.
 - `docs/admin/user-management.md` - User management UI and management bus integration.
 

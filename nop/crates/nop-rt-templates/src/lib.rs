@@ -25,7 +25,7 @@ pub struct RequestTools {
 
 impl RequestTools {
     pub fn new(app_name: &str) -> Self {
-        Self::new_with_version(app_name, "Release 1")
+        Self::new_with_version(app_name, "Release 2")
     }
 
     pub fn new_with_version(app_name: &str, app_version: &str) -> Self {

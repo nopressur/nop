@@ -99,7 +99,10 @@ All requests and responses require a monotonic `workflow_id` per connection and 
   - `roles = Some(vec![])` clears roles; omitted means unchanged.
   - `clear_access = true` removes any existing access rule (mutually exclusive with `access_rule`).
 - `TagDeleteRequest { id }`
-- `TagListRequest {} -> TagListResponse { tags: Vec<TagSummary { id, name }> }`
+- `TagListRequest {} -> TagListResponse { tags: Vec<TagSummary { id, name, usage_count }> }`
+  - `usage_count` is the number of cached content objects referencing the tag, read from the
+    in-memory page-cache tag index. It is never persisted and every content or tag mutation
+    rebuilds the index, so counts are always current while the server runs.
 - `TagShowRequest { id } -> TagShowResponse { id, name, roles, access_rule }`
 
 ### Core Operation Rules

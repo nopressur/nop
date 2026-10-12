@@ -29,19 +29,26 @@ The code and documentation in this repository is licensed under the GNU Affero G
 </script>
 
 <div class="w-full">
-  <input
-    {id}
-    {type}
-    {placeholder}
-    {disabled}
-    aria-invalid={isInvalid ? "true" : undefined}
-    aria-describedby={hasError && errorId ? errorId : undefined}
-    {...$$restProps}
-    bind:value
-    on:input={(event) => dispatch("input", (event.target as HTMLInputElement).value)}
-    on:change={(event) => dispatch("change", (event.target as HTMLInputElement).value)}
-    class={`h-[var(--control-height)] w-full rounded-sm border bg-surface px-[var(--control-padding-x)] text-sm text-text placeholder:text-muted focus:outline-none ${isInvalid ? "border-danger focus:border-danger" : "border-border focus:border-accent"} ${className}`}
-  />
+  <div class="relative">
+    <input
+      {id}
+      {type}
+      {placeholder}
+      {disabled}
+      aria-invalid={isInvalid ? "true" : undefined}
+      aria-describedby={hasError && errorId ? errorId : undefined}
+      {...$$restProps}
+      bind:value
+      on:input={(event) => dispatch("input", (event.target as HTMLInputElement).value)}
+      on:change={(event) => dispatch("change", (event.target as HTMLInputElement).value)}
+      class={`h-[var(--control-height)] w-full rounded-sm border bg-surface px-[var(--control-padding-x)] text-sm text-text placeholder:text-muted focus:outline-none ${$$slots.suffix ? "pr-9" : ""} ${isInvalid ? "border-danger focus:border-danger" : "border-border focus:border-accent"} ${className}`}
+    />
+    {#if $$slots.suffix}
+      <div class="absolute inset-y-0 right-1 flex items-center">
+        <slot name="suffix" />
+      </div>
+    {/if}
+  </div>
   {#if hasError}
     <p id={errorId || undefined} class="mt-1 text-[10px] text-danger">
       {error}

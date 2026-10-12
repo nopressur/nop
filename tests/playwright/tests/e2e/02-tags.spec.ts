@@ -33,11 +33,11 @@ test("tag management CRUD and listing", async ({ page, harness, rng }) => {
 
   await humanType(page.locator("#tag-id"), TAG.id, rng);
   await humanType(page.locator("#tag-name"), TAG.name, rng);
-  const rolesSelect = page.locator("#tag-roles");
-  await expect(rolesSelect.locator('option[value="editor"]')).toHaveCount(1);
-  await rolesSelect.selectOption("editor");
+  // Three short roles fit in a single row, so the selector collapses with no filter field.
+  await expect(page.locator("#tag-roles")).toHaveCount(0);
+  await humanClick(page.getByRole("button", { name: "Add editor" }), rng);
   await expect(page.locator('[aria-label="Remove editor"]')).toBeVisible();
-  await rolesSelect.selectOption("admin");
+  await humanClick(page.getByRole("button", { name: "Add admin" }), rng);
   await expect(page.locator('[aria-label="Remove admin"]')).toBeVisible();
 
   const accessSelect = page.locator("#tag-access");

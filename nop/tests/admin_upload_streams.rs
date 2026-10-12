@@ -458,6 +458,7 @@ async fn binary_stream_upload_rejects_existing_markdown_alias() {
                 disable_navbar: false,
                 disable_floating_nav: false,
                 content_width: ContentWidthMode::Auto,
+                disable_auto_links: false,
                 content: b"# Markdown Alias\n".to_vec(),
             })),
             actor_email: None,
@@ -572,6 +573,7 @@ async fn markdown_stream_create_and_update() {
         disable_navbar: false,
         disable_floating_nav: false,
         content_width: Default::default(),
+        disable_auto_links: false,
         size_bytes: content_bytes.len() as u64,
     };
 
@@ -658,6 +660,7 @@ async fn markdown_stream_create_and_update() {
         disable_navbar: None,
         disable_floating_nav: None,
         content_width: Default::default(),
+        disable_auto_links: false,
         size_bytes: updated_bytes.len() as u64,
     };
 

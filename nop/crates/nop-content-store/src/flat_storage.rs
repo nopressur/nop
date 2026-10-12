@@ -88,6 +88,8 @@ pub struct ContentSidecar {
     #[serde(default)]
     pub content_width: ContentWidthMode,
     #[serde(default)]
+    pub disable_auto_links: bool,
+    #[serde(default)]
     pub original_filename: Option<String>,
     #[serde(default)]
     pub theme: Option<String>,
@@ -429,6 +431,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
             original_filename: None,
             theme: None,
         };
@@ -451,6 +454,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
             original_filename: Some("intro.md".to_string()),
             theme: Some("minimal".to_string()),
         };
@@ -482,6 +486,7 @@ mod tests {
         assert!(!parsed.disable_navbar);
         assert!(!parsed.disable_floating_nav);
         assert_eq!(parsed.content_width, ContentWidthMode::Auto);
+        assert!(!parsed.disable_auto_links);
     }
 
     #[test]
@@ -497,6 +502,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: ContentWidthMode::Wide,
+            disable_auto_links: false,
             original_filename: None,
             theme: None,
         };
@@ -524,6 +530,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: "full",
+            disable_auto_links: false,
             original_filename: None,
             theme: None,
         )"#;
@@ -545,6 +552,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
             original_filename: None,
             theme: None,
         };

@@ -30,7 +30,7 @@ foreground for that run so the generated credentials are visible.
 | --- | --- |
 | `nop -C ./runtime` | Start the server using `./runtime`. On Unix this daemonizes by default. |
 | `nop -F -C ./runtime` | Start the server in the foreground. |
-| `nop -C ./runtime system ping` | Check that the selected runtime can answer management commands. |
+| `nop -C ./runtime system ping` | Check that the server on the selected runtime is running and answers management commands. |
 
 Options are order-insensitive for server startup, so `nop -C ./runtime -F` and
 `nop -F -C ./runtime` are equivalent. `-F` is not allowed with management
@@ -59,7 +59,7 @@ Domains and commands are case-insensitive. Unambiguous prefixes are accepted, so
 
 | Command | Purpose |
 | --- | --- |
-| `system ping` | Verify CLI connectivity and version compatibility. |
+| `system ping` | Verify CLI connectivity and version compatibility. Requires a running server. |
 | `system logging show` | Show log rotation settings. |
 | `system logging set --max-size-mb <mb> --max-files <count>` | Update log rotation settings. Both values are required. |
 | `system logging clear` | Clear managed log files. |
@@ -180,6 +180,8 @@ Common `content store` and `content change` options:
 | `--enable-navbar` | `content change` only | Clears `--disable-navbar`. |
 | `--disable-floating-nav` | Markdown only | Omits the floating document navigation panel and mobile heading links on that page. |
 | `--enable-floating-nav` | `content change` only | Clears `--disable-floating-nav`. |
+| `--manual-links` | Markdown only | Stores Manual Links; bare HTTP(S) URLs stay plain text. |
+| `--auto-links` | `content change` only | Restores Auto Links. |
 
 Use `-` as the file argument to read from standard input or write to standard
 output. When `content store` reads from standard input, it creates a generated
@@ -218,8 +220,12 @@ nop -C ./runtime search find -- -leading-dash
 
 - Management commands use the runtime's management socket when the server is
   running. If the socket is unavailable, commands run through the local
-  management path against the selected runtime root.
+  management path against the selected runtime root, except `system ping`,
+  which fails without a running server.
 - A stale management socket is removed automatically when detected.
+- The daemon and local-path commands arbitrate through a runtime lock
+  (`state/sys/runtime.lock`): the daemon fails fast when it is held, while
+  local-path commands wait up to 60 seconds for it.
 - Usage errors exit with code `2`; connector/runtime errors exit with code `1`.
 - If a command reports a version mismatch, use a `nop` binary built from the same
   release as the running server.

@@ -15,6 +15,9 @@ export default defineConfig({
   testDir: path.join(__dirname, "tests"),
   outputDir: path.join(artifactsRoot, "test-results"),
   timeout: 120_000,
+  // Serial by default: parallel workers boot competing servers and have produced
+  // timing flakes; pass --workers=N explicitly to opt back into parallelism.
+  workers: 1,
   expect: {
     timeout: 3_000,
   },

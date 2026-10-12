@@ -745,10 +745,12 @@ fn tag_entries(entries: &mut Vec<VectorEntry>) {
                 TagSummary {
                     id: "news".to_string(),
                     name: "News".to_string(),
+                    usage_count: 2,
                 },
                 TagSummary {
                     id: "updates".to_string(),
                     name: "Updates".to_string(),
+                    usage_count: 5,
                 },
             ],
         },
@@ -1018,6 +1020,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             disable_navbar: Some(true),
             disable_floating_nav: Some(true),
             content_width: Some(ContentWidthMode::Narrow),
+            disable_auto_links: Some(false),
             content: Some("# Hello".to_string()),
         },
     );
@@ -1048,6 +1051,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             disable_navbar: true,
             disable_floating_nav: false,
             content_width: ContentWidthMode::Wide,
+            disable_auto_links: false,
             content: vec![1, 2, 3, 4],
         },
     );
@@ -1106,6 +1110,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             disable_navbar: true,
             disable_floating_nav: false,
             content_width: ContentWidthMode::Narrow,
+            disable_auto_links: false,
             size_bytes: 777,
         },
     );
@@ -1133,6 +1138,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             disable_navbar: Some(false),
             disable_floating_nav: Some(false),
             content_width: Some(ContentWidthMode::Auto),
+            disable_auto_links: Some(false),
             size_bytes: 777,
         },
     );
@@ -1175,6 +1181,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
                 disable_navbar: true,
                 disable_floating_nav: false,
                 content_width: ContentWidthMode::Wide,
+                disable_auto_links: false,
                 is_markdown: true,
             }],
         },
@@ -1207,6 +1214,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             disable_navbar: true,
             disable_floating_nav: false,
             content_width: ContentWidthMode::Wide,
+            disable_auto_links: false,
             content: Some("# Intro".to_string()),
             stream_id: None,
             chunk_bytes: None,
@@ -1232,6 +1240,7 @@ fn content_entries(entries: &mut Vec<VectorEntry>) {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: ContentWidthMode::Auto,
+            disable_auto_links: false,
             content: None,
             stream_id: Some(42),
             chunk_bytes: Some(nop_management_bus::ws::WS_MAX_STREAM_CHUNK_BYTES as u32),
@@ -1569,6 +1578,7 @@ fn search_entries(entries: &mut Vec<VectorEntry>) {
                 disable_navbar: true,
                 disable_floating_nav: false,
                 content_width: ContentWidthMode::Wide,
+                disable_auto_links: false,
                 is_markdown: true,
             }],
         },

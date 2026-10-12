@@ -36,6 +36,7 @@ export interface SearchListItem {
   disableNavbar: boolean;
   disableFloatingNav: boolean;
   contentWidth: ContentWidthMode;
+  disableAutoLinks: boolean;
   isMarkdown: boolean;
 }
 
@@ -85,6 +86,7 @@ function readSearchListItem(reader: WireReader): SearchListItem {
   const disableNavbar = reader.readBool();
   const disableFloatingNav = reader.readBool();
   const contentWidth = readContentWidthMode(reader);
+  const disableAutoLinks = reader.readBool();
   const isMarkdown = reader.readBool();
   return {
     id,
@@ -99,6 +101,7 @@ function readSearchListItem(reader: WireReader): SearchListItem {
     disableNavbar,
     disableFloatingNav,
     contentWidth,
+    disableAutoLinks,
     isMarkdown,
   };
 }

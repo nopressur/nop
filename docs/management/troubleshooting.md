@@ -45,6 +45,22 @@ Status: Developed
 - Steps:
   - Switch to local auth in `config.yaml` or use OIDC flows instead of local user commands.
 
+### Daemon cannot start: runtime root is locked
+
+- Cause: another process holds `<runtime-root>/state/sys/runtime.lock` (a bypass
+  CLI command working on the tree, or another daemon).
+- Steps:
+  - Wait for the running CLI command to finish and retry.
+  - If no CLI command is running, check for a second daemon with the pid file.
+
+### CLI times out waiting for the runtime lock
+
+- Cause: the lock at `<runtime-root>/state/sys/runtime.lock` stayed held past
+  the 60 second bypass wait (a stuck CLI command or a starting daemon).
+- Steps:
+  - Check for wedged `nop` processes and stop them; locks release on process exit.
+  - If the daemon finished starting meanwhile, retry so the CLI uses the socket.
+
 ## Diagnostics
 
 - Use `RUST_LOG=debug` for more verbose management logging.

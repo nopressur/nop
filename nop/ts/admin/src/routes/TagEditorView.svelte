@@ -200,7 +200,7 @@ The code and documentation in this repository is licensed under the GNU Affero G
     {#if loading && !isNew}
       <p class="text-sm text-muted">Loading tag...</p>
     {:else}
-      <div class="grid gap-4 md:grid-cols-2">
+      <div class="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
         <div>
           <label for="tag-id" class="text-[11px] uppercase tracking-[0.3em] text-muted">Tag ID</label>
           <Input id="tag-id" bind:value={id} disabled={loading} className="mt-2" />
@@ -214,14 +214,14 @@ The code and documentation in this repository is licensed under the GNU Affero G
         </div>
       </div>
 
-      <div class="mt-4">
+      <div class="mt-4 min-w-0">
         <label for="tag-roles" class="text-[11px] uppercase tracking-[0.3em] text-muted">Roles</label>
-        <div class="mt-2">
+        <div class="mt-2 min-w-0 w-full">
           <ChipSelect
             id="tag-roles"
             options={availableRoles}
             bind:selected={selectedRoles}
-            placeholder="Select role"
+            placeholder="Filter roles"
             emptyLabel="No roles"
           />
         </div>

@@ -29,6 +29,7 @@ fn write_markdown_object(
         body,
         disable_navbar,
         ContentWidthMode::Auto,
+        false,
     )
 }
 
@@ -40,6 +41,7 @@ fn write_markdown_object_with_width(
     body: &[u8],
     disable_navbar: bool,
     content_width: ContentWidthMode,
+    disable_auto_links: bool,
 ) {
     let version = ContentVersion(1);
     let blob = blob_path(&runtime_paths.content_dir, content_id, version);
@@ -58,6 +60,7 @@ fn write_markdown_object_with_width(
         disable_navbar,
         disable_floating_nav: false,
         content_width,
+        disable_auto_links,
         original_filename: Some(format!("{}.md", alias.replace('/', "-"))),
         theme: None,
     };
@@ -124,7 +127,7 @@ async fn renders_version_footer_only_for_admin_users() {
     assert!(html.contains(r#"data-site-asset-reload"#));
     assert!(html.contains(">reload</a>"));
     assert!(!html.contains("data-site-admin-version"));
-    assert!(!html.contains("Release 1"));
+    assert!(!html.contains("Release 2"));
 
     let req = common::add_auth_headers(
         test::TestRequest::get().uri("/docs/intro"),
@@ -139,7 +142,7 @@ async fn renders_version_footer_only_for_admin_users() {
     assert!(html.contains(r#"data-site-page-footer"#));
     assert!(html.contains(r#"data-site-asset-reload"#));
     assert!(!html.contains("data-site-admin-version"));
-    assert!(!html.contains("Release 1"));
+    assert!(!html.contains("Release 2"));
 
     let req = common::add_auth_headers(
         test::TestRequest::get().uri("/docs/intro"),
@@ -153,7 +156,7 @@ async fn renders_version_footer_only_for_admin_users() {
     let html = String::from_utf8_lossy(&body);
     assert!(html.contains(r#"<footer class="site-page-footer" data-site-page-footer>"#));
     assert!(html.contains(r#"data-site-admin-version"#));
-    assert!(html.contains("NoPressure Release 1"));
+    assert!(html.contains("NoPressure Release 2"));
     assert!(html.contains(r#"data-site-asset-reload"#));
     assert!(html.contains(">reload</a>"));
 }
@@ -311,6 +314,73 @@ async fn page_with_disable_navbar_omits_public_navbar() {
 }
 
 #[actix_web::test]
+async fn auto_links_convert_bare_http_urls_and_preserve_markdown_links() {
+    let harness = common::TestHarness::new().await;
+    write_markdown_object(
+        &harness.runtime_paths,
+        ContentId(21),
+        "auto-links",
+        "Auto Links",
+        b"# Auto Links\n\nSee https://example.com/docs and [Docs](https://example.com/docs).\n\n`https://example.com/code`\n\n```\nhttps://example.com/block\n```\n",
+        false,
+    );
+    harness
+        .page_cache
+        .invalidate()
+        .await
+        .expect("cache invalidated");
+    let app = test::init_service(common::build_test_app(harness.app_bundle())).await;
+
+    let req = test::TestRequest::get().uri("/auto-links").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = test::read_body(resp).await;
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains(
+        r#"<a href="https://example.com/docs" rel="noopener noreferrer" target="_blank">https://example.com/docs</a>"#
+    ));
+    assert!(html.contains(
+        r#"<a href="https://example.com/docs" rel="noopener noreferrer" target="_blank">Docs</a>"#
+    ));
+    assert!(html.contains("<code>https://example.com/code</code>"));
+    assert!(!html.contains(r#"<a href="https://example.com/code""#));
+    assert!(html.contains("https://example.com/block"));
+    assert!(!html.contains(r#"<a href="https://example.com/block""#));
+}
+
+#[actix_web::test]
+async fn manual_links_leave_bare_http_urls_as_text() {
+    let harness = common::TestHarness::new().await;
+    write_markdown_object_with_width(
+        &harness.runtime_paths,
+        ContentId(22),
+        "manual-links",
+        "Manual Links",
+        b"# Manual Links\n\nSee https://example.com/plain and [Docs](https://example.com/docs).\n",
+        false,
+        ContentWidthMode::Auto,
+        true,
+    );
+    harness
+        .page_cache
+        .invalidate()
+        .await
+        .expect("cache invalidated");
+    let app = test::init_service(common::build_test_app(harness.app_bundle())).await;
+
+    let req = test::TestRequest::get().uri("/manual-links").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = test::read_body(resp).await;
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("See https://example.com/plain"));
+    assert!(!html.contains(r#"<a href="https://example.com/plain""#));
+    assert!(html.contains(
+        r#"<a href="https://example.com/docs" rel="noopener noreferrer" target="_blank">Docs</a>"#
+    ));
+}
+
+#[actix_web::test]
 async fn leading_hero_image_does_not_emit_empty_initial_content_container() {
     let harness = common::TestHarness::new().await;
     write_markdown_object(
@@ -405,6 +475,7 @@ async fn hero_reopened_container_preserves_wide_width() {
         body.as_bytes(),
         false,
         ContentWidthMode::Wide,
+        false,
     );
     harness
         .page_cache

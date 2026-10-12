@@ -266,6 +266,7 @@ fn scan_content_root(
                 disable_navbar: sidecar.disable_navbar,
                 disable_floating_nav: sidecar.disable_floating_nav,
                 content_width: sidecar.content_width,
+                disable_auto_links: sidecar.disable_auto_links,
                 original_filename: sidecar.original_filename,
                 last_modified,
                 is_markdown,
@@ -461,6 +462,7 @@ mod tests {
                 disable_navbar: false,
                 disable_floating_nav: false,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 original_filename: None,
                 theme: None,
             }],
@@ -489,6 +491,7 @@ mod tests {
                 disable_navbar: true,
                 disable_floating_nav: false,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 original_filename: None,
                 theme: None,
             }],
@@ -516,6 +519,7 @@ mod tests {
                 disable_navbar: false,
                 disable_floating_nav: true,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 original_filename: None,
                 theme: None,
             }],
@@ -543,6 +547,7 @@ mod tests {
                 disable_navbar: false,
                 disable_floating_nav: false,
                 content_width: ContentWidthMode::Narrow,
+                disable_auto_links: false,
                 original_filename: None,
                 theme: None,
             }],
@@ -553,6 +558,34 @@ mod tests {
             .get_by_alias("landing")
             .expect("alias resolved");
         assert_eq!(object.content_width, ContentWidthMode::Narrow);
+    }
+
+    #[test]
+    fn test_cache_propagates_disable_auto_links() {
+        let harness = build_cache(
+            "",
+            vec![ContentSidecar {
+                alias: "landing".to_string(),
+                title: Some("Landing".to_string()),
+                mime: "text/markdown".to_string(),
+                tags: Vec::new(),
+                nav_title: None,
+                nav_parent_id: None,
+                nav_order: None,
+                disable_navbar: false,
+                disable_floating_nav: false,
+                content_width: Default::default(),
+                disable_auto_links: true,
+                original_filename: None,
+                theme: None,
+            }],
+        );
+
+        let object = harness
+            .cache
+            .get_by_alias("landing")
+            .expect("alias resolved");
+        assert!(object.disable_auto_links);
     }
 
     #[test]
@@ -571,6 +604,7 @@ mod tests {
                 disable_navbar: false,
                 disable_floating_nav: false,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 original_filename: None,
                 theme: None,
             }],
@@ -597,6 +631,7 @@ mod tests {
                 disable_navbar: false,
                 disable_floating_nav: false,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 original_filename: None,
                 theme: None,
             }],
@@ -607,6 +642,39 @@ mod tests {
             .resolved_roles("public")
             .expect("public roles");
         assert!(matches!(roles, ResolvedRoles::Public));
+    }
+
+    #[test]
+    fn test_tag_usage_counts_reflect_content_tags() {
+        let tags_yaml = "news:\n  name: News\n  roles: []\nupdates:\n  name: Updates\n  roles: []\nunused:\n  name: Unused\n  roles: []\n";
+        let sidecar = |alias: &str, tags: Vec<&str>| ContentSidecar {
+            alias: alias.to_string(),
+            title: Some(alias.to_string()),
+            mime: "text/markdown".to_string(),
+            tags: tags.into_iter().map(str::to_string).collect(),
+            nav_title: None,
+            nav_parent_id: None,
+            nav_order: None,
+            disable_navbar: false,
+            disable_floating_nav: false,
+            content_width: Default::default(),
+            disable_auto_links: false,
+            original_filename: None,
+            theme: None,
+        };
+        let harness = build_cache(
+            tags_yaml,
+            vec![
+                sidecar("first", vec!["news"]),
+                sidecar("second", vec!["news", "updates"]),
+                sidecar("third", vec!["news"]),
+            ],
+        );
+
+        let counts = harness.cache.tag_usage_counts();
+        assert_eq!(counts.get("news"), Some(&3));
+        assert_eq!(counts.get("updates"), Some(&1));
+        assert!(!counts.contains_key("unused"));
     }
 
     #[test]
@@ -633,6 +701,7 @@ admin-only:
                 disable_navbar: false,
                 disable_floating_nav: false,
                 content_width: Default::default(),
+                disable_auto_links: false,
                 original_filename: None,
                 theme: None,
             }],
@@ -679,6 +748,7 @@ tag-c:
                     disable_navbar: false,
                     disable_floating_nav: false,
                     content_width: Default::default(),
+                    disable_auto_links: false,
                     original_filename: None,
                     theme: None,
                 },
@@ -693,6 +763,7 @@ tag-c:
                     disable_navbar: false,
                     disable_floating_nav: false,
                     content_width: Default::default(),
+                    disable_auto_links: false,
                     original_filename: None,
                     theme: None,
                 },

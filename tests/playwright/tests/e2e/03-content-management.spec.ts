@@ -99,10 +99,12 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await ensureDetailsOpen();
   await humanType(page.locator("#content-alias"), "Docs/UI-Test", rng);
   await humanType(page.locator("#content-title"), "UI Test", rng);
-  const tagSelect = page.locator("#content-tags");
-  await expect(tagSelect.locator('option[value="docs"]')).toHaveCount(1);
-  await tagSelect.selectOption("docs");
-  await tagSelect.selectOption("ui");
+  // Three short tags fit in a single row, so the selector collapses with no filter field.
+  await expect(page.locator("#content-tags")).toHaveCount(0);
+  await humanClick(page.getByRole("button", { name: "Add docs" }), rng);
+  await expect(page.locator('[aria-label="Remove docs"]')).toBeVisible();
+  await humanClick(page.getByRole("button", { name: "Add ui" }), rng);
+  await expect(page.locator('[aria-label="Remove ui"]')).toBeVisible();
 
   await page.waitForFunction(
     () => (window as Window & { ace?: any }).ace && document.querySelector(".ace_editor")
@@ -110,7 +112,7 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await page.evaluate(() => {
     const ace = (window as Window & { ace?: any }).ace;
     const editor = ace.edit(document.querySelector(".ace_editor"));
-    editor.setValue("# UI Test\n\nHello from Playwright.\n");
+    editor.setValue("# UI Test\n\nHello from Playwright. See https://example.com/docs\n");
     editor.clearSelection();
   });
 
@@ -132,8 +134,10 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
 
   const navbarToggle = page.getByRole("button", { name: "Navbar Enabled" });
   const widthToggle = page.getByRole("button", { name: "Auto Width" });
+  const autoLinksToggle = page.getByRole("button", { name: "Auto Links" });
   await expect(navbarToggle).toBeVisible();
   await expect(widthToggle).toBeVisible();
+  await expect(autoLinksToggle).toBeVisible();
 
   const navbarBox = await navbarToggle.boundingBox();
   const widthBox = await widthToggle.boundingBox();
@@ -153,7 +157,8 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   expect(navbarToggleStyle.backgroundColor).toBe("rgba(0, 0, 0, 0)");
   expect(navbarToggleStyle.borderColor).toBe(navbarToggleStyle.color);
 
-  await tagSelect.selectOption("featured");
+  await humanClick(page.getByRole("button", { name: "Add featured" }), rng);
+  await expect(page.locator('[aria-label="Remove featured"]')).toBeVisible();
   await humanClick(page.getByRole("button", { name: "Save" }), rng);
   await expect(page.getByText("Content saved").last()).toBeVisible();
 
@@ -167,6 +172,9 @@ test("content management list, edit, and upload", async ({ page, harness, rng })
   await page.goto(publicUrl);
   await expect(page.getByRole("heading", { name: "UI Test" })).toBeVisible();
   await expect(page).toHaveTitle("UI Test Updated");
+  await expect(
+    page.getByRole("link", { name: "https://example.com/docs", exact: true })
+  ).toHaveAttribute("href", "https://example.com/docs");
 
   const editLink = page.getByRole("link", { name: "Edit" });
   await expect(editLink).toBeVisible();
@@ -822,8 +830,8 @@ test("content list sorting", async ({ page, harness, rng }) => {
     await ensureDetailsOpen();
     await humanClearAndType(page.locator("#content-alias"), options.alias, rng);
     await humanClearAndType(page.locator("#content-title"), options.title, rng);
-    if (options.tags.length > 0) {
-      await page.locator("#content-tags").selectOption(options.tags);
+    for (const tag of options.tags) {
+      await humanClick(page.getByRole("button", { name: `Add ${tag}` }), rng);
     }
     if (options.navTitle) {
       await humanClearAndType(page.locator("#content-nav-title"), options.navTitle, rng);
@@ -1054,4 +1062,267 @@ test("content list sorting", async ({ page, harness, rng }) => {
         .map((row) => row.alias.replace(/^\//, ""));
     })
     .toEqual(expectedTieAliases);
+});
+
+test("content editor tag selector filters and ranks by usage", async ({
+  page,
+  harness,
+  rng,
+}) => {
+  test.setTimeout(180000);
+
+  await login({
+    page,
+    baseUrl: harness.baseUrl,
+    user: harness.users.admin,
+    rng,
+    returnPath: "/admin/tags",
+    expectedPath: "/admin/tags",
+  });
+  await expect(page.getByRole("heading", { name: "Tag Catalog" })).toBeVisible();
+
+  // "docs" is referenced by two seeded contents, so registering it yields usage 2.
+  // The long filler names overflow a single row and force the expanded selector.
+  const tagsToCreate = [
+    { id: "docs", name: "Docs" },
+    { id: "zz", name: "Zz" },
+    ...Array.from({ length: 12 }, (_, index) => ({
+      id: `filler-tag-number-${String(index + 1).padStart(2, "0")}`,
+      name: `Filler ${index + 1}`,
+    })),
+  ];
+  for (const tag of tagsToCreate) {
+    await humanClick(page.getByRole("button", { name: "New Tag" }), rng);
+    await expect(page.getByRole("heading", { name: "Create Tag" })).toBeVisible();
+    await humanType(page.locator("#tag-id"), tag.id, rng);
+    await humanType(page.locator("#tag-name"), tag.name, rng);
+    await humanClick(page.getByRole("button", { name: "Save" }), rng);
+    await page.waitForURL(/\/admin\/tags/);
+  }
+
+  await humanClick(page.getByRole("link", { name: "Content" }), rng);
+  await expect(page.getByRole("heading", { name: "Content Library" })).toBeVisible();
+  await humanClick(page.getByRole("button", { name: "New Page" }), rng);
+  await expect(page.getByRole("heading", { name: "Create Content" })).toBeVisible();
+
+  const expandButton = page.getByRole("button", { name: "Expand details" });
+  if (await expandButton.isVisible()) {
+    await humanClick(expandButton, rng);
+  }
+
+  // Expanded: the labelled filter field is present.
+  const filter = page.locator("#content-tags");
+  await expect(filter).toBeVisible();
+  await expect(page.getByLabel("Tags")).toBeVisible();
+
+  // "docs" leads the top row and also appears in the alphabetical row.
+  await expect(page.getByRole("button", { name: "Add docs" })).toHaveCount(2);
+  const firstAdd = page.locator('button[aria-label^="Add "]').first();
+  await expect(firstAdd).toHaveAttribute("aria-label", "Add docs");
+
+  // Filler tags are unused, so they only appear in the alphabetical row, which
+  // scrolls horizontally.
+  const alphaRow = page.locator("div.overflow-x-auto", {
+    has: page.getByRole("button", { name: "Add filler-tag-number-01" }),
+  });
+  await expect(alphaRow).toBeVisible();
+  expect(await alphaRow.evaluate((row) => row.scrollWidth > row.clientWidth)).toBe(true);
+
+  // Below `md`, the details grid used to size to the chip strip and stretch the form.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(alphaRow).toBeVisible();
+  const narrowMetrics = await page.evaluate(() => {
+    const row = document.querySelector("div.overflow-x-auto");
+    const title = document.querySelector("#content-title");
+    const alias = document.querySelector("#content-alias");
+    if (!(row instanceof HTMLElement) || !(title instanceof HTMLElement) || !(alias instanceof HTMLElement)) {
+      throw new Error("narrow layout probes missing");
+    }
+    return {
+      documentWidth: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+      rowClient: row.clientWidth,
+      rowScroll: row.scrollWidth,
+      titleWidth: title.getBoundingClientRect().width,
+      aliasWidth: alias.getBoundingClientRect().width,
+    };
+  });
+  expect(narrowMetrics.rowScroll).toBeGreaterThan(narrowMetrics.rowClient);
+  expect(narrowMetrics.rowClient).toBeLessThanOrEqual(narrowMetrics.viewport);
+  expect(narrowMetrics.titleWidth).toBeLessThan(narrowMetrics.viewport);
+  expect(narrowMetrics.aliasWidth).toBeLessThan(narrowMetrics.viewport);
+  expect(narrowMetrics.documentWidth).toBeLessThan(narrowMetrics.rowScroll);
+
+  const insertButton = page.getByRole("button", { name: "Insert" });
+  const sizeLabel = page.getByText("Size", { exact: true });
+  const insertBox = await insertButton.boundingBox();
+  const sizeBox = await sizeLabel.boundingBox();
+  if (!insertBox || !sizeBox) {
+    throw new Error("editor toolbar controls have no bounding box");
+  }
+  expect(insertBox.y).toBeLessThan(sizeBox.y);
+  expect(insertBox.x + insertBox.width).toBeLessThanOrEqual(390);
+  expect(sizeBox.x + sizeBox.width).toBeLessThanOrEqual(390);
+  expect(
+    await insertButton.evaluate((button) => button.parentElement?.classList.contains("flex-wrap")),
+  ).toBe(true);
+  await expect(page.getByText("or drop file(s) on the editor")).toBeHidden();
+
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(filter).toBeVisible();
+  await expect(page.getByText("or drop file(s) on the editor")).toBeVisible();
+
+  // Visual: the filter field matches chip height and neither row clips chips.
+  const filterBox = await filter.boundingBox();
+  const chipBox = await firstAdd.boundingBox();
+  if (!filterBox || !chipBox) {
+    throw new Error("filter field or chip has no bounding box");
+  }
+  expect(Math.abs(filterBox.height - chipBox.height)).toBeLessThanOrEqual(1);
+  expect(
+    await alphaRow.evaluate((row) => row.scrollHeight - row.clientHeight)
+  ).toBeLessThanOrEqual(1);
+  const topRow = page.locator("div.overflow-hidden", {
+    has: page.getByRole("button", { name: "Add docs" }),
+  });
+  expect(await topRow.evaluate((row) => row.scrollHeight - row.clientHeight)).toBeLessThanOrEqual(
+    1
+  );
+
+  // Filtering narrows to matches and hides the top row.
+  await humanType(filter, "zz", rng);
+  await expect(page.getByRole("button", { name: /^Add / })).toHaveCount(1);
+
+  // Selecting keeps the filter text.
+  await humanClick(page.getByRole("button", { name: "Add zz" }), rng);
+  await expect(page.locator('[aria-label="Remove zz"]')).toBeVisible();
+  await expect(filter).toHaveValue("zz");
+  await expect(page.getByText("No matches")).toBeVisible();
+
+  // Clearing restores the full list.
+  await humanClick(page.getByRole("button", { name: "Clear search" }), rng);
+  await expect(filter).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Add docs" })).toHaveCount(2);
+
+  // Save the page tagged "zz" so it gains usage 1, then check top-row order.
+  await humanType(page.locator("#content-alias"), "selector/probe", rng);
+  await humanType(page.locator("#content-title"), "Selector Probe", rng);
+  await page.waitForFunction(
+    () => (window as Window & { ace?: unknown }).ace && document.querySelector(".ace_editor"),
+  );
+  await page.evaluate(() => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    editor.setValue("# Selector Probe\n\nPlaywright selector test.\n");
+    editor.clearSelection();
+  });
+  await humanClick(page.getByRole("button", { name: "Save" }), rng);
+  await page.waitForURL(/\/admin\/pages\/edit/);
+
+  await humanClick(page.getByRole("link", { name: "Content" }), rng);
+  await expect(page.getByRole("heading", { name: "Content Library" })).toBeVisible();
+  await humanClick(page.getByRole("button", { name: "New Page" }), rng);
+  await expect(page.getByRole("heading", { name: "Create Content" })).toBeVisible();
+  const expandAgain = page.getByRole("button", { name: "Expand details" });
+  if (await expandAgain.isVisible()) {
+    await humanClick(expandAgain, rng);
+  }
+  await expect(page.locator("#content-tags")).toBeVisible();
+
+  const labels = await page
+    .locator('button[aria-label^="Add "]')
+    .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")));
+  expect(labels.slice(0, 2)).toEqual(["Add docs", "Add zz"]);
+});
+
+test("content editor inserts title as page heading", async ({ page, harness, rng }) => {
+  await login({
+    page,
+    baseUrl: harness.baseUrl,
+    user: harness.users.admin,
+    rng,
+    returnPath: "/admin/pages",
+    expectedPath: "/admin/pages",
+  });
+
+  await humanClick(page.getByRole("button", { name: "New Page" }), rng);
+  await expect(page.getByRole("heading", { name: "Create Content" })).toBeVisible();
+
+  const titleInput = page.locator("#content-title");
+  const insertTitle = page.getByRole("button", { name: "Insert title to page" });
+  await expect(insertTitle).toBeVisible();
+  await expect(insertTitle).toBeDisabled();
+
+  const titleBox = await titleInput.boundingBox();
+  const buttonBox = await insertTitle.boundingBox();
+  expect(titleBox).not.toBeNull();
+  expect(buttonBox).not.toBeNull();
+  expect(buttonBox?.x ?? 0).toBeGreaterThan(titleBox?.x ?? 0);
+  expect((buttonBox?.x ?? 0) + (buttonBox?.width ?? 0)).toBeLessThanOrEqual(
+    (titleBox?.x ?? 0) + (titleBox?.width ?? 0) + 1
+  );
+  expect(buttonBox?.y ?? 0).toBeGreaterThanOrEqual((titleBox?.y ?? 0) - 2);
+  expect((buttonBox?.y ?? 0) + (buttonBox?.height ?? 0)).toBeLessThanOrEqual(
+    (titleBox?.y ?? 0) + (titleBox?.height ?? 0) + 2
+  );
+
+  await humanType(titleInput, "Getting Started", rng);
+  await expect(insertTitle).toBeEnabled();
+
+  await page.waitForFunction(
+    () => (window as Window & { ace?: any }).ace && document.querySelector(".ace_editor")
+  );
+
+  await humanClick(insertTitle, rng);
+  await expect.poll(async () => {
+    return page.evaluate(() => {
+      const ace = (window as Window & { ace?: any }).ace;
+      const editor = ace.edit(document.querySelector(".ace_editor"));
+      return editor.getValue();
+    });
+  }).toBe("# Getting Started\n");
+
+  let cursor = await page.evaluate(() => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    return editor.getCursorPosition();
+  });
+  expect(cursor).toEqual({ row: 1, column: 0 });
+
+  await page.evaluate(() => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    editor.setValue("\n\nBody only.\n");
+    editor.clearSelection();
+  });
+  await humanClick(insertTitle, rng);
+  await expect.poll(async () => {
+    return page.evaluate(() => {
+      const ace = (window as Window & { ace?: any }).ace;
+      const editor = ace.edit(document.querySelector(".ace_editor"));
+      return editor.getValue();
+    });
+  }).toBe("# Getting Started\n\nBody only.\n");
+  cursor = await page.evaluate(() => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    return editor.getCursorPosition();
+  });
+  expect(cursor).toEqual({ row: 2, column: 0 });
+
+  await humanClearAndType(titleInput, "Updated Title", rng);
+  await humanClick(insertTitle, rng);
+  await expect.poll(async () => {
+    return page.evaluate(() => {
+      const ace = (window as Window & { ace?: any }).ace;
+      const editor = ace.edit(document.querySelector(".ace_editor"));
+      return editor.getValue();
+    });
+  }).toBe("# Updated Title\n\nBody only.\n");
+  cursor = await page.evaluate(() => {
+    const ace = (window as Window & { ace?: any }).ace;
+    const editor = ace.edit(document.querySelector(".ace_editor"));
+    return editor.getCursorPosition();
+  });
+  expect(cursor).toEqual({ row: 2, column: 0 });
 });

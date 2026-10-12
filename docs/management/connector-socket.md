@@ -322,6 +322,7 @@ ContentUpdateRequest {
   disable_navbar: Option<bool>,
   disable_floating_nav: Option<bool>,
   content_width: Option<ContentWidthMode>,
+  disable_auto_links: Option<bool>,
   content: Option<String>,
 }
 ```
@@ -350,6 +351,7 @@ ContentUploadRequest {
   disable_navbar: bool,
   disable_floating_nav: bool,
   content_width: ContentWidthMode,
+  disable_auto_links: bool,
   content: Vec<u8>,
 }
 ```
@@ -371,6 +373,7 @@ ContentReadResponse {
   disable_navbar: bool,
   disable_floating_nav: bool,
   content_width: ContentWidthMode,
+  disable_auto_links: bool,
   content: Option<String>,
   stream_id: Option<u32>,
   chunk_bytes: Option<u32>,
@@ -540,6 +543,7 @@ ContentUploadStreamInitRequest {
   disable_navbar: bool,
   disable_floating_nav: bool,
   content_width: ContentWidthMode,
+  disable_auto_links: bool,
   size_bytes: u64,
 }
 ```
@@ -559,6 +563,7 @@ ContentUpdateStreamInitRequest {
   disable_navbar: Option<bool>,
   disable_floating_nav: Option<bool>,
   content_width: Option<ContentWidthMode>,
+  disable_auto_links: Option<bool>,
   size_bytes: u64,
 }
 ```

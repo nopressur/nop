@@ -117,6 +117,7 @@ export type ContentListItem = {
   disableNavbar: boolean;
   disableFloatingNav: boolean;
   contentWidth: ContentWidthMode;
+  disableAutoLinks: boolean;
   isMarkdown: boolean;
 };
 
@@ -203,6 +204,7 @@ export async function readContent(id: string): Promise<{
   disableNavbar: boolean;
   disableFloatingNav: boolean;
   contentWidth: ContentWidthMode;
+  disableAutoLinks: boolean;
   content: string | null;
   sizeBytes: number | null;
 }> {
@@ -244,6 +246,7 @@ export async function updateContent(params: {
   disableNavbar?: boolean | null;
   disableFloatingNav?: boolean | null;
   contentWidth?: ContentWidthMode | null;
+  disableAutoLinks?: boolean | null;
   content?: string | null;
 }): Promise<void> {
   const client = getAdminWsClient();
@@ -325,6 +328,7 @@ export async function uploadContent(params: {
   disableNavbar?: boolean | null;
   disableFloatingNav?: boolean | null;
   contentWidth?: ContentWidthMode | null;
+  disableAutoLinks?: boolean | null;
   content: Uint8Array;
 }): Promise<{ id: string; alias: string; mime: string; isMarkdown: boolean }> {
   const client = getAdminWsClient();
@@ -456,6 +460,7 @@ export async function createMarkdownStream(params: {
   disableNavbar?: boolean | null;
   disableFloatingNav?: boolean | null;
   contentWidth?: ContentWidthMode | null;
+  disableAutoLinks?: boolean | null;
   content: string;
 }): Promise<{ id: string; alias: string; mime: string; isMarkdown: boolean }> {
   const encoder = new TextEncoder();
@@ -476,6 +481,7 @@ export async function createMarkdownStream(params: {
       disableNavbar: params.disableNavbar ?? false,
       disableFloatingNav: params.disableFloatingNav ?? false,
       contentWidth: params.contentWidth ?? "auto",
+      disableAutoLinks: params.disableAutoLinks ?? false,
       sizeBytes: payload.length,
     }),
   );
@@ -524,6 +530,7 @@ export async function updateMarkdownStream(params: {
   disableNavbar?: boolean | null;
   disableFloatingNav?: boolean | null;
   contentWidth?: ContentWidthMode | null;
+  disableAutoLinks?: boolean | null;
   content: string;
 }): Promise<void> {
   const encoder = new TextEncoder();
@@ -545,6 +552,7 @@ export async function updateMarkdownStream(params: {
       disableNavbar: params.disableNavbar ?? null,
       disableFloatingNav: params.disableFloatingNav ?? null,
       contentWidth: params.contentWidth ?? null,
+      disableAutoLinks: params.disableAutoLinks ?? null,
       sizeBytes: payload.length,
     }),
   );

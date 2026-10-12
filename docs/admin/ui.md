@@ -23,11 +23,14 @@ Status: Developed
   - `Auto Width` is the default state and uses a transparent button with success/green border and text.
   - `Wide` uses a transparent button with warning/amber border and text.
   - `Narrow` uses a transparent button with danger/red border and text.
+- The page editor details panel adds an auto-link toggle for Markdown pages. It is a two-state control:
+  - `Auto Links` is the default state, uses a transparent button with success/green border and text, and persists `disable_auto_links = false`.
+  - `Manual Links` is the active state, uses a transparent button with danger/red border and text, and persists `disable_auto_links = true`.
 - The reusable toggle component must support two-state and three-state option sets without embedding content-specific labels in the component.
 - Toggle controls remain keyboard reachable, expose a clear accessible name, and emit a single selected value to the owning view.
 - The toggle component uses the existing Svelte event convention (`createEventDispatcher` + `on:` handlers) rather than callback props.
 - The width mode is Markdown metadata. Non-Markdown editors keep the control disabled.
-- The page editor renders the navbar and width toggles next to each other in one inline horizontal control group. The controls do not have separate visible titles because the selected button text describes the current state.
+- The page editor renders the navbar, floating-nav, width, and auto-link toggles next to each other in one inline horizontal control group. The controls do not have separate visible titles because the selected button text describes the current state.
 - The admin UI stores the selected width mode in editor state, includes it in dirty-state comparison, and sends it through the same content management WebSocket paths used for other sidecar metadata.
 - Public rendering semantics for each width mode are defined in `docs/content/content-model.md`.
 
@@ -49,8 +52,18 @@ Status: Developed
   - Support Cmd/Ctrl+S to save in place (prevent default browser behavior).
   - Cancel/Escape return to the last list/filter state stored in memory (not query params or session).
   - Keep the title input always visible and editable.
+  - Markdown editors include an in-field down-arrow control in the title input, named
+    `Insert title to page`. The control is hidden for non-Markdown editors and disabled when the
+    title field is empty or whitespace-only. Clicking it writes the current title as a single-hash
+    Markdown heading at the first contentful line of the page (leading blank lines are ignored):
+    an existing ATX H1 on that line is rewritten in place (`# {title}`) without adding or removing
+    surrounding blank lines, and a missing H1 prepends `# {title}` plus exactly one following blank
+    line before the first body content. After the click, focus moves to the Ace editor on the first
+    body line after that heading.
   - Alias inputs validate on change and surface inline error states (red border + helper text).
   - Collapse sidecar fields behind a right-aligned chevron toggle that expands downward.
+  - The editor action toolbar (Insert, Paste-Merge, Link-Card, Upload, copy URL, size) wraps at every viewport width.
+  - The "or drop file(s) on the editor" hint is hidden below the `md` breakpoint.
 - Form controls:
   - Theme selection uses a dropdown populated from a lightweight REST endpoint that returns theme
     names (from `.theme` files; see `docs/content/themes.md`).
@@ -59,6 +72,7 @@ Status: Developed
   - Page layout controls render as one inline toggle group without separate visible titles:
     - `Navbar Enabled` uses green border/text by default, and `Navbar Disabled` uses red border/text when active.
     - `Auto Width` uses green border/text by default, `Wide` uses amber border/text, and `Narrow` uses red border/text.
+    - `Auto Links` uses green border/text by default, and `Manual Links` uses red border/text when active.
   - Tags use a chip-style multi-select from existing tags; missing tags are removed and not shown.
   - Tag roles use a chip-style multi-select from existing roles (`roles.yaml`).
 - Table UX:
@@ -117,6 +131,9 @@ Status: Developed
 - The page-level floating document navigation render state is controlled by a matching reusable
   toggle button: `Floating Nav Enabled` maps to `disable_floating_nav = false`, and
   `Floating Nav Disabled` maps to `disable_floating_nav = true`.
+- The page-level Markdown auto-link render state is controlled by a matching reusable toggle
+  button: `Auto Links` maps to `disable_auto_links = false`, and `Manual Links` maps to
+  `disable_auto_links = true`. Public rendering semantics live in `docs/content/content-model.md`.
 
 ### SPA Architecture
 #### SPA shell and runtime config
@@ -237,6 +254,10 @@ Status: Developed
 - Markdown editors provide a `Link-Card` toolbar action that converts the selected inline Markdown
   link, or the inline Markdown link containing the cursor, into a `link-card` shortcode with the
   link label as `title`, the link destination as `link`, and the `noblank` flag set.
+- Markdown editors provide an in-field `Insert title to page` control on the title input. It copies
+  the sidecar title into the Markdown body as a level-1 ATX heading (`# {title}`) at the first
+  contentful line, replacing an existing H1 on that line or inserting the heading plus one blank
+  line when none is present. Focus then moves to the first body line in Ace.
 
 #### Editor Insert Modal
 
@@ -339,6 +360,8 @@ CSRF, etc.).
 - Role-based access and OIDC behavior are validated (user management redirects or hides when OIDC is enabled).
 - SPA build verification relies on builtin asset embedding in release builds.
 - Protocol codecs and validation helpers have unit coverage in the SPA workspace (`nop/ts/admin`).
+- The Markdown title-to-heading control is covered by helper unit tests, ContentEditorView tests, and
+  Playwright content-editor coverage.
 
 <!--
 This file is part of the product NoPressure.

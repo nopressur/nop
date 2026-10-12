@@ -5,6 +5,7 @@
 
 use crate::bus::ManagementBus;
 use crate::cli::CliError;
+use crate::runtime_lock::RuntimeLock;
 use crate::socket::SocketError;
 use crate::socket::client::{SocketClient, SocketConnect};
 use crate::ws::{StreamAckFrame, WsFrame};
@@ -12,10 +13,12 @@ use crate::{ManagementContext, WorkflowCounter, build_default_registry, next_con
 use nop_content_store::flat_storage::{blob_path, parse_content_id_hex};
 use nop_content_store::reserved_paths::ReservedPaths;
 use nop_management_contract::DomainActionKey;
+use nop_management_contract::system::SystemCommand;
 use nop_management_contract::{ManagementCommand, ManagementResponse, ResponsePayload};
 use nop_management_errors::ManagementError;
 use nop_rt_page_cache::PageMetaCache;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Clone)]
@@ -29,6 +32,14 @@ pub struct CliCommand {
     pub command: ManagementCommand,
     pub success_actions: Vec<DomainActionKey>,
     pub stream_target: Option<ContentStreamTarget>,
+}
+
+const BYPASS_LOCK_TIMEOUT: Duration = Duration::from_secs(60);
+
+async fn acquire_bypass_lock(runtime_root: &Path) -> Result<RuntimeLock, CliError> {
+    crate::runtime_lock::acquire_runtime_lock_wait(runtime_root, BYPASS_LOCK_TIMEOUT)
+        .await
+        .map_err(|err| CliError::connector(err.to_string()))
 }
 
 pub async fn execute(runtime_root: &Path, cli_command: CliCommand) -> Result<i32, CliError> {
@@ -64,6 +75,13 @@ pub async fn execute(runtime_root: &Path, cli_command: CliCommand) -> Result<i32
                 return Err(CliError::connector(message));
             }
         }
+    }
+
+    if matches!(command, ManagementCommand::System(SystemCommand::Ping(_))) {
+        return Err(CliError::connector(format!(
+            "system ping requires a running server (no management socket at {})",
+            socket_path.display()
+        )));
     }
 
     let response = send_via_bypass(runtime_root, command).await?;
@@ -233,6 +251,7 @@ async fn stream_via_bypass(
     success_actions: &[DomainActionKey],
     stream_target: ContentStreamTarget,
 ) -> Result<i32, CliError> {
+    let _lock = acquire_bypass_lock(runtime_root).await?;
     let registry = build_default_registry().map_err(|err| CliError::connector(err.to_string()))?;
     let context = ManagementContext::from_runtime_root(runtime_root)
         .map_err(|err| CliError::connector(err.to_string()))?;
@@ -317,6 +336,7 @@ async fn send_via_bypass(
     runtime_root: &Path,
     command: ManagementCommand,
 ) -> Result<ManagementResponse, CliError> {
+    let _lock = acquire_bypass_lock(runtime_root).await?;
     let registry = build_default_registry().map_err(|err| CliError::connector(err.to_string()))?;
     let mut context = ManagementContext::from_runtime_root(runtime_root)
         .map_err(|err| CliError::connector(err.to_string()))?;
@@ -650,13 +670,22 @@ fn print_role_show(payload: &nop_management_contract::roles::RoleShowResponse) {
 fn print_tag_list(payload: &nop_management_contract::tags::TagListResponse) {
     let id_header = "Id";
     let name_header = "Name";
+    let count_header = "Count";
     let mut id_width = id_header.len();
+    let mut name_width = name_header.len();
     for tag in &payload.tags {
         id_width = id_width.max(tag.id.chars().count());
+        name_width = name_width.max(tag.name.chars().count());
     }
-    println!("{:<width$}  {}", id_header, name_header, width = id_width);
+    println!(
+        "{:<id_width$}  {:<name_width$}  {}",
+        id_header, name_header, count_header
+    );
     for tag in &payload.tags {
-        println!("{:<width$}  {}", tag.id, tag.name, width = id_width);
+        println!(
+            "{:<id_width$}  {:<name_width$}  {}",
+            tag.id, tag.name, tag.usage_count
+        );
     }
 }
 
@@ -707,6 +736,14 @@ fn print_content_read(payload: &nop_management_contract::content::ContentReadRes
     }
     println!("Disable navbar: {}", payload.disable_navbar);
     println!("Disable floating nav: {}", payload.disable_floating_nav);
+    println!(
+        "Auto links: {}",
+        if payload.disable_auto_links {
+            "manual"
+        } else {
+            "auto"
+        }
+    );
     if let Some(name) = &payload.original_filename {
         println!("Original filename: {}", name);
     }
@@ -794,6 +831,7 @@ impl From<SocketError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::settings::show_command;
     use crate::cli::system::ping_command;
     use nop_config::{
         AdminConfig, AppConfig, AuthMethod, Config, JwtConfig, LocalAuthConfig, LoggingConfig,
@@ -878,7 +916,7 @@ mod tests {
         fixture.init_runtime_layout().unwrap();
         write_test_config(fixture.path());
         let runtime_root = fixture.path();
-        let command = ping_command().unwrap();
+        let command = show_command();
         let exit_code = execute(runtime_root, command).await.unwrap();
         assert_eq!(exit_code, 0);
     }
@@ -895,9 +933,44 @@ mod tests {
             .join("management.sock");
         std::fs::write(&socket_path, "not-a-socket").unwrap();
 
-        let command = ping_command().unwrap();
+        let command = show_command();
         let exit_code = execute(runtime_root, command).await.unwrap();
         assert_eq!(exit_code, 0);
+        assert!(!socket_path.exists());
+    }
+
+    #[tokio::test]
+    async fn ping_fails_when_socket_missing() {
+        let fixture = TestFixtureRoot::new_unique("cli-ping-offline").unwrap();
+        fixture.init_runtime_layout().unwrap();
+        write_test_config(fixture.path());
+        let runtime_root = fixture.path();
+        let command = ping_command().unwrap();
+        let err = execute(runtime_root, command)
+            .await
+            .expect_err("ping must fail");
+        assert_eq!(err.exit_code(), 1);
+        assert!(err.to_string().contains("requires a running server"));
+    }
+
+    #[tokio::test]
+    async fn ping_removes_stale_socket_then_fails() {
+        let fixture = TestFixtureRoot::new_unique("cli-ping-stale").unwrap();
+        fixture.init_runtime_layout().unwrap();
+        write_test_config(fixture.path());
+        let runtime_root = fixture.path();
+        let socket_path = runtime_root
+            .join("state")
+            .join("sys")
+            .join("management.sock");
+        std::fs::write(&socket_path, "not-a-socket").unwrap();
+
+        let command = ping_command().unwrap();
+        let err = execute(runtime_root, command)
+            .await
+            .expect_err("ping must fail");
+        assert_eq!(err.exit_code(), 1);
+        assert!(err.to_string().contains("requires a running server"));
         assert!(!socket_path.exists());
     }
 }

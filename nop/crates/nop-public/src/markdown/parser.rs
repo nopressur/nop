@@ -4,6 +4,7 @@
 // The code and documentation in this repository is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See LICENSE.
 
 use crate::markdown::HtmlSanitizer;
+use crate::markdown::autolink::autolink_text_events;
 use crate::markdown::document_structure::{
     HeadingDraft, MarkdownHeading, assign_heading_anchor_ids, select_document_structure,
 };
@@ -90,7 +91,8 @@ pub(super) fn generate_html(
     let wrapper_nonce = generate_code_block_wrapper_nonce();
 
     // Process events with custom logic for images/links plus code-block wrapper placeholders
-    let mut event_state = RenderEventState::new(wrapper_nonce.clone());
+    let mut event_state =
+        RenderEventState::new(wrapper_nonce.clone(), !render_state.disable_auto_links);
     let mut events = Vec::new();
     for event in parser {
         let output_start_index = events.len();
@@ -139,11 +141,7 @@ pub(super) fn generate_html(
         &hook_context,
     );
     render_state.has_hero = shortcode_result.contains_hero;
-    let final_html = assemble_balanced_content_stream(
-        final_html,
-        request.hooks,
-        &hook_context,
-    );
+    let final_html = assemble_balanced_content_stream(final_html, request.hooks, &hook_context);
 
     Ok(RenderedMarkdown {
         html: final_html,
@@ -212,6 +210,10 @@ fn encode_hex(bytes: &[u8]) -> String {
 
 struct RenderEventState {
     nonce: Option<String>,
+    auto_links: bool,
+    in_link: bool,
+    in_image: bool,
+    in_code_block: bool,
     in_wrapped_code_block: bool,
     start_count: usize,
     end_count: usize,
@@ -230,9 +232,13 @@ struct AnchoredMarkdownHeading {
 }
 
 impl RenderEventState {
-    fn new(nonce: Option<String>) -> Self {
+    fn new(nonce: Option<String>, auto_links: bool) -> Self {
         Self {
             nonce,
+            auto_links,
+            in_link: false,
+            in_image: false,
+            in_code_block: false,
             in_wrapped_code_block: false,
             start_count: 0,
             end_count: 0,
@@ -290,7 +296,11 @@ impl RenderEventState {
                 if let Some(builder) = self.current_heading.as_mut() {
                     builder.push_text(&text);
                 }
-                vec![Event::Text(text)]
+                if self.auto_links && !self.in_link && !self.in_image && !self.in_code_block {
+                    autolink_text_events(text)
+                } else {
+                    vec![Event::Text(text)]
+                }
             }
             Event::Code(text) => {
                 if let Some(builder) = self.current_heading.as_mut() {
@@ -316,7 +326,24 @@ impl RenderEventState {
                 }
                 vec![Event::HardBreak]
             }
+            Event::Start(Tag::Link { .. }) => {
+                self.in_link = true;
+                vec![event]
+            }
+            Event::End(TagEnd::Link) => {
+                self.in_link = false;
+                vec![event]
+            }
+            Event::Start(Tag::Image { .. }) => {
+                self.in_image = true;
+                vec![event]
+            }
+            Event::End(TagEnd::Image) => {
+                self.in_image = false;
+                vec![event]
+            }
             Event::Start(Tag::CodeBlock(kind)) => {
+                self.in_code_block = true;
                 let should_wrap = self.nonce.is_some() && matches!(kind, CodeBlockKind::Fenced(_));
                 self.in_wrapped_code_block = should_wrap;
                 if should_wrap {
@@ -329,6 +356,7 @@ impl RenderEventState {
                 vec![Event::Start(Tag::CodeBlock(kind))]
             }
             Event::End(TagEnd::CodeBlock) => {
+                self.in_code_block = false;
                 let should_wrap = self.in_wrapped_code_block;
                 self.in_wrapped_code_block = false;
                 if should_wrap {
@@ -992,7 +1020,36 @@ mod tests {
             md_path,
             user: None,
             hooks: &hooks,
-            render_state: PageRenderState::new(false, false, content_width),
+            render_state: PageRenderState::new(false, false, content_width, false),
+        })
+        .expect("render markdown")
+    }
+
+    fn render_markdown_with_auto_links(
+        markdown: &str,
+        registry: &ShortcodeRegistry,
+        options: &Options,
+        sanitizer: &HtmlSanitizer,
+        cache: &PageMetaCache,
+        md_path: &str,
+        disable_auto_links: bool,
+    ) -> RenderedMarkdown {
+        let hooks = DefaultRenderPipelineSupportHooks;
+        generate_html(&RenderRequest {
+            markdown,
+            shortcode_registry: registry,
+            options,
+            sanitizer,
+            cache,
+            md_path,
+            user: None,
+            hooks: &hooks,
+            render_state: PageRenderState::new(
+                false,
+                false,
+                ContentWidthMode::Auto,
+                disable_auto_links,
+            ),
         })
         .expect("render markdown")
     }
@@ -1131,6 +1188,59 @@ Here's a [link to example](https://example.com).
     }
 
     #[test]
+    fn auto_links_convert_bare_http_urls_without_rewriting_markdown_links() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-auto-links");
+        let registry = ShortcodeRegistry::new();
+        let options = Options::empty();
+        let sanitizer = create_test_sanitizer();
+        let cache = create_test_cache(&runtime_paths);
+        let html = render_markdown_with_auto_links(
+            "See https://example.com/docs and [Docs](https://example.com/docs).\n\n`https://example.com/code`\n",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            false,
+        )
+        .html;
+
+        assert!(html.contains(
+            r#"<a href="https://example.com/docs" rel="noopener noreferrer" target="_blank">https://example.com/docs</a>"#
+        ));
+        assert!(html.contains(
+            r#"<a href="https://example.com/docs" rel="noopener noreferrer" target="_blank">Docs</a>"#
+        ));
+        assert!(html.contains("<code>https://example.com/code</code>"));
+        assert!(!html.contains(r#"<a href="https://example.com/code""#));
+    }
+
+    #[test]
+    fn manual_links_leave_bare_http_urls_as_text() {
+        let (_fixture, runtime_paths) = create_fixture_paths("markdown-manual-links");
+        let registry = ShortcodeRegistry::new();
+        let options = Options::empty();
+        let sanitizer = create_test_sanitizer();
+        let cache = create_test_cache(&runtime_paths);
+        let html = render_markdown_with_auto_links(
+            "See https://example.com/plain and [Docs](https://example.com/docs).",
+            &registry,
+            &options,
+            &sanitizer,
+            &cache,
+            "test.md",
+            true,
+        )
+        .html;
+
+        assert!(html.contains("See https://example.com/plain"));
+        assert!(!html.contains(r#"<a href="https://example.com/plain""#));
+        assert!(html.contains(
+            r#"<a href="https://example.com/docs" rel="noopener noreferrer" target="_blank">Docs</a>"#
+        ));
+    }
+
+    #[test]
     fn leading_container_escape_renders_band_then_first_segment() {
         let (_fixture, runtime_paths) = create_fixture_paths("markdown-leading-breakout");
         let registry = container_escape_test_registry();
@@ -1148,16 +1258,8 @@ Here's a [link to example](https://example.com).
             ContentWidthMode::Auto,
         );
 
-        assert!(
-            rendered
-                .html
-                .starts_with("<div class=\"site-doc-band\">")
-        );
-        assert!(
-            rendered
-                .html
-                .contains("</div><div class=\"content-wrapper")
-        );
+        assert!(rendered.html.starts_with("<div class=\"site-doc-band\">"));
+        assert!(rendered.html.contains("</div><div class=\"content-wrapper"));
         assert!(
             rendered
                 .html
@@ -1194,19 +1296,12 @@ Here's a [link to example](https://example.com).
                 .html
                 .contains("</div></div></div><div class=\"site-doc-band\">")
         );
-        assert!(
-            rendered
-                .html
-                .contains("</div><div class=\"content-wrapper")
-        );
+        assert!(rendered.html.contains("</div><div class=\"content-wrapper"));
         assert_eq!(
             rendered.html.matches("<div").count(),
             rendered.html.matches("</div>").count()
         );
-        assert_eq!(
-            rendered.html.matches("content-wrapper").count(),
-            2
-        );
+        assert_eq!(rendered.html.matches("content-wrapper").count(), 2);
     }
 
     #[test]
@@ -1252,10 +1347,7 @@ Here's a [link to example](https://example.com).
         );
 
         assert!(rendered.html.ends_with("</div>"));
-        assert_eq!(
-            rendered.html.matches("content-wrapper").count(),
-            1
-        );
+        assert_eq!(rendered.html.matches("content-wrapper").count(), 1);
         assert_eq!(
             rendered.html.matches("<div").count(),
             rendered.html.matches("</div>").count()
@@ -2047,6 +2139,7 @@ font-body-family "Test Font", sans-serif
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
             original_filename: Some("about.md".to_string()),
             theme: Some("blue".to_string()),
         };
@@ -2106,7 +2199,7 @@ font-body-family "Test Font", sans-serif
             theme,
             release_tracker: &release_tracker,
             template_engine: &templates,
-            app_version: "Release 1",
+            app_version: "Release 2",
             show_admin_version_footer: false,
         };
         let html_page = runtime.block_on(generate_html_page_with_user(
@@ -2151,7 +2244,7 @@ font-body-family "Test Font", sans-serif
         let runtime_settings = nop_config::RuntimeSettings::new(&settings);
         let release_tracker = ReleaseTracker::new();
         let templates = MiniJinjaEngine::new();
-        let mut render_state = PageRenderState::new(true, false, ContentWidthMode::Auto);
+        let mut render_state = PageRenderState::new(true, false, ContentWidthMode::Auto, false);
         render_state.document_structure = DocumentStructure {
             entries: vec![DocumentStructureEntry {
                 id: "section".to_string(),
@@ -2167,7 +2260,7 @@ font-body-family "Test Font", sans-serif
             theme: None,
             release_tracker: &release_tracker,
             template_engine: &templates,
-            app_version: "Release 1",
+            app_version: "Release 2",
             show_admin_version_footer: false,
         };
         let runtime = Builder::new_current_thread()
@@ -2193,8 +2286,7 @@ font-body-family "Test Font", sans-serif
 
     #[test]
     fn hero_presence_omits_panel_but_keeps_drawer_and_topbar() {
-        let fixture =
-            TestFixtureRoot::new_unique("markdown-hero-structure").expect("fixture root");
+        let fixture = TestFixtureRoot::new_unique("markdown-hero-structure").expect("fixture root");
         fixture.init_runtime_layout().expect("layout init");
         let runtime_paths = fixture.runtime_paths().expect("runtime paths");
         let config = create_test_config();
@@ -2205,7 +2297,7 @@ font-body-family "Test Font", sans-serif
         let runtime_settings = nop_config::RuntimeSettings::new(&settings);
         let release_tracker = ReleaseTracker::new();
         let templates = MiniJinjaEngine::new();
-        let mut render_state = PageRenderState::new(false, false, ContentWidthMode::Auto);
+        let mut render_state = PageRenderState::new(false, false, ContentWidthMode::Auto, false);
         render_state.has_hero = true;
         render_state.document_structure = DocumentStructure {
             entries: vec![DocumentStructureEntry {
@@ -2222,7 +2314,7 @@ font-body-family "Test Font", sans-serif
             theme: None,
             release_tracker: &release_tracker,
             template_engine: &templates,
-            app_version: "Release 1",
+            app_version: "Release 2",
             show_admin_version_footer: false,
         };
         let runtime = Builder::new_current_thread()
@@ -2260,7 +2352,7 @@ font-body-family "Test Font", sans-serif
         let runtime_settings = nop_config::RuntimeSettings::new(&settings);
         let release_tracker = ReleaseTracker::new();
         let templates = MiniJinjaEngine::new();
-        let mut render_state = PageRenderState::new(false, true, ContentWidthMode::Auto);
+        let mut render_state = PageRenderState::new(false, true, ContentWidthMode::Auto, false);
         render_state.document_structure = DocumentStructure {
             entries: vec![DocumentStructureEntry {
                 id: "section".to_string(),
@@ -2276,7 +2368,7 @@ font-body-family "Test Font", sans-serif
             theme: None,
             release_tracker: &release_tracker,
             template_engine: &templates,
-            app_version: "Release 1",
+            app_version: "Release 2",
             show_admin_version_footer: false,
         };
         let runtime = Builder::new_current_thread()
@@ -2313,7 +2405,7 @@ font-body-family "Test Font", sans-serif
         let runtime_settings = nop_config::RuntimeSettings::new(&settings);
         let release_tracker = ReleaseTracker::new();
         let templates = MiniJinjaEngine::new();
-        let mut render_state = PageRenderState::new(false, false, ContentWidthMode::Auto);
+        let mut render_state = PageRenderState::new(false, false, ContentWidthMode::Auto, false);
         render_state.document_structure = DocumentStructure {
             entries: vec![DocumentStructureEntry {
                 id: "section".to_string(),
@@ -2329,7 +2421,7 @@ font-body-family "Test Font", sans-serif
             theme: None,
             release_tracker: &release_tracker,
             template_engine: &templates,
-            app_version: "Release 1",
+            app_version: "Release 2",
             show_admin_version_footer: false,
         };
         let runtime = Builder::new_current_thread()

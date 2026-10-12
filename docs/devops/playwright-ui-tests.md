@@ -45,6 +45,12 @@ Status: Developed
 - Ensure all network requests target the local server only; no external network access.
 - Keep each test isolated and hermetic; no shared state outside the temp root.
 
+### Serial Execution
+
+- The Playwright config defaults to one worker (`workers: 1`): parallel workers
+  boot competing servers and have produced timing flakes on shared machines.
+- Pass `--workers=N` explicitly to opt back into parallelism for a run.
+
 ### Data Seeding (Predictable and Repeatable)
 
 - Pre-generate known users in `users.yaml` and roles in `roles.yaml`, including at minimum:

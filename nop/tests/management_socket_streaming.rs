@@ -129,6 +129,7 @@ fn seed_content(runtime_paths: &RuntimePaths) {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
             original_filename: Some(format!(
                 "{}.{}",
                 alias.rsplit('/').next().unwrap_or("file"),

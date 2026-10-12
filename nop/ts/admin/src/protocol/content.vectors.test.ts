@@ -158,6 +158,10 @@ function encodeRequest(
           | "wide"
           | "narrow"
           | null,
+        disableAutoLinks: parseOptionalBool(
+          payload.disable_auto_links,
+          `${name}.disable_auto_links`,
+        ),
         content: parseOptionalString(payload.content, `${name}.content`),
       });
     case CONTENT_ACTION_DELETE:
@@ -187,6 +191,7 @@ function encodeRequest(
           | "auto"
           | "wide"
           | "narrow",
+        disableAutoLinks: parseBool(payload.disable_auto_links, `${name}.disable_auto_links`),
         content: parseBytes(payload.content, `${name}.content`),
       });
     case CONTENT_ACTION_NAV_INDEX:
@@ -232,6 +237,7 @@ function encodeRequest(
           | "auto"
           | "wide"
           | "narrow",
+        disableAutoLinks: parseBool(payload.disable_auto_links, `${name}.disable_auto_links`),
         sizeBytes: parseU64(payload.size_bytes, `${name}.size_bytes`),
       });
     case CONTENT_ACTION_UPLOAD_STREAM_COMMIT:
@@ -258,6 +264,10 @@ function encodeRequest(
           | "wide"
           | "narrow"
           | null,
+        disableAutoLinks: parseOptionalBool(
+          payload.disable_auto_links,
+          `${name}.disable_auto_links`,
+        ),
         sizeBytes: parseU64(payload.size_bytes, `${name}.size_bytes`),
       });
     case CONTENT_ACTION_UPDATE_STREAM_COMMIT:
@@ -329,6 +339,7 @@ function normalizeContentListResponse(response: {
     disableNavbar: boolean;
     disableFloatingNav: boolean;
     contentWidth: "auto" | "wide" | "narrow";
+    disableAutoLinks: boolean;
     isMarkdown: boolean;
   }[];
 }): unknown {
@@ -349,6 +360,7 @@ function normalizeContentListResponse(response: {
       disable_navbar: item.disableNavbar,
       disable_floating_nav: item.disableFloatingNav,
       content_width: item.contentWidth,
+      disable_auto_links: item.disableAutoLinks,
       is_markdown: item.isMarkdown,
     })),
   };
@@ -368,6 +380,7 @@ function normalizeContentReadResponse(response: {
   disableNavbar: boolean;
   disableFloatingNav: boolean;
   contentWidth: "auto" | "wide" | "narrow";
+  disableAutoLinks: boolean;
   content: string | null;
   streamId: number | null;
   chunkBytes: number | null;
@@ -387,6 +400,7 @@ function normalizeContentReadResponse(response: {
     disable_navbar: response.disableNavbar,
     disable_floating_nav: response.disableFloatingNav,
     content_width: response.contentWidth,
+    disable_auto_links: response.disableAutoLinks,
     content: response.content,
     stream_id: response.streamId,
     chunk_bytes: response.chunkBytes,

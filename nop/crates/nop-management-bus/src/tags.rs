@@ -319,6 +319,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
             original_filename: Some("tagged.md".to_string()),
             theme: None,
         };
@@ -379,6 +380,7 @@ mod tests {
             disable_navbar: false,
             disable_floating_nav: false,
             content_width: Default::default(),
+            disable_auto_links: false,
             original_filename: Some("rename.md".to_string()),
             theme: None,
         };
